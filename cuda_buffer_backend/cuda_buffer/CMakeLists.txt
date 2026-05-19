@@ -14,6 +14,25 @@ find_package(rosidl_buffer REQUIRED)
 find_package(cuda_buffer_backend_msgs REQUIRED)
 find_package(rmw REQUIRED)
 find_package(rcutils REQUIRED)
+
+# Workaround for CMake's FindCUDAToolkit: on Ubuntu's split nvidia-cuda-dev
+# layout (headers in /usr/include, libs in /usr/lib/<multiarch>) it derives
+# the include path as /usr/lib/include and fails. Pre-populate the cache
+# variable that find_path() inside FindCUDAToolkit would otherwise compute,
+# so the broken auto-detection is skipped.
+# Refs https://gitlab.kitware.com/cmake/cmake/-/issues/24856
+find_path(_CUDA_RUNTIME_DIR
+  NAMES cuda_runtime.h
+  HINTS
+    ENV CUDA_HOME
+    ENV CUDA_PATH
+    /usr/local/cuda/include
+    /usr/include
+)
+if(_CUDA_RUNTIME_DIR AND NOT DEFINED CUDAToolkit_INCLUDE_DIRECTORIES)
+  set(CUDAToolkit_INCLUDE_DIRECTORIES "${_CUDA_RUNTIME_DIR}" CACHE PATH
+    "CUDA include dir (FindCUDAToolkit nvidia-cuda-dev workaround)")
+endif()
 find_package(CUDAToolkit REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
