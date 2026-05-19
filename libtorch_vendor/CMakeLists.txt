@@ -91,25 +91,15 @@ if(NOT Torch_FOUND OR FORCE_BUILD_VENDOR_PKG)
     USE_SOURCE_PERMISSIONS
   )
 
-  # Pre-strip the prebuilt PyTorch shared libraries. PyTorch's libtorch_cpu.so
-  # ships with ELF features (very large section table, debug-section flags)
-  # that newer binutils' objcopy cannot round-trip cleanly, which makes
-  # dh_strip's "objcopy --only-keep-debug" fail with messages like:
-  #   readelf: Error: no .dynamic section in the dynamic segment
-  #   objcopy: ... has a corrupt string table index
-  # Stripping debug+unneeded symbols here normalizes the ELF so dh_strip
-  # finishes cleanly when the debs are produced on the buildfarm.
+  # Pre-strip libtorch_cpu.so so dh_strip's objcopy doesn't fail on its
+  # non-standard ELF section table on the buildfarm.
   install(CODE "
-    file(GLOB_RECURSE _libtorch_sos
-      \"\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/lib/*.so\"
-      \"\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/lib/*.so.*\")
-    foreach(_so IN LISTS _libtorch_sos)
-      if(NOT IS_SYMLINK \"\${_so}\")
-        execute_process(
-          COMMAND strip --strip-unneeded \"\${_so}\"
-          OUTPUT_QUIET ERROR_QUIET)
-      endif()
-    endforeach()
+    set(_lt \"\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/lib/libtorch_cpu.so\")
+    if(EXISTS \"\${_lt}\" AND NOT IS_SYMLINK \"\${_lt}\")
+      execute_process(
+        COMMAND strip --strip-unneeded \"\${_lt}\"
+        OUTPUT_QUIET ERROR_QUIET)
+    endif()
   ")
 
   ament_index_register_resource("vendor_packages" CONTENT "opt/${PROJECT_NAME}")

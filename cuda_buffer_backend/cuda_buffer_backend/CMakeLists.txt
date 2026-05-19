@@ -12,12 +12,10 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
-# Workaround for CMake's FindCUDAToolkit: on Ubuntu's split nvidia-cuda-dev
-# layout (headers in /usr/include, libs in /usr/lib/<multiarch>) it derives
-# the include path as /usr/lib/include and fails. Pre-populate the cache
-# variable that find_path() inside FindCUDAToolkit would otherwise compute,
-# so the broken auto-detection is skipped.
-# Refs https://gitlab.kitware.com/cmake/cmake/-/issues/24856
+# Workaround for CMake's FindCUDAToolkit on Ubuntu's split nvidia-cuda-dev
+# layout in the bloom build pipeline. Pre-populate the cache variable to
+# skip the broken auto-detection.
+# Related: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=995122
 find_path(_CUDA_RUNTIME_DIR
   NAMES cuda_runtime.h
   HINTS
