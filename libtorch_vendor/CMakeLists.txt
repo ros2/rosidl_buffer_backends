@@ -16,6 +16,12 @@ option(FORCE_BUILD_VENDOR_PKG
   "Build vendor packages from source, even if system-installed packages are available"
   OFF)
 
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _processor)
+set(_is_aarch64 FALSE)
+if(_processor MATCHES "^(aarch64|arm64)$")
+  set(_is_aarch64 TRUE)
+endif()
+
 if(LIBTORCH_CUDA_VERSION STREQUAL "")
   find_package(CUDAToolkit QUIET)
   if(CUDAToolkit_FOUND)
@@ -53,11 +59,37 @@ endif()
 
 find_package(Torch QUIET)
 
+# On aarch64 (Jetson), PyTorch ships with JetPack as a Python package; auto-locate
+# its CMake config so find_package(Torch) succeeds without manual CMAKE_PREFIX_PATH.
+if(NOT Torch_FOUND AND _is_aarch64)
+  execute_process(
+    COMMAND python3 -c "import torch; print(torch.utils.cmake_prefix_path)"
+    OUTPUT_VARIABLE _torch_python_cmake_prefix
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _torch_python_rc
+    ERROR_QUIET
+  )
+  if(_torch_python_rc EQUAL 0 AND IS_DIRECTORY "${_torch_python_cmake_prefix}")
+    list(APPEND CMAKE_PREFIX_PATH "${_torch_python_cmake_prefix}")
+    find_package(Torch QUIET)
+  endif()
+endif()
+
 if(NOT Torch_FOUND OR FORCE_BUILD_VENDOR_PKG)
   if(Torch_FOUND)
     message(STATUS "${PROJECT_NAME}: forcing vendor build (FORCE_BUILD_VENDOR_PKG)")
   endif()
 
+  if(_is_aarch64)
+    # PyTorch's official libtorch is x86_64 only, so we can't download a
+    # Jetson build. Either Torch was found above (JetPack), or the user
+    # needs to install it.
+    message(FATAL_ERROR
+      "${PROJECT_NAME}: PyTorch not found on aarch64. Install JetPack "
+      "(which provides PyTorch) on the target.")
+  endif()
+
+  # x86_64: PyTorch's official libtorch zip (extracts into a "libtorch/" subdir).
   # Starting with LibTorch 2.8.0, PyTorch dropped the "-cxx11-abi-" infix from
   # the Linux archive name (they no longer ship the pre-cxx11-abi variant).
   if(LIBTORCH_VERSION VERSION_GREATER_EQUAL "2.8.0")
@@ -94,7 +126,7 @@ if(NOT Torch_FOUND OR FORCE_BUILD_VENDOR_PKG)
   # Pre-strip libtorch_cpu.so so dh_strip's objcopy doesn't fail on its
   # non-standard ELF section table on the buildfarm.
   install(CODE "
-    set(_lt \"\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/lib/libtorch_cpu.so\")
+    set(_lt \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/lib/libtorch_cpu.so\")
     if(EXISTS \"\${_lt}\" AND NOT IS_SYMLINK \"\${_lt}\")
       execute_process(
         COMMAND strip --strip-unneeded \"\${_lt}\"
