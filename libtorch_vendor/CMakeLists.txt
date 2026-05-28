@@ -10,17 +10,15 @@ find_package(ament_cmake_vendor_package REQUIRED)
 set(LIBTORCH_VERSION "" CACHE STRING
   "LibTorch version to download. Auto-selected per CUDA variant if empty.")
 set(LIBTORCH_CUDA_VERSION "" CACHE STRING
-  "CUDA variant override (cu118, cu121, cu124, cu126, cu128, cu129, cpu). Auto-detected if empty.")
+  "CUDA variant override (cu118, cu121, cu124, cu126, cu128, cu129, cu130, cpu). Auto-detected if empty.")
+set(LIBTORCH_URL "" CACHE STRING
+  "Explicit LibTorch or PyTorch wheel archive URL.")
+set(LIBTORCH_ARCHIVE_LAYOUT "" CACHE STRING
+  "Archive layout override: libtorch or torch_wheel. Auto-detected if empty.")
 
 option(FORCE_BUILD_VENDOR_PKG
   "Build vendor packages from source, even if system-installed packages are available"
   OFF)
-
-string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _processor)
-set(_is_aarch64 FALSE)
-if(_processor MATCHES "^(aarch64|arm64)$")
-  set(_is_aarch64 TRUE)
-endif()
 
 if(LIBTORCH_CUDA_VERSION STREQUAL "")
   find_package(CUDAToolkit QUIET)
@@ -57,53 +55,105 @@ if(LIBTORCH_VERSION STREQUAL "")
   endif()
 endif()
 
-find_package(Torch QUIET)
-
-# On aarch64 (Jetson), PyTorch ships with JetPack as a Python package; auto-locate
-# its CMake config so find_package(Torch) succeeds without manual CMAKE_PREFIX_PATH.
-if(NOT Torch_FOUND AND _is_aarch64)
+# Provide a non-empty CMAKE_CUDA_ARCHITECTURES (required by CMake 3.28+
+# when find_package(Torch) calls enable_language(CUDA)).
+if(NOT CMAKE_CUDA_ARCHITECTURES)
   execute_process(
-    COMMAND python3 -c "import torch; print(torch.utils.cmake_prefix_path)"
-    OUTPUT_VARIABLE _torch_python_cmake_prefix
+    COMMAND python3 -c "import torch; print(';'.join(a.split('_',1)[-1] for a in torch.cuda.get_arch_list()))"
+    OUTPUT_VARIABLE _torch_arch_list
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE _torch_python_rc
+    RESULT_VARIABLE _torch_arch_rc
     ERROR_QUIET
   )
-  if(_torch_python_rc EQUAL 0 AND IS_DIRECTORY "${_torch_python_cmake_prefix}")
-    list(APPEND CMAKE_PREFIX_PATH "${_torch_python_cmake_prefix}")
-    find_package(Torch QUIET)
+  if(_torch_arch_rc EQUAL 0 AND _torch_arch_list)
+    set(CMAKE_CUDA_ARCHITECTURES "${_torch_arch_list}" CACHE STRING
+      "CUDA archs (auto-detected by libtorch_vendor)" FORCE)
+  else()
+    set(CMAKE_CUDA_ARCHITECTURES "75" CACHE STRING
+      "CUDA archs (libtorch_vendor fallback, satisfies CMake validation)" FORCE)
   endif()
 endif()
 
-if(NOT Torch_FOUND OR FORCE_BUILD_VENDOR_PKG)
+# PyTorch only publishes pre-built LibTorch archives for x86_64
+# On aarch64 (e.g. NVIDIA Jetson) LibTorch ships within Jetpack,
+# so the platform-provided installation must be reused.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
+if(_system_arch MATCHES "aarch64|arm64")
+  set(_is_aarch64 TRUE)
+else()
+  set(_is_aarch64 FALSE)
+endif()
+
+# Help find_package(Torch) locate a pip/system-installed LibTorch. This enables
+# "reuse if present" on x86_64 and is the primary discovery path on aarch64.
+if(NOT Torch_DIR)
+  execute_process(
+    COMMAND python3 -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'share', 'cmake', 'Torch'))"
+    OUTPUT_VARIABLE _py_torch_dir
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _py_torch_rc
+    ERROR_QUIET
+  )
+  if(_py_torch_rc EQUAL 0 AND EXISTS "${_py_torch_dir}/TorchConfig.cmake")
+    set(Torch_DIR "${_py_torch_dir}")
+    message(STATUS "${PROJECT_NAME}: discovered LibTorch via python3 at ${Torch_DIR}")
+  endif()
+endif()
+
+find_package(Torch QUIET)
+
+if(Torch_FOUND AND NOT FORCE_BUILD_VENDOR_PKG)
+  message(STATUS "${PROJECT_NAME}: system LibTorch ${Torch_VERSION} found, skipping download")
+  set(LIBTORCH_VENDOR_TORCH_DIR "${Torch_DIR}" CACHE PATH
+    "Torch_DIR found by libtorch_vendor")
+elseif(_is_aarch64)
+  message(FATAL_ERROR
+    "${PROJECT_NAME}: no pre-built LibTorch archive is published for aarch64. "
+    "On NVIDIA Jetson, LibTorch ships within JetPack, so the platform-provided "
+    "installation must be reused. Ensure the JetPack PyTorch is installed so that "
+    "'python3 -c \"import torch\"' or find_package(Torch) can locate it, then "
+    "rebuild. Set Torch_DIR explicitly if it lives in a non-standard location.")
+else()
   if(Torch_FOUND)
     message(STATUS "${PROJECT_NAME}: forcing vendor build (FORCE_BUILD_VENDOR_PKG)")
   endif()
 
-  if(_is_aarch64)
-    # PyTorch's official libtorch is x86_64 only, so we can't download a
-    # Jetson build. Either Torch was found above (JetPack), or the user
-    # needs to install it.
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: PyTorch not found on aarch64. Install JetPack "
-      "(which provides PyTorch) on the target.")
+  if(LIBTORCH_URL STREQUAL "")
+    # Starting with LibTorch 2.8.0, PyTorch dropped the "-cxx11-abi-" infix from
+    # the Linux archive name (they no longer ship the pre-cxx11-abi variant).
+    if(LIBTORCH_VERSION VERSION_GREATER_EQUAL "2.8.0")
+      set(_archive_prefix "libtorch-shared-with-deps")
+    else()
+      set(_archive_prefix "libtorch-cxx11-abi-shared-with-deps")
+    endif()
+    string(CONCAT _url
+      "https://download.pytorch.org/libtorch/${LIBTORCH_CUDA_VERSION}/"
+      "${_archive_prefix}-${LIBTORCH_VERSION}%2B${LIBTORCH_CUDA_VERSION}.zip")
+  else()
+    set(_url "${LIBTORCH_URL}")
   endif()
 
-  # x86_64: PyTorch's official libtorch zip (extracts into a "libtorch/" subdir).
-  # Starting with LibTorch 2.8.0, PyTorch dropped the "-cxx11-abi-" infix from
-  # the Linux archive name (they no longer ship the pre-cxx11-abi variant).
-  if(LIBTORCH_VERSION VERSION_GREATER_EQUAL "2.8.0")
-    set(_archive_prefix "libtorch-shared-with-deps")
-  else()
-    set(_archive_prefix "libtorch-cxx11-abi-shared-with-deps")
+  if(LIBTORCH_ARCHIVE_LAYOUT STREQUAL "")
+    if(_url MATCHES "\\.whl($|[?#])")
+      set(LIBTORCH_ARCHIVE_LAYOUT "torch_wheel")
+    else()
+      set(LIBTORCH_ARCHIVE_LAYOUT "libtorch")
+    endif()
   endif()
-  string(CONCAT _url
-    "https://download.pytorch.org/libtorch/${LIBTORCH_CUDA_VERSION}/"
-    "${_archive_prefix}-${LIBTORCH_VERSION}%2B${LIBTORCH_CUDA_VERSION}.zip")
-  set(_archive "${CMAKE_CURRENT_BINARY_DIR}/libtorch.zip")
+
+  set(_archive "${CMAKE_CURRENT_BINARY_DIR}/libtorch_archive")
   set(_extract_dir "${CMAKE_CURRENT_BINARY_DIR}/libtorch_extracted")
 
-  if(NOT EXISTS "${_extract_dir}/libtorch/share/cmake/Torch/TorchConfig.cmake")
+  if(LIBTORCH_ARCHIVE_LAYOUT STREQUAL "torch_wheel")
+    set(_torch_root "${_extract_dir}/torch")
+  elseif(LIBTORCH_ARCHIVE_LAYOUT STREQUAL "libtorch")
+    set(_torch_root "${_extract_dir}/libtorch")
+  else()
+    message(FATAL_ERROR
+      "${PROJECT_NAME}: unsupported LIBTORCH_ARCHIVE_LAYOUT '${LIBTORCH_ARCHIVE_LAYOUT}'")
+  endif()
+
+  if(NOT EXISTS "${_torch_root}/share/cmake/Torch/TorchConfig.cmake")
     message(STATUS "${PROJECT_NAME}: downloading LibTorch ${LIBTORCH_VERSION}+${LIBTORCH_CUDA_VERSION}")
     message(STATUS "${PROJECT_NAME}: URL: ${_url}")
     file(DOWNLOAD "${_url}" "${_archive}" SHOW_PROGRESS STATUS _dl_status)
@@ -115,10 +165,10 @@ if(NOT Torch_FOUND OR FORCE_BUILD_VENDOR_PKG)
     file(ARCHIVE_EXTRACT INPUT "${_archive}" DESTINATION "${_extract_dir}")
     file(REMOVE "${_archive}")
   else()
-    message(STATUS "${PROJECT_NAME}: using cached LibTorch at ${_extract_dir}")
+    message(STATUS "${PROJECT_NAME}: using cached LibTorch at ${_torch_root}")
   endif()
 
-  install(DIRECTORY "${_extract_dir}/libtorch/"
+  install(DIRECTORY "${_torch_root}/"
     DESTINATION "opt/${PROJECT_NAME}"
     USE_SOURCE_PERMISSIONS
   )
@@ -149,8 +199,6 @@ if(NOT Torch_FOUND OR FORCE_BUILD_VENDOR_PKG)
     "${ament_cmake_vendor_package_DIR}/templates/vendor_package.sh.in"
     "${ament_cmake_vendor_package_DIR}/templates/vendor_package.dsv.in"
   )
-else()
-  message(STATUS "${PROJECT_NAME}: system LibTorch ${Torch_VERSION} found, skipping download")
 endif()
 
 if(BUILD_TESTING)
@@ -161,3 +209,4 @@ endif()
 ament_package(
   CONFIG_EXTRAS_POST "libtorch_vendor-extras.cmake.in"
 )
+
