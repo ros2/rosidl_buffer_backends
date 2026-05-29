@@ -10,11 +10,7 @@ find_package(ament_cmake_vendor_package REQUIRED)
 set(LIBTORCH_VERSION "" CACHE STRING
   "LibTorch version to download. Auto-selected per CUDA variant if empty.")
 set(LIBTORCH_CUDA_VERSION "" CACHE STRING
-  "CUDA variant override (cu118, cu121, cu124, cu126, cu128, cu129, cu130, cpu). Auto-detected if empty.")
-set(LIBTORCH_URL "" CACHE STRING
-  "Explicit LibTorch or PyTorch wheel archive URL.")
-set(LIBTORCH_ARCHIVE_LAYOUT "" CACHE STRING
-  "Archive layout override: libtorch or torch_wheel. Auto-detected if empty.")
+  "CUDA variant override (cu118, cu121, cu124, cu126, cu128, cu129, cpu). Auto-detected if empty.")
 
 option(FORCE_BUILD_VENDOR_PKG
   "Build vendor packages from source, even if system-installed packages are available"
@@ -118,40 +114,20 @@ else()
     message(STATUS "${PROJECT_NAME}: forcing vendor build (FORCE_BUILD_VENDOR_PKG)")
   endif()
 
-  if(LIBTORCH_URL STREQUAL "")
-    # Starting with LibTorch 2.8.0, PyTorch dropped the "-cxx11-abi-" infix from
-    # the Linux archive name (they no longer ship the pre-cxx11-abi variant).
-    if(LIBTORCH_VERSION VERSION_GREATER_EQUAL "2.8.0")
-      set(_archive_prefix "libtorch-shared-with-deps")
-    else()
-      set(_archive_prefix "libtorch-cxx11-abi-shared-with-deps")
-    endif()
-    string(CONCAT _url
-      "https://download.pytorch.org/libtorch/${LIBTORCH_CUDA_VERSION}/"
-      "${_archive_prefix}-${LIBTORCH_VERSION}%2B${LIBTORCH_CUDA_VERSION}.zip")
+  # Starting with LibTorch 2.8.0, PyTorch dropped the "-cxx11-abi-" infix from
+  # the Linux archive name (they no longer ship the pre-cxx11-abi variant).
+  if(LIBTORCH_VERSION VERSION_GREATER_EQUAL "2.8.0")
+    set(_archive_prefix "libtorch-shared-with-deps")
   else()
-    set(_url "${LIBTORCH_URL}")
+    set(_archive_prefix "libtorch-cxx11-abi-shared-with-deps")
   endif()
-
-  if(LIBTORCH_ARCHIVE_LAYOUT STREQUAL "")
-    if(_url MATCHES "\\.whl($|[?#])")
-      set(LIBTORCH_ARCHIVE_LAYOUT "torch_wheel")
-    else()
-      set(LIBTORCH_ARCHIVE_LAYOUT "libtorch")
-    endif()
-  endif()
+  string(CONCAT _url
+    "https://download.pytorch.org/libtorch/${LIBTORCH_CUDA_VERSION}/"
+    "${_archive_prefix}-${LIBTORCH_VERSION}%2B${LIBTORCH_CUDA_VERSION}.zip")
 
   set(_archive "${CMAKE_CURRENT_BINARY_DIR}/libtorch_archive")
   set(_extract_dir "${CMAKE_CURRENT_BINARY_DIR}/libtorch_extracted")
-
-  if(LIBTORCH_ARCHIVE_LAYOUT STREQUAL "torch_wheel")
-    set(_torch_root "${_extract_dir}/torch")
-  elseif(LIBTORCH_ARCHIVE_LAYOUT STREQUAL "libtorch")
-    set(_torch_root "${_extract_dir}/libtorch")
-  else()
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: unsupported LIBTORCH_ARCHIVE_LAYOUT '${LIBTORCH_ARCHIVE_LAYOUT}'")
-  endif()
+  set(_torch_root "${_extract_dir}/libtorch")
 
   if(NOT EXISTS "${_torch_root}/share/cmake/Torch/TorchConfig.cmake")
     message(STATUS "${PROJECT_NAME}: downloading LibTorch ${LIBTORCH_VERSION}+${LIBTORCH_CUDA_VERSION}")
