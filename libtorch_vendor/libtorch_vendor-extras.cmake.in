@@ -29,8 +29,13 @@ if(NOT Torch_DIR AND EXISTS "${_@PROJECT_NAME@_vendor_torch_dir}/TorchConfig.cma
 endif()
 unset(_@PROJECT_NAME@_vendor_torch_dir)
 
-# Provide a non-empty CMAKE_CUDA_ARCHITECTURES for downstream consumers
-if(NOT CMAKE_CUDA_ARCHITECTURES)
+# A CUDA-built LibTorch makes downstream find_package(Torch) enable the CUDA
+# language, which errors on CMake 3.28+ if CMAKE_CUDA_ARCHITECTURES is empty.
+# This package was built against the '@LIBTORCH_CUDA_VERSION@' variant, so only
+# seed the arch list for CUDA builds (in practice the JetPack PyTorch on Tegra,
+# or a CUDA x86 build); a CPU-only LibTorch never enables CUDA. Consumers that
+# set CMAKE_CUDA_ARCHITECTURES themselves take precedence.
+if(NOT "@LIBTORCH_CUDA_VERSION@" STREQUAL "cpu" AND NOT CMAKE_CUDA_ARCHITECTURES)
   execute_process(
     COMMAND python3 -c "import torch; print(';'.join(a.split('_',1)[-1] for a in torch.cuda.get_arch_list()))"
     OUTPUT_VARIABLE _@PROJECT_NAME@_torch_arch_list
@@ -39,11 +44,7 @@ if(NOT CMAKE_CUDA_ARCHITECTURES)
     ERROR_QUIET
   )
   if(_@PROJECT_NAME@_torch_arch_rc EQUAL 0 AND _@PROJECT_NAME@_torch_arch_list)
-    set(CMAKE_CUDA_ARCHITECTURES "${_@PROJECT_NAME@_torch_arch_list}" CACHE STRING
-      "CUDA archs (auto-detected by libtorch_vendor)" FORCE)
-  else()
-    set(CMAKE_CUDA_ARCHITECTURES "75" CACHE STRING
-      "CUDA archs (libtorch_vendor fallback, satisfies CMake validation)" FORCE)
+    set(CMAKE_CUDA_ARCHITECTURES "${_@PROJECT_NAME@_torch_arch_list}")
   endif()
   unset(_@PROJECT_NAME@_torch_arch_list)
   unset(_@PROJECT_NAME@_torch_arch_rc)

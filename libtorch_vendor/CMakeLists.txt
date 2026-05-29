@@ -51,9 +51,12 @@ if(LIBTORCH_VERSION STREQUAL "")
   endif()
 endif()
 
-# Provide a non-empty CMAKE_CUDA_ARCHITECTURES (required by CMake 3.28+
-# when find_package(Torch) calls enable_language(CUDA)).
-if(NOT CMAKE_CUDA_ARCHITECTURES)
+# A CUDA-built LibTorch makes find_package(Torch) enable the CUDA language,
+# which errors on CMake 3.28+ if CMAKE_CUDA_ARCHITECTURES is empty. This only
+# applies to CUDA variants (in practice the JetPack PyTorch found on Tegra, or
+# a CUDA x86 build); a CPU-only LibTorch never enables CUDA, so skip it there.
+# Seed the arch list from torch when available, else a safe fallback.
+if(NOT LIBTORCH_CUDA_VERSION STREQUAL "cpu" AND NOT CMAKE_CUDA_ARCHITECTURES)
   execute_process(
     COMMAND python3 -c "import torch; print(';'.join(a.split('_',1)[-1] for a in torch.cuda.get_arch_list()))"
     OUTPUT_VARIABLE _torch_arch_list
@@ -62,22 +65,20 @@ if(NOT CMAKE_CUDA_ARCHITECTURES)
     ERROR_QUIET
   )
   if(_torch_arch_rc EQUAL 0 AND _torch_arch_list)
-    set(CMAKE_CUDA_ARCHITECTURES "${_torch_arch_list}" CACHE STRING
-      "CUDA archs (auto-detected by libtorch_vendor)" FORCE)
-  else()
-    set(CMAKE_CUDA_ARCHITECTURES "75" CACHE STRING
-      "CUDA archs (libtorch_vendor fallback, satisfies CMake validation)" FORCE)
+    set(CMAKE_CUDA_ARCHITECTURES "${_torch_arch_list}")
   endif()
 endif()
 
-# PyTorch only publishes pre-built LibTorch archives for x86_64
-# On aarch64 (e.g. NVIDIA Jetson) LibTorch ships within Jetpack,
-# so the platform-provided installation must be reused.
+# PyTorch publishes pre-built LibTorch archives for x86_64 only. For aarch64,
+# this vendor package supports only the NVIDIA Tegra platform (Jetson), where
+# PyTorch/LibTorch is shipped with JetPack and must be reused rather than
+# downloaded. The check below treats aarch64 as Tegra and routes it to that
+# reuse path.
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(_system_arch MATCHES "aarch64|arm64")
-  set(_is_aarch64 TRUE)
+  set(_is_tegra TRUE)
 else()
-  set(_is_aarch64 FALSE)
+  set(_is_tegra FALSE)
 endif()
 
 # Help find_package(Torch) locate a pip/system-installed LibTorch. This enables
@@ -102,13 +103,14 @@ if(Torch_FOUND AND NOT FORCE_BUILD_VENDOR_PKG)
   message(STATUS "${PROJECT_NAME}: system LibTorch ${Torch_VERSION} found, skipping download")
   set(LIBTORCH_VENDOR_TORCH_DIR "${Torch_DIR}" CACHE PATH
     "Torch_DIR found by libtorch_vendor")
-elseif(_is_aarch64)
+elseif(_is_tegra)
   message(FATAL_ERROR
     "${PROJECT_NAME}: no pre-built LibTorch archive is published for aarch64. "
-    "On NVIDIA Jetson, LibTorch ships within JetPack, so the platform-provided "
-    "installation must be reused. Ensure the JetPack PyTorch is installed so that "
-    "'python3 -c \"import torch\"' or find_package(Torch) can locate it, then "
-    "rebuild. Set Torch_DIR explicitly if it lives in a non-standard location.")
+    "On the NVIDIA Tegra platform (Jetson / JetPack), LibTorch ships within the "
+    "JetPack PyTorch wheel, so the platform-provided installation must be reused. "
+    "Ensure the JetPack PyTorch is installed so that 'python3 -c \"import torch\"' "
+    "or find_package(Torch) can locate it, then rebuild. Set Torch_DIR explicitly "
+    "if it lives in a non-standard location.")
 else()
   if(Torch_FOUND)
     message(STATUS "${PROJECT_NAME}: forcing vendor build (FORCE_BUILD_VENDOR_PKG)")
