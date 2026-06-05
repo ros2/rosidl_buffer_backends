@@ -78,10 +78,6 @@ string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(_system_arch MATCHES "aarch64|arm64")
   set(_is_aarch64 TRUE)
   set(_is_tegra FALSE)
-  # The device-tree 'compatible' string holds several null-separated entries,
-  # one of which is an "nvidia,tegra..." value (not necessarily the first). Read
-  # it as hex so the nulls don't truncate it, and derive the needle with
-  # string(HEX) to avoid a hard-coded hex literal.
   if(EXISTS "/proc/device-tree/compatible")
     file(READ "/proc/device-tree/compatible" _dt_compat_hex HEX)
     string(HEX "nvidia,tegra" _tegra_needle_hex)
