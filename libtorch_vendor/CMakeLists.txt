@@ -70,14 +70,27 @@ if(NOT LIBTORCH_CUDA_VERSION STREQUAL "cpu" AND NOT CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 # PyTorch publishes pre-built LibTorch archives for x86_64 only. For aarch64,
-# this vendor package supports only the NVIDIA Tegra platform (Jetson), where
-# PyTorch/LibTorch is shipped with JetPack and must be reused rather than
-# downloaded. The check below treats aarch64 as Tegra and routes it to that
-# reuse path.
+# this vendor package has only been verified on the NVIDIA Tegra platform
+# (Jetson), where PyTorch/LibTorch ships with JetPack and must be reused rather
+# than downloaded. Tegra is identified by the kernel device-tree rather than by
+# aarch64 alone, since not all aarch64 systems are Tegra.
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(_system_arch MATCHES "aarch64|arm64")
-  set(_is_tegra TRUE)
+  set(_is_aarch64 TRUE)
+  set(_is_tegra FALSE)
+  # The device-tree 'compatible' string holds several null-separated entries,
+  # one of which is an "nvidia,tegra..." value (not necessarily the first). Read
+  # it as hex so the nulls don't truncate it, and derive the needle with
+  # string(HEX) to avoid a hard-coded hex literal.
+  if(EXISTS "/proc/device-tree/compatible")
+    file(READ "/proc/device-tree/compatible" _dt_compat_hex HEX)
+    string(HEX "nvidia,tegra" _tegra_needle_hex)
+    if(_dt_compat_hex MATCHES "${_tegra_needle_hex}")
+      set(_is_tegra TRUE)
+    endif()
+  endif()
 else()
+  set(_is_aarch64 FALSE)
   set(_is_tegra FALSE)
 endif()
 
@@ -101,6 +114,12 @@ find_package(Torch QUIET)
 
 if(Torch_FOUND AND NOT FORCE_BUILD_VENDOR_PKG)
   message(STATUS "${PROJECT_NAME}: system LibTorch ${Torch_VERSION} found, skipping download")
+  if(_is_aarch64 AND NOT _is_tegra)
+    message(WARNING
+      "${PROJECT_NAME}: reusing the discovered LibTorch on a non-Tegra aarch64 "
+      "platform. This configuration has only been verified on NVIDIA Tegra "
+      "(Jetson) and is otherwise unverified.")
+  endif()
   set(LIBTORCH_VENDOR_TORCH_DIR "${Torch_DIR}" CACHE PATH
     "Torch_DIR found by libtorch_vendor")
 elseif(_is_tegra)
@@ -111,6 +130,13 @@ elseif(_is_tegra)
     "Ensure the JetPack PyTorch is installed so that 'python3 -c \"import torch\"' "
     "or find_package(Torch) can locate it, then rebuild. Set Torch_DIR explicitly "
     "if it lives in a non-standard location.")
+elseif(_is_aarch64)
+  message(FATAL_ERROR
+    "${PROJECT_NAME}: aarch64 support is only verified on the NVIDIA Tegra "
+    "platform (Jetson), which was not detected here. No pre-built LibTorch "
+    "archive is published for aarch64, so install a compatible LibTorch and "
+    "ensure 'python3 -c \"import torch\"' or find_package(Torch) can locate it "
+    "(set Torch_DIR if needed), then rebuild.")
 else()
   if(Torch_FOUND)
     message(STATUS "${PROJECT_NAME}: forcing vendor build (FORCE_BUILD_VENDOR_PKG)")
