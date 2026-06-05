@@ -26,6 +26,3 @@ uint64 ipc_uid                 # Unique ID per publish for staleness detection
 
 # CUDA IPC event for inter-process GPU synchronization
 uint8[64] ipc_event_handle     # cudaIpcEventHandle_t (64 bytes)
-
-# CPU fallback data (empty when IPC is used)
-uint8[] serialized_data

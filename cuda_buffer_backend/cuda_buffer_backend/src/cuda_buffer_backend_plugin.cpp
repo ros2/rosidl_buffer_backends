@@ -292,18 +292,8 @@ std::unique_ptr<void, void (*)(void *)> CudaBufferBackend::from_descriptor_with_
     }
   }
 
-  if (!descriptor->serialized_data.empty()) {
-    auto result = std::make_unique<CudaBufferImpl<uint8_t>>(descriptor->size);
-    size_t copy_size = std::min(descriptor->serialized_data.size(), byte_size);
-    CUDA_CHECK(cudaMemcpy(result->get_cuda_buffer().get_device_ptr(),
-        descriptor->serialized_data.data(), copy_size, cudaMemcpyHostToDevice));
-    return {result.release(), [](void * p) {
-        delete static_cast<rosidl::BufferImplBase<uint8_t> *>(p);
-      }};
-  }
-
   RCUTILS_LOG_WARN_NAMED("cuda_buffer_backend",
-    "Dropping stale descriptor: IPC failed and no serialized_data available");
+    "Dropping stale descriptor: IPC failed");
   auto empty = std::make_unique<CudaBufferImpl<uint8_t>>();
   return {empty.release(), [](void * p) {
       delete static_cast<rosidl::BufferImplBase<uint8_t> *>(p);
