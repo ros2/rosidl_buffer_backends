@@ -7,7 +7,8 @@ copying when supported, with automatic fallback to the default CPU path.
 ## Packages
 
 - [`cuda_buffer_backend`](cuda_buffer_backend/README.md) -- CUDA buffer backend
-  packages for zero-copy GPU memory sharing using CUDA VMM IPC.
+  packages for zero-copy GPU memory sharing using CUDA VMM IPC, including
+  `cuda_buffer_py` allocation, scoped read/write handles, and copies for Python.
 - [`qc_buffer_backend`](qc_buffer_backend/README.md) -- Qualcomm buffer backend
   packages for HTP-CPU zero-copy sharing using dma-buf memory.
 - **libtorch_vendor** -- Vendor package that downloads and installs the
