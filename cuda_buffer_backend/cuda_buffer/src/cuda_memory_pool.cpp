@@ -61,6 +61,10 @@ CudaMemoryPool::~CudaMemoryPool()
     if (block->exported_fd >= 0) {
       close(block->exported_fd);
     }
+    if (block->local_event) {
+      cudaEventDestroy(block->local_event);
+      block->local_event = nullptr;
+    }
     if (block->va != 0) {
       cuMemUnmap(block->va, block->size);
       cuMemAddressFree(block->va, block->size);
@@ -244,6 +248,16 @@ VmmBlock * CudaMemoryPool::create_block(size_t aligned_size)
     cuMemAddressFree(block->va, aligned_size);
     cuMemRelease(block->handle);
     throw CudaError(__FILE__, __LINE__, "cuMemSetAccess", r);
+  }
+
+  cudaError_t event_result = cudaEventCreateWithFlags(
+    &block->local_event, cudaEventDisableTiming);
+  if (event_result != cudaSuccess) {
+    block->local_event = nullptr;
+    (void)cudaGetLastError();
+    RCUTILS_LOG_WARN_NAMED(
+      "cuda_memory_pool",
+      "Failed to create same-process CUDA event; local transport may synchronize");
   }
 
   if (ipc_capable_) {

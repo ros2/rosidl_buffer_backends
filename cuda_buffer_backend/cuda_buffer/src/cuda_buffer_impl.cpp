@@ -14,10 +14,30 @@
 
 #include "cuda_buffer/cuda_buffer_impl.hpp"
 
+#include <rcutils/logging_macros.h>
+
 #include <memory>
 
 namespace cuda_buffer_backend
 {
+
+cudaStream_t get_internal_stream()
+{
+  static cudaStream_t stream = [] {
+      cudaStream_t result = nullptr;
+      cudaError_t error = cudaStreamCreateWithFlags(&result, cudaStreamNonBlocking);
+      if (error != cudaSuccess) {
+        RCUTILS_LOG_WARN_NAMED(
+          "cuda_buffer_backend",
+          "Failed to create internal CUDA stream (%s); "
+          "clone/resize/to_cpu will use the default (synchronizing) stream",
+          cudaGetErrorName(error));
+        (void)cudaGetLastError();
+      }
+      return result;
+    }();
+  return stream;
+}
 
 std::shared_ptr<CudaMemoryPool> get_or_create_global_pool()
 {

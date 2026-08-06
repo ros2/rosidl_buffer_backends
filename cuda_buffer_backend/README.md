@@ -15,14 +15,14 @@ rosdep install --from-paths src --ignore-src -y \
   --skip-keys "fastcdr rti-connext-dds-7.7.0 urdfdom_headers qt6-svg-dev"
 
 # Build the CUDA backend.
-colcon build --symlink-install --packages-up-to cuda_buffer_backend
+colcon build --symlink-install --packages-up-to cuda_buffer_backend cuda_buffer_py
 source install/setup.sh
 ```
 
 ## Test
 
 ```bash
-colcon test --packages-select cuda_buffer cuda_buffer_backend
+colcon test --packages-select cuda_buffer cuda_buffer_py cuda_buffer_backend
 colcon test-result --verbose
 ```
 
@@ -31,6 +31,7 @@ colcon test-result --verbose
 | Package | Description |
 |---|---|
 | `cuda_buffer` | Core CUDA buffer implementation: memory pool, IPC manager, host endpoint manager, and user-facing `allocate_buffer` / `from_input_buffer` / `from_output_buffer` / `to_buffer` APIs |
+| `cuda_buffer_py` | Python CUDA buffer allocation plus scoped read/write handles for rclpy publishers and subscribers |
 | `cuda_buffer_backend` | Plugin registration via `pluginlib`, endpoint discovery, and descriptor serialization |
 | `cuda_buffer_backend_msgs` | ROS 2 message definition for `CudaBufferDescriptor` |
 
@@ -137,6 +138,108 @@ cuda_buffer_backend::ReadHandle rh =
   const and mutable arguments (const-ref binding). `ReadHandle::get_ptr()` returns
   `const uint8_t *` — the type system prevents subscribers from writing
   through the handle.
+
+### Python (rclpy)
+
+The `cuda_buffer_py` package exposes the same scoped input/output model to
+rclpy. For a direct CUDA producer, allocate device storage and write it on the
+same stream used by the producing kernel:
+
+```python
+from cuda_buffer import CudaBuffer
+from sensor_msgs.msg import Image
+
+stream_ptr = get_current_cuda_stream_ptr()
+
+msg = Image()
+msg.height = 480
+msg.width = 640
+msg.encoding = 'rgb8'
+msg.step = 640 * 3
+msg.data = CudaBuffer.allocate_buffer(msg.height * msg.step)
+
+with CudaBuffer.from_output_buffer(msg.data, stream_ptr) as write_handle:
+    produce_device_data(
+        write_handle.device_ptr,
+        len(msg.data),
+        stream_ptr,
+    )
+
+publisher.publish(msg)
+```
+
+Leaving the context records the producer event on `stream_ptr`; it does not
+synchronize the stream. `write_handle.buffer` holds the CUDA buffer and is
+useful when `from_output_buffer()` promotes a non-CUDA value based on its size:
+
+```python
+with CudaBuffer.from_output_buffer(msg.data, stream_ptr) as write_handle:
+    msg.data = write_handle.buffer
+    produce_device_data(write_handle.device_ptr, len(msg.data), stream_ptr)
+```
+
+For CPU-originated data, `from_cpu()` copies bytes to device memory, while
+`from_size()` creates a zero-initialized device buffer. These convenience
+factories synchronize their initialization before returning:
+
+```python
+from cuda_buffer import CudaBuffer
+from sensor_msgs.msg import Image
+
+msg = Image()
+msg.height = 480
+msg.width = 640
+msg.encoding = 'rgb8'
+msg.step = 640 * 3
+msg.data = CudaBuffer.from_cpu(host_image_bytes)
+publisher.publish(msg)
+```
+
+Python subscribers can acquire the same scoped CUDA read access as the C++
+`from_input_buffer()` API. Pass the CUDA stream that will consume the data as
+an integer pointer; CPU fallback data is promoted automatically:
+
+```python
+from cuda_buffer import CudaBuffer
+
+def callback(msg):
+    stream_ptr = get_current_cuda_stream_ptr()
+    with CudaBuffer.from_input_buffer(msg.data, stream_ptr) as read_handle:
+        consume_device_data(
+            read_handle.device_ptr,
+            len(msg.data),
+            stream_ptr,
+        )
+```
+
+For an existing CUDA-backed field, `from_input_buffer()` only enqueues a wait
+for the producer event on the consumer stream. The handle keeps the source or
+promoted CUDA buffer alive, and leaving the context records a read event so the
+backend does not recycle the allocation before queued work completes. There is
+no CPU conversion or stream synchronization in this CUDA-to-CUDA path. If no
+stream is supplied, the backend's process-lifetime internal stream is used.
+CPU fallback input is promoted with an asynchronous host-to-device copy on the
+selected stream.
+
+Subscribers opt in to delivery through the CUDA backend with rclpy's
+`acceptable_buffer_backends` argument. CPU remains an implicit fallback when
+CUDA IPC is unavailable:
+
+```python
+subscription = node.create_subscription(
+    Image,
+    'image',
+    callback,
+    10,
+    acceptable_buffer_backends='cuda',
+)
+
+def callback(msg):
+    if getattr(msg.data, 'backend_type', 'cpu') == 'cuda':
+        host_image_bytes = msg.data.to_bytes()
+    else:
+        host_image_bytes = bytes(msg.data)
+```
 
 ## IPC Behavior
 

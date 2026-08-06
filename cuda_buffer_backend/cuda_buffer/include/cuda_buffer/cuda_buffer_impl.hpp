@@ -15,8 +15,6 @@
 #ifndef CUDA_BUFFER__CUDA_BUFFER_IMPL_HPP_
 #define CUDA_BUFFER__CUDA_BUFFER_IMPL_HPP_
 
-#include <rcutils/logging_macros.h>
-
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -33,28 +31,13 @@
 namespace cuda_buffer_backend
 {
 
-/// Process-wide VMM allocation pool. Defined out-of-line so backend plugins
-/// and application DSOs resolve allocations through the same pool instance.
-CUDA_BUFFER_PUBLIC std::shared_ptr<CudaMemoryPool> get_or_create_global_pool();
+/// Process-wide stream for internal operations (clone, to_cpu, and resize).
+/// Defined in libcuda_buffer so callers in separate DSOs share one instance.
+CUDA_BUFFER_PUBLIC cudaStream_t get_internal_stream();
 
-// Process-wide stream for internal ops (clone, to_cpu, resize).
-// Intentionally leaked; destroyed by cudaDeviceReset in ~CudaMemoryPool.
-inline cudaStream_t get_internal_stream()
-{
-  static cudaStream_t s = [] {
-      cudaStream_t stream = nullptr;
-      cudaError_t err = cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
-      if (err != cudaSuccess) {
-        RCUTILS_LOG_WARN_NAMED("cuda_buffer_backend",
-          "Failed to create internal CUDA stream (%s); "
-          "clone/resize/to_cpu will use the default (synchronizing) stream",
-          cudaGetErrorName(err));
-        (void)cudaGetLastError();
-      }
-      return stream;
-    }();
-  return s;
-}
+/// Process-wide VMM allocation pool. Defined out-of-line so backend plugins and
+/// language bindings resolve allocations through the same pool instance.
+CUDA_BUFFER_PUBLIC std::shared_ptr<CudaMemoryPool> get_or_create_global_pool();
 
 template<typename T>
 class CudaBufferImpl : public rosidl::BufferImplBase<T>
