@@ -31,8 +31,10 @@ namespace cuda_buffer_backend
 
 class CudaBuffer;
 
-constexpr unsigned int CUDA_BUFFER_EVENT_FLAGS =
-  cudaEventBlockingSync | cudaEventDisableTiming | cudaEventInterprocess;
+constexpr unsigned int CUDA_BUFFER_MINIMUM_EVENT_FLAGS =
+  cudaEventBlockingSync | cudaEventDisableTiming;
+constexpr unsigned int CUDA_BUFFER_DEFAULT_EVENT_FLAGS =
+  CUDA_BUFFER_MINIMUM_EVENT_FLAGS | cudaEventInterprocess;
 
 inline bool cuda_is_stream_usable(cudaStream_t s)
 {
@@ -124,7 +126,7 @@ private:
 
     cudaEvent_t ev{nullptr};
     CUDA_CHECK_NOTHROW(
-      cudaEventCreateWithFlags(&ev, CUDA_BUFFER_EVENT_FLAGS),
+      cudaEventCreateWithFlags(&ev, CUDA_BUFFER_DEFAULT_EVENT_FLAGS),
       return);
     CUDA_CHECK_NOTHROW(cudaEventRecord(ev, stream_), {cudaEventDestroy(ev); return;});
     std::lock_guard<std::mutex> lg(*events_mutex_);

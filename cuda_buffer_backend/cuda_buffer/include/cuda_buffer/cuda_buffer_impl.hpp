@@ -187,16 +187,21 @@ private:
     VmmBlock * block = pool->allocate(byte_size);
 
     cudaEvent_t ev = nullptr;
-    cudaError_t ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_EVENT_FLAGS);
+    cudaError_t ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_DEFAULT_EVENT_FLAGS);
     if (ev_err != cudaSuccess) {
+      const cudaError_t interprocess_event_error = ev_err;
       (void)cudaGetLastError();
-      ev_err = cudaEventCreateWithFlags(
-        &ev, cudaEventBlockingSync | cudaEventDisableTiming);
+      ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_MINIMUM_EVENT_FLAGS);
       if (ev_err != cudaSuccess) {
         ev = nullptr;
         (void)cudaGetLastError();
         RCUTILS_LOG_WARN_NAMED("cuda_buffer_backend",
           "Failed to create CUDA event; stream ordering disabled for this buffer");
+      } else {
+        RCUTILS_LOG_WARN_ONCE_NAMED(
+          "cuda_buffer_backend",
+          "Failed to create interprocess CUDA event (%s); falling back to a local event",
+          cudaGetErrorName(interprocess_event_error));
       }
     }
 
