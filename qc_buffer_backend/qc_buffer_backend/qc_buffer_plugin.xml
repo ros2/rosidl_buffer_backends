@@ -1,0 +1,9 @@
+<!-- Copyright 2026 Open Source Robotics Foundation, Inc.
+     Licensed under the Apache License, Version 2.0 -->
+<library path="qc_buffer_backend">
+  <class name="qc"
+         type="qc_buffer_backend::QcBufferBackend"
+         base_class_type="rosidl::BufferBackend">
+    <description>Qualcomm backend for buffer serialization with ION/dma-buf HTP-CPU zero-copy</description>
+  </class>
+</library>
