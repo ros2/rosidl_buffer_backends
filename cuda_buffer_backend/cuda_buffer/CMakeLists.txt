@@ -35,6 +35,7 @@ find_package(CUDAToolkit REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/cuda_buffer.cpp
+  src/cuda_buffer_impl.cpp
   src/cuda_buffer_ipc_manager.cpp
   src/cuda_memory_pool.cpp
   src/host_endpoint_manager.cpp

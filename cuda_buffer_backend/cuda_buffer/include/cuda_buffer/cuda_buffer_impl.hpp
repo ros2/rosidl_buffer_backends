@@ -25,12 +25,17 @@
 #include "cuda_buffer/cuda_buffer.hpp"
 #include "cuda_buffer/cuda_error.hpp"
 #include "cuda_buffer/cuda_memory_pool.hpp"
+#include "cuda_buffer/visibility_control.h"
 #include "rosidl_buffer/buffer.hpp"
 #include "rosidl_buffer/buffer_impl_base.hpp"
 #include "rosidl_buffer/cpu_buffer_impl.hpp"
 
 namespace cuda_buffer_backend
 {
+
+/// Process-wide VMM allocation pool. Defined out-of-line so backend plugins
+/// and application DSOs resolve allocations through the same pool instance.
+CUDA_BUFFER_PUBLIC std::shared_ptr<CudaMemoryPool> get_or_create_global_pool();
 
 // Process-wide stream for internal ops (clone, to_cpu, resize).
 // Intentionally leaked; destroyed by cudaDeviceReset in ~CudaMemoryPool.
@@ -156,15 +161,7 @@ public:
 
   static std::shared_ptr<CudaMemoryPool> get_or_create_global_pool()
   {
-    static std::shared_ptr<CudaMemoryPool> global_pool = [] {
-        auto pool = std::make_shared<CudaMemoryPool>();
-        const CUresult r = pool->create();
-        if (r != CUDA_SUCCESS) {
-          throw CudaError(__FILE__, __LINE__, "CudaMemoryPool::create", r);
-        }
-        return pool;
-      }();
-    return global_pool;
+    return cuda_buffer_backend::get_or_create_global_pool();
   }
 
   static bool is_pool_ipc_capable()
