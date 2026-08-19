@@ -2,53 +2,59 @@
 # Licensed under the Apache License, Version 2.0
 
 cmake_minimum_required(VERSION 3.20)
-project(python_torch_vendor)
+project(pytorch_vendor)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(PYTHON_TORCH_VERSION "" CACHE STRING
-  "Python Torch version to install. Auto-selected per CUDA variant if empty.")
-set(PYTHON_TORCH_CUDA_VERSION "" CACHE STRING
-  "CUDA variant override (cu118, cu121, cu124, cu126, cu128, cu129, cpu). Auto-detected if empty.")
+set(PYTORCH_VERSION "" CACHE STRING
+  "PyTorch version to install. Auto-selected per CUDA variant if empty.")
+set(PYTORCH_CUDA_VERSION "" CACHE STRING
+  "CUDA variant override (cu118, cu121, cu124, cu126, cu128, cu129, cu130, cu132, cpu). Auto-detected if empty.")
 
 option(FORCE_BUILD_VENDOR_PKG
   "Install the selected wheel even if Python Torch is already available"
   OFF)
 
-if(PYTHON_TORCH_CUDA_VERSION STREQUAL "")
+if(PYTORCH_CUDA_VERSION STREQUAL "")
   find_package(CUDAToolkit QUIET)
   if(CUDAToolkit_FOUND)
-    if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.9")
-      set(PYTHON_TORCH_CUDA_VERSION "cu129")
+    if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "13.2")
+      set(PYTORCH_CUDA_VERSION "cu132")
+    elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "13.0")
+      set(PYTORCH_CUDA_VERSION "cu130")
+    elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.9")
+      set(PYTORCH_CUDA_VERSION "cu129")
     elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8")
-      set(PYTHON_TORCH_CUDA_VERSION "cu128")
+      set(PYTORCH_CUDA_VERSION "cu128")
     elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.6")
-      set(PYTHON_TORCH_CUDA_VERSION "cu126")
+      set(PYTORCH_CUDA_VERSION "cu126")
     elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.4")
-      set(PYTHON_TORCH_CUDA_VERSION "cu124")
+      set(PYTORCH_CUDA_VERSION "cu124")
     elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.1")
-      set(PYTHON_TORCH_CUDA_VERSION "cu121")
+      set(PYTORCH_CUDA_VERSION "cu121")
     elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "11.8")
-      set(PYTHON_TORCH_CUDA_VERSION "cu118")
+      set(PYTORCH_CUDA_VERSION "cu118")
     else()
-      set(PYTHON_TORCH_CUDA_VERSION "cpu")
+      set(PYTORCH_CUDA_VERSION "cpu")
     endif()
   else()
-    set(PYTHON_TORCH_CUDA_VERSION "cpu")
+    set(PYTORCH_CUDA_VERSION "cpu")
   endif()
 endif()
 
-if(PYTHON_TORCH_VERSION STREQUAL "")
-  if(PYTHON_TORCH_CUDA_VERSION STREQUAL "cu118")
-    set(PYTHON_TORCH_VERSION "2.7.1")
-  elseif(PYTHON_TORCH_CUDA_VERSION STREQUAL "cu121")
-    set(PYTHON_TORCH_VERSION "2.5.1")
-  elseif(PYTHON_TORCH_CUDA_VERSION STREQUAL "cu124")
-    set(PYTHON_TORCH_VERSION "2.6.0")
+if(PYTORCH_VERSION STREQUAL "")
+  if(PYTORCH_CUDA_VERSION STREQUAL "cu132")
+    set(PYTORCH_VERSION "2.12.0")
+  elseif(PYTORCH_CUDA_VERSION STREQUAL "cu118")
+    set(PYTORCH_VERSION "2.7.1")
+  elseif(PYTORCH_CUDA_VERSION STREQUAL "cu121")
+    set(PYTORCH_VERSION "2.5.1")
+  elseif(PYTORCH_CUDA_VERSION STREQUAL "cu124")
+    set(PYTORCH_VERSION "2.6.0")
   else()
-    set(PYTHON_TORCH_VERSION "2.11.0")
+    set(PYTORCH_VERSION "2.11.0")
   endif()
 endif()
 
@@ -93,11 +99,11 @@ elseif(_is_aarch64)
     "install a compatible platform package and rebuild")
 else()
   set(_index_url
-    "https://download.pytorch.org/whl/${PYTHON_TORCH_CUDA_VERSION}")
+    "https://download.pytorch.org/whl/${PYTORCH_CUDA_VERSION}")
   set(_wheel_dir "${CMAKE_CURRENT_BINARY_DIR}/wheel")
   set(_stage_dir "${CMAKE_CURRENT_BINARY_DIR}/stage")
   set(_marker
-    "${_stage_dir}/.torch-${PYTHON_TORCH_VERSION}-${PYTHON_TORCH_CUDA_VERSION}")
+    "${_stage_dir}/.torch-${PYTORCH_VERSION}-${PYTORCH_CUDA_VERSION}")
 
   if(NOT EXISTS "${_marker}")
     file(REMOVE_RECURSE "${_wheel_dir}" "${_stage_dir}")
@@ -111,7 +117,7 @@ else()
         --only-binary=:all:
         --dest "${_wheel_dir}"
         --index-url "${_index_url}"
-        "torch==${PYTHON_TORCH_VERSION}"
+        "torch==${PYTORCH_VERSION}"
       RESULT_VARIABLE _download_rc
       COMMAND_ERROR_IS_FATAL ANY
     )
@@ -154,11 +160,11 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     )
     list(GET _vendored_torch 0 _vendored_version)
     list(GET _vendored_torch 1 _vendored_variant)
-    if(NOT _vendored_version VERSION_EQUAL PYTHON_TORCH_VERSION OR
-        NOT _vendored_variant STREQUAL PYTHON_TORCH_CUDA_VERSION)
+    if(NOT _vendored_version VERSION_EQUAL PYTORCH_VERSION OR
+        NOT _vendored_variant STREQUAL PYTORCH_CUDA_VERSION)
       message(FATAL_ERROR
         "${PROJECT_NAME}: downloaded torch ${_vendored_version}+${_vendored_variant} "
-        "does not match ${PYTHON_TORCH_VERSION}+${PYTHON_TORCH_CUDA_VERSION}")
+        "does not match ${PYTORCH_VERSION}+${PYTORCH_CUDA_VERSION}")
     endif()
     file(WRITE "${_marker}" "")
   endif()
@@ -177,5 +183,5 @@ if(BUILD_TESTING)
 endif()
 
 ament_package(
-  CONFIG_EXTRAS_POST "python_torch_vendor-extras.cmake.in"
+  CONFIG_EXTRAS_POST "pytorch_vendor-extras.cmake.in"
 )
