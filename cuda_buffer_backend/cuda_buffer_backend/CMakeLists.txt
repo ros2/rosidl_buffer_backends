@@ -101,6 +101,24 @@ if(BUILD_TESTING)
   rclcpp_components_register_nodes(cuda_image_publisher_component
     "CudaImagePublisher")
 
+  ament_auto_add_library(cuda_image_dso_publisher_component SHARED
+    test/src/cuda_image_dso_publisher_node.cpp
+  )
+  set_target_properties(cuda_image_dso_publisher_component PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+  )
+  target_link_libraries(cuda_image_dso_publisher_component
+    cuda_buffer::cuda_buffer
+    CUDA::cudart
+    rclcpp::rclcpp
+    rclcpp_components::component
+    ${sensor_msgs_TARGETS}
+    rosidl_runtime_cpp::rosidl_runtime_cpp
+  )
+  rclcpp_components_register_nodes(cuda_image_dso_publisher_component
+    "CudaImageDsoPublisher")
+
   ament_auto_add_library(cuda_image_subscriber_component SHARED
     test/src/cuda_image_subscriber_node.cpp
   )
@@ -148,6 +166,11 @@ if(BUILD_TESTING)
 
   add_launch_test(test/test_cuda_image_multiprocess_fastrtps_launch.py
     TARGET test_cuda_image_multiprocess_fastrtps_launch
+    TIMEOUT 45
+  )
+
+  add_launch_test(test/test_cuda_image_pool_dso_fastrtps_launch.py
+    TARGET test_cuda_image_pool_dso_fastrtps_launch
     TIMEOUT 45
   )
 

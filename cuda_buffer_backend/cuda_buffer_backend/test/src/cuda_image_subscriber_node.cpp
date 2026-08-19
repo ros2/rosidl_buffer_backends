@@ -14,8 +14,10 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
@@ -35,12 +37,18 @@ public:
     validation_passed_(true)
   {
     this->declare_parameter<std::string>("expected_backend", "cuda");
+    this->declare_parameter<std::string>("acceptable_buffer_backends", "any");
+    this->declare_parameter<bool>("validate_sequence_pattern", false);
     expected_backend_ = this->get_parameter("expected_backend").as_string();
+    acceptable_buffer_backends_ =
+      this->get_parameter("acceptable_buffer_backends").as_string();
+    validate_sequence_pattern_ =
+      this->get_parameter("validate_sequence_pattern").as_bool();
 
     cudaStreamCreate(&stream_);
 
     rclcpp::SubscriptionOptions sub_opts;
-    sub_opts.acceptable_buffer_backends = "any";
+    sub_opts.acceptable_buffer_backends = acceptable_buffer_backends_;
     subscription_ = this->create_subscription<sensor_msgs::msg::Image>(
       "test_cuda_image", 10,
       std::bind(&CudaImageSubscriber::image_callback, this, std::placeholders::_1),
@@ -79,9 +87,11 @@ private:
     bool metadata_valid = true;
     bool backend_valid = true;
     bool content_valid = true;
-    size_t expected_size = msg->width * msg->height * 3;
+    const size_t channels = validate_sequence_pattern_ ? 1u : 3u;
+    const size_t expected_size = msg->width * msg->height * channels;
+    const char * expected_encoding = validate_sequence_pattern_ ? "mono8" : "rgb8";
 
-    if (msg->encoding != "rgb8") {
+    if (msg->encoding != expected_encoding) {
       RCLCPP_ERROR(this->get_logger(), "Wrong encoding: %s",
                    msg->encoding.c_str());
       metadata_valid = false;
@@ -91,6 +101,21 @@ private:
       RCLCPP_ERROR(this->get_logger(), "Wrong data size: %zu (expected %zu)",
                    msg->data.size(), expected_size);
       metadata_valid = false;
+    }
+
+    uint8_t expected_value = 0;
+    if (validate_sequence_pattern_) {
+      const std::string expected_frame_id =
+        "cuda_pool_dso_" + std::to_string(received_count_);
+      expected_value = static_cast<uint8_t>((received_count_ * 37u + 11u) & 0xffu);
+      if (msg->header.frame_id != expected_frame_id || msg->encoding != "mono8" ||
+        msg->height != 16u || msg->width != 256u || msg->step != 256u ||
+        msg->data.size() != 4096u)
+      {
+        RCLCPP_ERROR(
+          this->get_logger(), "Wrong DSO regression metadata for image #%u", received_count_);
+        metadata_valid = false;
+      }
     }
 
     const std::string backend_type = msg->data.get_backend_type();
@@ -120,9 +145,12 @@ private:
       content_valid = false;
     }
 
-    if (!cpu_data.empty() && metadata_valid && backend_valid) {
-      uint8_t expected_val = cpu_data[0];
-      for (size_t i = 1; i < cpu_data.size(); ++i) {
+    if (cpu_data.empty()) {
+      content_valid = false;
+    } else if (metadata_valid && backend_valid) {
+      const uint8_t expected_val = validate_sequence_pattern_ ? expected_value : cpu_data[0];
+      const size_t first_index = validate_sequence_pattern_ ? 0u : 1u;
+      for (size_t i = first_index; i < cpu_data.size(); ++i) {
         if (cpu_data[i] != expected_val) {
           RCLCPP_ERROR(this->get_logger(),
             "Content corruption at byte %zu: expected 0x%02x, got 0x%02x",
@@ -197,6 +225,8 @@ private:
   uint32_t received_count_;
   bool validation_passed_;
   std::string expected_backend_;
+  std::string acceptable_buffer_backends_;
+  bool validate_sequence_pattern_;
 };
 
 RCLCPP_COMPONENTS_REGISTER_NODE(CudaImageSubscriber)
