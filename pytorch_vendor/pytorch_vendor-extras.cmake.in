@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(PYTHON_TORCH_VENDOR_TORCH_VERSION
-  "@PYTHON_TORCH_VERSION@")
-set(PYTHON_TORCH_VENDOR_CUDA_VARIANT
-  "@PYTHON_TORCH_CUDA_VERSION@")
+set(PYTORCH_VENDOR_TORCH_VERSION
+  "@PYTORCH_VERSION@")
+set(PYTORCH_VENDOR_CUDA_VARIANT
+  "@PYTORCH_CUDA_VERSION@")

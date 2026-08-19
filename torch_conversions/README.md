@@ -126,7 +126,7 @@ and updates shape / strides / dtype metadata to match `t`. Use
 
 CPU-backed conversions are always available. CUDA-backed conversions are
 enabled when the package is built with `cuda_buffer` and
-`python_torch_vendor` provides a CUDA-enabled distribution. The Python and C++
+`pytorch_vendor` provides a CUDA-enabled distribution. The Python and C++
 Torch vendors use the same default version and CUDA selection policy. Explicit
 CUDA requests raise an error when either capability is unavailable.
 

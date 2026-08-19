@@ -14,7 +14,7 @@
 
   <depend>rosidl_buffer</depend>
 
-  <exec_depend>python_torch_vendor</exec_depend>
+  <exec_depend>pytorch_vendor</exec_depend>
   <exec_depend>rosidl_buffer_py</exec_depend>
   <exec_depend>tensor_msgs</exec_depend>
 
