@@ -11,39 +11,45 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
-find_package(cuda_buffer REQUIRED)
-find_package(libtorch_vendor REQUIRED)
-find_package(rosidl_buffer REQUIRED)
+find_package(cuda_buffer QUIET)
 
-find_path(TORCH_DLPACK_INCLUDE_DIR
-  NAMES ATen/dlpack.h
-  HINTS
-    "${Torch_DIR}/../../../include"
-    "${libtorch_vendor_DIR}/../../../opt/libtorch_vendor/include"
-  REQUIRED
-)
+if(cuda_buffer_FOUND)
+  find_package(libtorch_vendor REQUIRED)
+  find_package(rosidl_buffer REQUIRED)
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-find_package(pybind11 REQUIRED)
+  find_path(TORCH_DLPACK_INCLUDE_DIR
+    NAMES ATen/dlpack.h
+    HINTS
+      "${libtorch_vendor_DIR}/../../../opt/libtorch_vendor/include"
+    REQUIRED
+  )
 
-pybind11_add_module(_torch_conversions_py
-  src/torch_conversions_py.cpp
-)
+  # Find Python before pybind11 so both use the same interpreter.
+  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+  find_package(pybind11 REQUIRED)
 
-target_include_directories(_torch_conversions_py PRIVATE
-  "${TORCH_DLPACK_INCLUDE_DIR}"
-)
+  pybind11_add_module(_torch_conversions_py
+    src/torch_conversions_py.cpp
+  )
 
-target_link_libraries(_torch_conversions_py PRIVATE
-  cuda_buffer::cuda_buffer
-  rosidl_buffer::rosidl_buffer
-)
+  target_include_directories(_torch_conversions_py PRIVATE
+    "${TORCH_DLPACK_INCLUDE_DIR}"
+  )
 
+  target_link_libraries(_torch_conversions_py PRIVATE
+    cuda_buffer::cuda_buffer
+    rosidl_buffer::rosidl_buffer
+  )
+endif()
+
+# Install the Python package first so ament defines PYTHON_INSTALL_DIR.
 ament_python_install_package(torch_conversions)
 
-install(TARGETS _torch_conversions_py
-  DESTINATION "${PYTHON_INSTALL_DIR}/torch_conversions"
-)
+if(cuda_buffer_FOUND)
+  install(TARGETS _torch_conversions_py
+    DESTINATION "${PYTHON_INSTALL_DIR}/torch_conversions"
+  )
+endif()
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
@@ -56,15 +62,17 @@ if(BUILD_TESTING)
     TIMEOUT 90
   )
 
-  install(PROGRAMS test/torch_tensor_publisher_node.py
-    DESTINATION "lib/${PROJECT_NAME}"
-    RENAME torch_tensor_publisher_node
-  )
+  if(cuda_buffer_FOUND)
+    install(PROGRAMS test/torch_tensor_publisher_node.py
+      DESTINATION "lib/${PROJECT_NAME}"
+      RENAME torch_tensor_publisher_node
+    )
 
-  add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps.py
-    TARGET test_torch_tensor_inter_pubsub_fastrtps
-    TIMEOUT 40
-  )
+    add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps.py
+      TARGET test_torch_tensor_inter_pubsub_fastrtps
+      TIMEOUT 40
+    )
+  endif()
 endif()
 
 ament_package()

@@ -22,12 +22,21 @@ from typing import overload
 from typing import Sequence
 from typing import Union
 
-from cuda_buffer import CudaBuffer
 from rosidl_buffer import Buffer
 from tensor_msgs.msg import ExperimentalTensor
 import torch
-from torch_conversions._torch_conversions_py import _from_input_dlpack
-from torch_conversions._torch_conversions_py import _from_output_dlpack
+
+try:
+    from cuda_buffer import CudaBuffer
+    from torch_conversions._torch_conversions_py import _from_input_dlpack
+    from torch_conversions._torch_conversions_py import _from_output_dlpack
+except ImportError as error:
+    CudaBuffer = None
+    _from_input_dlpack = None
+    _from_output_dlpack = None
+    _CUDA_IMPORT_ERROR = error
+else:
+    _CUDA_IMPORT_ERROR = None
 
 
 _DTYPE_TO_DLPACK = {
@@ -104,6 +113,19 @@ def _is_cuda_buffer(data: object) -> bool:
     return isinstance(data, Buffer) and data.backend_type == 'cuda'
 
 
+def _cuda_available() -> bool:
+    return CudaBuffer is not None and torch.cuda.is_available()
+
+
+def _require_cuda_support() -> None:
+    if not torch.cuda.is_available():
+        raise RuntimeError('CUDA was requested but is not available to PyTorch')
+    if CudaBuffer is None:
+        raise RuntimeError(
+            'CUDA buffer support was not built for torch_conversions'
+        ) from _CUDA_IMPORT_ERROR
+
+
 def _current_cuda_stream() -> int:
     return torch.cuda.current_stream().cuda_stream
 
@@ -120,12 +142,12 @@ def allocate_tensor_msg(
     if dtype not in _DTYPE_TO_DLPACK:
         raise TypeError(f'Unsupported torch dtype {dtype}')
     selected_device = torch.device(
-        device if device is not None else ('cuda' if torch.cuda.is_available() else 'cpu')
+        device if device is not None else ('cuda' if _cuda_available() else 'cpu')
     )
     if selected_device.type not in ('cpu', 'cuda'):
         raise ValueError(f'Unsupported tensor device {selected_device.type}')
-    if selected_device.type == 'cuda' and not torch.cuda.is_available():
-        raise RuntimeError('CUDA was requested but is not available to PyTorch')
+    if selected_device.type == 'cuda':
+        _require_cuda_support()
 
     msg = ExperimentalTensor()
     dtype_code, dtype_bits, dtype_lanes = _DTYPE_TO_DLPACK[dtype]
@@ -149,6 +171,7 @@ def from_output_tensor_msg(msg: ExperimentalTensor) -> Optional[torch.Tensor]:
         return None
     shape, strides, dtype, span = _metadata(msg)
     if _is_cuda_buffer(msg.data):
+        _require_cuda_support()
         capsule = _from_output_dlpack(
             msg.data,
             shape,
@@ -180,6 +203,7 @@ def from_input_tensor_msg(
         return None
     shape, strides, dtype, span = _metadata(msg)
     if _is_cuda_buffer(msg.data):
+        _require_cuda_support()
         capsule = _from_input_dlpack(
             msg.data,
             shape,

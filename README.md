@@ -15,6 +15,9 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
   descriptors.
 - **libtorch_vendor** -- Vendor package that downloads and installs the
   pre-built LibTorch C++ distribution.
+- **python_torch_vendor** -- Vendor package that installs the Python Torch
+  distribution using the same platform and CUDA selection policy as
+  `libtorch_vendor`.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
 - **torch_conversions** -- Header-only helper library that converts between
   `tensor_msgs/ExperimentalTensor` and `at::Tensor` and exposes DLPack import /
@@ -22,6 +25,8 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
   plain message + bridge library that rides on top of whichever
   `rosidl::Buffer` backend is registered (CUDA when available, CPU
   otherwise).
+- **torch_conversions_py** -- Python conversions between
+  `tensor_msgs/ExperimentalTensor` and `torch.Tensor` for CPU and CUDA storage.
 
 ## Deb build status
 
