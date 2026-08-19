@@ -29,10 +29,12 @@ import rclpy
 from rosidl_buffer import Buffer
 from tensor_msgs.msg import ExperimentalTensor
 import torch
+import torch_conversions
 from torch_conversions import from_input_tensor_msg
 from torch_conversions import set_stream
 
 
+CUDA_AVAILABLE = torch_conversions._cuda_available()
 TENSOR_SHAPE = (2, 3, 4)
 TENSOR_VALUES = (
     3, 17, 29, 43, 59, 71, 89, 101, 113, 127, 139, 149,
@@ -48,6 +50,7 @@ def _expected_tensor(device):
     ).reshape(TENSOR_SHAPE)
 
 
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason='CUDA support is unavailable')
 @pytest.mark.launch_test
 @launch_testing.markers.keep_alive
 def generate_test_description():

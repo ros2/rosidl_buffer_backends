@@ -17,10 +17,14 @@ from array import array
 import pytest
 from tensor_msgs.msg import ExperimentalTensor
 import torch
+import torch_conversions
 from torch_conversions import allocate_tensor_msg
 from torch_conversions import from_input_tensor_msg
 from torch_conversions import from_output_tensor_msg
 from torch_conversions import to_tensor_msg
+
+
+CUDA_AVAILABLE = torch_conversions._cuda_available()
 
 
 @pytest.mark.parametrize(
@@ -147,7 +151,16 @@ def test_unsupported_torch_dtype_is_rejected():
         to_tensor_msg(torch.zeros(4, dtype=torch.complex64))
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA is unavailable')
+@pytest.mark.skipif(CUDA_AVAILABLE, reason='CUDA support is available')
+def test_cpu_only_configuration_defaults_to_cpu_and_rejects_cuda():
+    msg = allocate_tensor_msg((4,), torch.float32)
+
+    assert isinstance(msg.data, array)
+    with pytest.raises(RuntimeError, match='CUDA'):
+        allocate_tensor_msg((4,), torch.float32, 'cuda')
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason='CUDA support is unavailable')
 def test_cuda_write_read_round_trip():
     msg = allocate_tensor_msg((6,), torch.float32, 'cuda')
     output = from_output_tensor_msg(msg)
@@ -159,7 +172,7 @@ def test_cuda_write_read_round_trip():
     assert torch.equal(result.cpu(), torch.arange(6, dtype=torch.float32))
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA is unavailable')
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason='CUDA support is unavailable')
 def test_cuda_tensor_to_message_round_trip():
     source = torch.arange(12, dtype=torch.int32, device='cuda').reshape(3, 4)
 
