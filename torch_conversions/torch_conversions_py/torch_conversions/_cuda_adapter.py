@@ -22,8 +22,8 @@ from torch_conversions._adapter import TensorMetadata
 
 try:
     from cuda_buffer import CudaBuffer
-    from torch_conversions._torch_conversions_py import _from_input_dlpack
-    from torch_conversions._torch_conversions_py import _from_output_dlpack
+    from torch_conversions._cuda_dlpack_bridge import _from_input_dlpack
+    from torch_conversions._cuda_dlpack_bridge import _from_output_dlpack
 except ImportError as error:
     CudaBuffer = None
     _from_input_dlpack = None
