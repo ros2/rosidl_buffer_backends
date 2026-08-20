@@ -12,31 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Convert tensor_msgs/ExperimentalTensor messages to and from PyTorch tensors."""
+"""Convert ExperimentalTensor messages to and from PyTorch tensors."""
 
-from array import array
-from contextlib import nullcontext
 from math import prod
 from typing import Optional
 from typing import overload
 from typing import Sequence
 from typing import Union
 
-from rosidl_buffer import Buffer
 from tensor_msgs.msg import ExperimentalTensor
+
 import torch
 
-try:
-    from cuda_buffer import CudaBuffer
-    from torch_conversions._torch_conversions_py import _from_input_dlpack
-    from torch_conversions._torch_conversions_py import _from_output_dlpack
-except ImportError as error:
-    CudaBuffer = None
-    _from_input_dlpack = None
-    _from_output_dlpack = None
-    _CUDA_IMPORT_ERROR = error
-else:
-    _CUDA_IMPORT_ERROR = None
+from torch_conversions._adapter import TensorMetadata
+from torch_conversions._adapter import TorchConversionRegistry
+from torch_conversions._cpu_adapter import CpuTorchConversionAdapter
+from torch_conversions._cuda_adapter import CudaTorchConversionAdapter
 
 
 _DTYPE_TO_DLPACK = {
@@ -52,6 +43,10 @@ _DTYPE_TO_DLPACK = {
     torch.bool: (6, 8, 1),
 }
 _DLPACK_TO_DTYPE = {value: key for key, value in _DTYPE_TO_DLPACK.items()}
+
+_registry = TorchConversionRegistry()
+_registry.register(CpuTorchConversionAdapter())
+_registry.register(CudaTorchConversionAdapter())
 
 
 def _contiguous_strides(shape: Sequence[int]) -> list[int]:
@@ -86,13 +81,15 @@ def _set_metadata(msg: ExperimentalTensor, tensor: torch.Tensor) -> None:
 
 def _metadata(
     msg: ExperimentalTensor,
-) -> tuple[list[int], list[int], torch.dtype, int]:
+) -> TensorMetadata:
     shape = list(msg.shape)
     if any(dimension < 0 for dimension in shape):
         raise ValueError('Tensor shape dimensions must be nonnegative')
     strides = list(msg.strides) or _contiguous_strides(shape)
     if len(strides) != len(shape):
-        raise ValueError('Tensor strides must be empty or match the shape rank')
+        raise ValueError(
+            'Tensor strides must be empty or match the shape rank'
+        )
     if any(stride < 0 for stride in strides):
         raise ValueError('Negative tensor strides are unsupported')
 
@@ -100,34 +97,34 @@ def _metadata(
     element_size = torch.empty((), dtype=dtype).element_size()
     span = 0 if 0 in shape else 1
     if span:
-        span += sum((dimension - 1) * stride for dimension, stride in zip(shape, strides))
+        span += sum(
+            (dimension - 1) * stride
+            for dimension, stride in zip(shape, strides)
+        )
     required_size = msg.byte_offset + span * element_size
     if required_size > len(msg.data):
         raise ValueError(
-            f'Tensor view requires {required_size} bytes, but the buffer has {len(msg.data)}'
+            f'Tensor view requires {required_size} bytes, '
+            f'but the buffer has {len(msg.data)}'
         )
-    return shape, strides, dtype, span
-
-
-def _is_cuda_buffer(data: object) -> bool:
-    return isinstance(data, Buffer) and data.backend_type == 'cuda'
+    return TensorMetadata(
+        shape=shape,
+        strides=strides,
+        dtype=dtype,
+        span=span,
+        byte_offset=msg.byte_offset,
+        dtype_code=msg.dtype_code,
+        dtype_bits=msg.dtype_bits,
+        dtype_lanes=msg.dtype_lanes,
+    )
 
 
 def _cuda_available() -> bool:
-    return CudaBuffer is not None and torch.cuda.is_available()
-
-
-def _require_cuda_support() -> None:
-    if not torch.cuda.is_available():
-        raise RuntimeError('CUDA was requested but is not available to PyTorch')
-    if CudaBuffer is None:
-        raise RuntimeError(
-            'CUDA buffer support was not built for torch_conversions'
-        ) from _CUDA_IMPORT_ERROR
-
-
-def _current_cuda_stream() -> int:
-    return torch.cuda.current_stream().cuda_stream
+    try:
+        _registry.for_device(torch.device('cuda'))
+    except RuntimeError:
+        return False
+    return True
 
 
 def allocate_tensor_msg(
@@ -141,13 +138,11 @@ def allocate_tensor_msg(
         raise ValueError('Tensor shape dimensions must be nonnegative')
     if dtype not in _DTYPE_TO_DLPACK:
         raise TypeError(f'Unsupported torch dtype {dtype}')
-    selected_device = torch.device(
-        device if device is not None else ('cuda' if _cuda_available() else 'cpu')
-    )
-    if selected_device.type not in ('cpu', 'cuda'):
-        raise ValueError(f'Unsupported tensor device {selected_device.type}')
-    if selected_device.type == 'cuda':
-        _require_cuda_support()
+    if device is None:
+        selected_device = _registry.default_device()
+    else:
+        selected_device = torch.device(device)
+    backend = _registry.for_device(selected_device)
 
     msg = ExperimentalTensor()
     dtype_code, dtype_bits, dtype_lanes = _DTYPE_TO_DLPACK[dtype]
@@ -158,73 +153,29 @@ def allocate_tensor_msg(
     msg.strides = _contiguous_strides(normalized_shape)
     msg.byte_offset = 0
     byte_count = prod(normalized_shape) * (dtype_bits * dtype_lanes // 8)
-    if selected_device.type == 'cuda':
-        msg.data = CudaBuffer.allocate_buffer(byte_count)
-    else:
-        msg.data = array('B', bytes(byte_count))
+    msg.data = backend.allocate(byte_count, selected_device)
     return msg
 
 
-def from_output_tensor_msg(msg: ExperimentalTensor) -> Optional[torch.Tensor]:
-    """Return a writable tensor view whose lifetime owns the backend write handle."""
+def from_output_tensor_msg(
+    msg: ExperimentalTensor,
+) -> Optional[torch.Tensor]:
+    """Return a writable tensor view that owns its backend write handle."""
     if len(msg.data) == 0:
         return None
-    shape, strides, dtype, span = _metadata(msg)
-    if _is_cuda_buffer(msg.data):
-        _require_cuda_support()
-        capsule = _from_output_dlpack(
-            msg.data,
-            shape,
-            strides,
-            msg.dtype_code,
-            msg.dtype_bits,
-            msg.dtype_lanes,
-            msg.byte_offset,
-            _current_cuda_stream(),
-        )
-        return torch.utils.dlpack.from_dlpack(capsule)
-    if isinstance(msg.data, Buffer):
-        raise ValueError(f'Unsupported buffer backend {msg.data.backend_type!r}')
-    storage = torch.frombuffer(
-        msg.data,
-        dtype=dtype,
-        count=span,
-        offset=msg.byte_offset,
-    )
-    return torch.as_strided(storage, shape, strides)
+    metadata = _metadata(msg)
+    return _registry.for_data(msg.data).from_output(msg.data, metadata)
 
 
 def from_input_tensor_msg(
     msg: ExperimentalTensor,
     clone: bool = True,
 ) -> Optional[torch.Tensor]:
-    """Return an independent tensor or a zero-copy read-only view of a message."""
+    """Return an independent tensor or a zero-copy message view."""
     if len(msg.data) == 0:
         return None
-    shape, strides, dtype, span = _metadata(msg)
-    if _is_cuda_buffer(msg.data):
-        _require_cuda_support()
-        capsule = _from_input_dlpack(
-            msg.data,
-            shape,
-            strides,
-            msg.dtype_code,
-            msg.dtype_bits,
-            msg.dtype_lanes,
-            msg.byte_offset,
-            _current_cuda_stream(),
-        )
-        tensor = torch.utils.dlpack.from_dlpack(capsule)
-    elif isinstance(msg.data, Buffer):
-        raise ValueError(f'Unsupported buffer backend {msg.data.backend_type!r}')
-    else:
-        storage = torch.frombuffer(
-            msg.data,
-            dtype=dtype,
-            count=span,
-            offset=msg.byte_offset,
-        )
-        tensor = torch.as_strided(storage, shape, strides)
+    metadata = _metadata(msg)
+    tensor = _registry.for_data(msg.data).from_input(msg.data, metadata)
     return tensor.clone() if clone else tensor
 
 
@@ -258,13 +209,16 @@ def to_tensor_msg(*args: object) -> ExperimentalTensor:
         if tensor.numel() == 0:
             return msg
     else:
-        raise TypeError('Expected to_tensor_msg(tensor) or to_tensor_msg(msg, tensor)')
+        raise TypeError(
+            'Expected to_tensor_msg(tensor) or to_tensor_msg(msg, tensor)'
+        )
 
     contiguous = tensor.contiguous()
     required_size = contiguous.numel() * contiguous.element_size()
     if required_size > len(msg.data):
         raise ValueError(
-            f'Tensor requires {required_size} bytes, but the buffer has {len(msg.data)}'
+            f'Tensor requires {required_size} bytes, '
+            f'but the buffer has {len(msg.data)}'
         )
     _set_metadata(msg, contiguous)
     output = from_output_tensor_msg(msg)
@@ -274,11 +228,15 @@ def to_tensor_msg(*args: object) -> ExperimentalTensor:
     return msg
 
 
-def set_stream():
-    """Return a context manager selecting a non-default CUDA stream when available."""
-    if not torch.cuda.is_available():
-        return nullcontext()
-    return torch.cuda.stream(torch.cuda.Stream())
+def set_stream(
+    device: Optional[Union[str, torch.device]] = None,
+):
+    """Return a context manager selecting a backend stream when available."""
+    if device is None:
+        selected_device = _registry.default_device()
+    else:
+        selected_device = torch.device(device)
+    return _registry.for_device(selected_device).stream_context()
 
 
 __all__ = [
