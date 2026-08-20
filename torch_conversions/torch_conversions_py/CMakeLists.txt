@@ -28,15 +28,15 @@ if(cuda_buffer_FOUND)
   find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
   find_package(pybind11 REQUIRED)
 
-  pybind11_add_module(_torch_conversions_py
-    src/torch_conversions_py.cpp
+  pybind11_add_module(_cuda_dlpack_bridge
+    src/cuda_dlpack_bridge.cpp
   )
 
-  target_include_directories(_torch_conversions_py PRIVATE
+  target_include_directories(_cuda_dlpack_bridge PRIVATE
     "${TORCH_DLPACK_INCLUDE_DIR}"
   )
 
-  target_link_libraries(_torch_conversions_py PRIVATE
+  target_link_libraries(_cuda_dlpack_bridge PRIVATE
     cuda_buffer::cuda_buffer
     rosidl_buffer::rosidl_buffer
   )
@@ -46,7 +46,7 @@ endif()
 ament_python_install_package(torch_conversions)
 
 if(cuda_buffer_FOUND)
-  install(TARGETS _torch_conversions_py
+  install(TARGETS _cuda_dlpack_bridge
     DESTINATION "${PYTHON_INSTALL_DIR}/torch_conversions"
   )
 endif()

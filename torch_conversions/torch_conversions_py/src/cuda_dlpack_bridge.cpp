@@ -136,7 +136,7 @@ py::capsule make_dlpack(
 
 }  // namespace
 
-PYBIND11_MODULE(_torch_conversions_py, module)
+PYBIND11_MODULE(_cuda_dlpack_bridge, module)
 {
   module.doc() = "DLPack bindings for CUDA-backed tensor messages";
 
