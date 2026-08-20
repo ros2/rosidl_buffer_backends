@@ -15,16 +15,51 @@
 from array import array
 
 import pytest
+
 from tensor_msgs.msg import ExperimentalTensor
+
 import torch
+
 import torch_conversions
 from torch_conversions import allocate_tensor_msg
 from torch_conversions import from_input_tensor_msg
 from torch_conversions import from_output_tensor_msg
+from torch_conversions import set_stream
 from torch_conversions import to_tensor_msg
+from torch_conversions._adapter import TorchConversionRegistry
+from torch_conversions._cpu_adapter import CpuTorchConversionAdapter
 
 
 CUDA_AVAILABLE = torch_conversions._cuda_available()
+
+
+def test_conversion_registry_rejects_duplicate_device():
+    registry = TorchConversionRegistry()
+    adapter = CpuTorchConversionAdapter()
+    registry.register(adapter)
+
+    with pytest.raises(ValueError, match='already registered'):
+        registry.register(adapter)
+
+
+def test_conversion_registry_rejects_unknown_device_and_storage():
+    registry = TorchConversionRegistry()
+    registry.register(CpuTorchConversionAdapter())
+
+    with pytest.raises(ValueError, match='Unsupported tensor device'):
+        registry.for_device(torch.device('meta'))
+    with pytest.raises(ValueError, match='Unsupported tensor storage'):
+        registry.for_data(object())
+
+
+def test_conversion_registry_dispatches_cpu_storage():
+    registry = TorchConversionRegistry()
+    adapter = CpuTorchConversionAdapter()
+    registry.register(adapter)
+
+    assert registry.for_device(torch.device('cpu')) is adapter
+    assert registry.for_data(array('B')) is adapter
+    assert registry.default_device() == torch.device('cpu')
 
 
 @pytest.mark.parametrize(
@@ -59,7 +94,8 @@ def test_cpu_write_read_round_trip():
 
     result = from_input_tensor_msg(msg, clone=False)
 
-    assert torch.equal(result, torch.tensor([10, 20, 30, 40], dtype=torch.int32))
+    expected = torch.tensor([10, 20, 30, 40], dtype=torch.int32)
+    assert torch.equal(result, expected)
 
 
 def test_input_clone_is_independent_and_zero_copy_view_is_shared():
@@ -106,7 +142,8 @@ def test_byte_offset_selects_storage_subregion():
 
     view = from_input_tensor_msg(msg, clone=False)
 
-    assert torch.equal(view, torch.tensor([400, 500, 600, 700], dtype=torch.int32))
+    expected = torch.tensor([400, 500, 600, 700], dtype=torch.int32)
+    assert torch.equal(view, expected)
 
 
 def test_empty_buffer_returns_none():
@@ -182,3 +219,30 @@ def test_cuda_tensor_to_message_round_trip():
     assert msg.data.backend_type == 'cuda'
     assert result.is_cuda
     assert torch.equal(result.cpu(), source.cpu())
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason='CUDA support is unavailable')
+def test_cuda_zero_copy_view_aliases_message_storage():
+    msg = allocate_tensor_msg((8,), torch.float32, 'cuda')
+    output = from_output_tensor_msg(msg)
+    output.copy_(torch.arange(8, dtype=torch.float32, device='cuda'))
+    output_pointer = output.data_ptr()
+    del output
+
+    view = from_input_tensor_msg(msg, clone=False)
+
+    assert view.data_ptr() == output_pointer
+    assert torch.equal(view.cpu(), torch.arange(8, dtype=torch.float32))
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason='CUDA support is unavailable')
+def test_set_stream_selects_non_default_cuda_stream():
+    default_stream = torch.cuda.current_stream().cuda_stream
+
+    with set_stream('cuda'):
+        selected_stream = torch.cuda.current_stream().cuda_stream
+        msg = allocate_tensor_msg((1,), torch.float32, 'cuda')
+        output = from_output_tensor_msg(msg)
+        output.fill_(1)
+
+    assert selected_stream != default_stream
