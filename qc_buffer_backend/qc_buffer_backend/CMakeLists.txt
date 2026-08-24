@@ -37,6 +37,20 @@ pluginlib_export_plugin_description_file(rosidl_buffer_backend qc_buffer_plugin.
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_qc_buffer_backend
+    test/test_qc_buffer_backend.cpp
+  )
+  if(TARGET test_qc_buffer_backend)
+    target_link_libraries(test_qc_buffer_backend
+      ${PROJECT_NAME}
+      qc_buffer::qc_buffer
+      ${qc_buffer_backend_msgs_TARGETS}
+      rosidl_buffer::rosidl_buffer
+      rosidl_buffer_backend::rosidl_buffer_backend
+    )
+  endif()
 endif()
 
 ament_auto_package(USE_SCOPED_HEADER_INSTALL_DIR)
