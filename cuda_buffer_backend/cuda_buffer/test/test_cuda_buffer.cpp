@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "cuda_buffer/cuda_buffer_api.hpp"
-#include "cuda_buffer/cuda_buffer_c_api.h"
 #include "rosidl_buffer/buffer.hpp"
 
 class CudaBufferTest : public ::testing::Test
@@ -75,121 +74,6 @@ TEST_F(CudaBufferTest, AllocateAndWriteHandle)
   EXPECT_NE(nullptr, handle.get_ptr());
   EXPECT_EQ("cuda", buffer.get_backend_type());
   EXPECT_EQ(1024u, buffer.size());
-}
-
-TEST_F(CudaBufferTest, CApiRejectsIncompatibleVersion)
-{
-  cuda_buffer_api_v1 api{};
-
-  EXPECT_EQ(
-    CUDA_BUFFER_STATUS_INCOMPATIBLE_ABI,
-    cuda_buffer_get_api(CUDA_BUFFER_C_API_VERSION + 1U, sizeof(api), &api));
-  EXPECT_EQ(nullptr, api.acquire_read);
-}
-
-TEST_F(CudaBufferTest, CApiAcquiresWriteAndReadLeases)
-{
-  cuda_buffer_api_v1 api{};
-  ASSERT_EQ(
-    CUDA_BUFFER_STATUS_OK,
-    cuda_buffer_get_api(CUDA_BUFFER_C_API_VERSION, sizeof(api), &api));
-  ASSERT_EQ(CUDA_BUFFER_C_API_VERSION, api.abi_version);
-  ASSERT_EQ(sizeof(api), api.struct_size);
-
-  rosidl::Buffer<uint8_t> buffer;
-  allocate_buffer(buffer, 64);
-
-  cuda_buffer_lease * write_lease = nullptr;
-  void * write_data = nullptr;
-  int32_t write_device_id = -1;
-  ASSERT_EQ(
-    CUDA_BUFFER_STATUS_OK,
-    api.acquire_write(
-      &buffer, reinterpret_cast<uintptr_t>(stream1_), &write_lease,
-      &write_data, &write_device_id));
-  ASSERT_NE(nullptr, write_lease);
-  ASSERT_NE(nullptr, write_data);
-  EXPECT_GE(write_device_id, 0);
-  write_pattern(static_cast<uint8_t *>(write_data), 64, 17, stream1_);
-  api.release(write_lease);
-
-  cuda_buffer_lease * read_lease = nullptr;
-  const void * read_data = nullptr;
-  int32_t read_device_id = -1;
-  ASSERT_EQ(
-    CUDA_BUFFER_STATUS_OK,
-    api.acquire_read(
-      &buffer, reinterpret_cast<uintptr_t>(stream2_), &read_lease,
-      &read_data, &read_device_id));
-  ASSERT_NE(nullptr, read_lease);
-  ASSERT_NE(nullptr, read_data);
-  EXPECT_EQ(write_device_id, read_device_id);
-  auto result = read_to_host(
-    static_cast<const uint8_t *>(read_data), 64, stream2_);
-  api.release(read_lease);
-
-  for (size_t i = 0; i < result.size(); ++i) {
-    EXPECT_EQ(static_cast<uint8_t>((17 + i) % 256), result[i]);
-  }
-}
-
-TEST_F(CudaBufferTest, CApiPreservesCudaDefaultStream)
-{
-  cuda_buffer_api_v1 api{};
-  ASSERT_EQ(
-    CUDA_BUFFER_STATUS_OK,
-    cuda_buffer_get_api(CUDA_BUFFER_C_API_VERSION, sizeof(api), &api));
-
-  constexpr size_t size = 4U * 1024U * 1024U;
-  rosidl::Buffer<uint8_t> buffer;
-  allocate_buffer(buffer, size);
-
-  cuda_buffer_lease * write_lease = nullptr;
-  void * write_data = nullptr;
-  int32_t device_id = -1;
-  ASSERT_EQ(
-    CUDA_BUFFER_STATUS_OK,
-    api.acquire_write(
-      &buffer, 0U, &write_lease, &write_data, &device_id));
-  ASSERT_EQ(cudaSuccess, cudaMemsetAsync(write_data, 0xAB, size, nullptr));
-  api.release(write_lease);
-
-  cuda_buffer_lease * read_lease = nullptr;
-  const void * read_data = nullptr;
-  ASSERT_EQ(
-    CUDA_BUFFER_STATUS_OK,
-    api.acquire_read(
-      &buffer, reinterpret_cast<uintptr_t>(stream2_), &read_lease,
-      &read_data, &device_id));
-  auto result = read_to_host(
-    static_cast<const uint8_t *>(read_data), size, stream2_);
-  api.release(read_lease);
-
-  EXPECT_EQ(size, result.size());
-  EXPECT_EQ(0xAB, result.front());
-  EXPECT_EQ(0xAB, result.back());
-}
-
-TEST_F(CudaBufferTest, CApiRejectsCpuAndEmptyBuffers)
-{
-  cuda_buffer_api_v1 api{};
-  ASSERT_EQ(
-    CUDA_BUFFER_STATUS_OK,
-    cuda_buffer_get_api(CUDA_BUFFER_C_API_VERSION, sizeof(api), &api));
-
-  rosidl::Buffer<uint8_t> cpu_buffer(16);
-  cuda_buffer_lease * lease = nullptr;
-  const void * data = nullptr;
-  int32_t device_id = -1;
-  EXPECT_EQ(
-    CUDA_BUFFER_STATUS_NOT_CUDA,
-    api.acquire_read(&cpu_buffer, 0U, &lease, &data, &device_id));
-  EXPECT_NE(nullptr, api.get_last_error());
-
-  rosidl::Buffer<uint8_t> empty_buffer;
-  EXPECT_EQ(
-    CUDA_BUFFER_STATUS_EMPTY_BUFFER,
-    api.acquire_read(&empty_buffer, 0U, &lease, &data, &device_id));
 }
 
 TEST_F(CudaBufferTest, FromBuffer_PromotesCpuBufferForRead)

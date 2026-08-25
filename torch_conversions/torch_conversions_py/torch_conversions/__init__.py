@@ -14,6 +14,7 @@
 
 """Convert ExperimentalTensor messages to and from PyTorch tensors."""
 
+from importlib.metadata import entry_points
 from math import prod
 from typing import Optional
 from typing import overload
@@ -27,7 +28,6 @@ import torch
 from torch_conversions._adapter import TensorMetadata
 from torch_conversions._adapter import TorchConversionRegistry
 from torch_conversions._cpu_adapter import CpuTorchConversionAdapter
-from torch_conversions._cuda_adapter import CudaTorchConversionAdapter
 
 
 _DTYPE_TO_DLPACK = {
@@ -46,7 +46,30 @@ _DLPACK_TO_DTYPE = {value: key for key, value in _DTYPE_TO_DLPACK.items()}
 
 _registry = TorchConversionRegistry()
 _registry.register(CpuTorchConversionAdapter())
-_registry.register(CudaTorchConversionAdapter())
+
+for _entry_point in entry_points(group='torch_conversions.adapters'):
+    _entry_point.load()(_registry)
+
+
+def _adapter_for_device(device: torch.device):
+    try:
+        return _registry.for_device(device)
+    except ValueError as error:
+        raise RuntimeError(
+            f'Tensor device {device.type!r} requires an installed '
+            'conversion adapter'
+        ) from error
+
+
+def _adapter_for_data(data: object):
+    try:
+        return _registry.for_data(data)
+    except ValueError as error:
+        backend_type = getattr(data, 'backend_type', type(data).__name__)
+        raise RuntimeError(
+            f'Tensor storage {backend_type!r} requires an installed '
+            'conversion adapter'
+        ) from error
 
 
 def _contiguous_strides(shape: Sequence[int]) -> list[int]:
@@ -119,10 +142,10 @@ def _metadata(
     )
 
 
-def _cuda_available() -> bool:
+def _adapter_available(device: Union[str, torch.device]) -> bool:
     try:
-        _registry.for_device(torch.device('cuda'))
-    except RuntimeError:
+        _registry.for_device(torch.device(device))
+    except (RuntimeError, ValueError):
         return False
     return True
 
@@ -132,7 +155,7 @@ def allocate_tensor_msg(
     dtype: torch.dtype,
     device: Optional[Union[str, torch.device]] = None,
 ) -> ExperimentalTensor:
-    """Allocate a tensor message on CPU or CUDA and populate its metadata."""
+    """Allocate a tensor message and populate its metadata."""
     normalized_shape = list(shape)
     if any(dimension < 0 for dimension in normalized_shape):
         raise ValueError('Tensor shape dimensions must be nonnegative')
@@ -142,7 +165,7 @@ def allocate_tensor_msg(
         selected_device = _registry.default_device()
     else:
         selected_device = torch.device(device)
-    backend = _registry.for_device(selected_device)
+    backend = _adapter_for_device(selected_device)
 
     msg = ExperimentalTensor()
     dtype_code, dtype_bits, dtype_lanes = _DTYPE_TO_DLPACK[dtype]
@@ -164,7 +187,7 @@ def from_output_tensor_msg(
     if len(msg.data) == 0:
         return None
     metadata = _metadata(msg)
-    return _registry.for_data(msg.data).from_output(msg.data, metadata)
+    return _adapter_for_data(msg.data).from_output(msg.data, metadata)
 
 
 def from_input_tensor_msg(
@@ -175,7 +198,7 @@ def from_input_tensor_msg(
     if len(msg.data) == 0:
         return None
     metadata = _metadata(msg)
-    tensor = _registry.for_data(msg.data).from_input(msg.data, metadata)
+    tensor = _adapter_for_data(msg.data).from_input(msg.data, metadata)
     return tensor.clone() if clone else tensor
 
 
@@ -236,7 +259,7 @@ def set_stream(
         selected_device = _registry.default_device()
     else:
         selected_device = torch.device(device)
-    return _registry.for_device(selected_device).stream_context()
+    return _adapter_for_device(selected_device).stream_context()
 
 
 __all__ = [

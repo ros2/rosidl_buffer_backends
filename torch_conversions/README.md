@@ -19,7 +19,8 @@ and interoperate over the wire without re-encoding shape / dtype metadata.
 |---|---|
 | `tensor_msgs` | `ExperimentalTensor.msg` definition: DLPack-aligned `{dtype_code, dtype_bits, dtype_lanes}`, `shape[]`, `strides[]`, `byte_offset`, `data[]`. |
 | `torch_conversions` | Header-only library: allocation, `at::Tensor` ↔ `ExperimentalTensor.msg` conversion, DLPack export, and CUDA stream helpers. |
-| `torch_conversions_py` | Python API for CPU and CUDA `torch.Tensor` conversion with scoped DLPack ownership. |
+| `torch_conversions_py` | Platform-independent Python API and CPU `torch.Tensor` conversions. |
+| `torch_conversions_py_cuda_plugin` | Optional CUDA adapter with scoped DLPack ownership. |
 
 The `uint8[] data` field maps to `rosidl::Buffer<uint8_t>`,
 so storage and transport are delegated to whichever buffer backend is
@@ -124,11 +125,13 @@ and updates shape / strides / dtype metadata to match `t`. Use
 
 ### Python
 
-CPU-backed conversions are always available. CUDA-backed conversions are
-enabled when the package is built with `cuda_buffer` and
-`pytorch_vendor` provides a CUDA-enabled distribution. The Python and C++
-Torch vendors use the same default version and CUDA selection policy. Explicit
-CUDA requests raise an error when either capability is unavailable.
+CPU-backed conversions are available from `torch_conversions_py`. Install
+`torch_conversions_py_cuda_plugin` for CUDA-backed conversions. The CUDA
+package pulls in the core and CUDA buffer dependencies and requires a
+CUDA-enabled distribution from `pytorch_vendor`. Installed adapters are
+discovered through the `torch_conversions.adapters` Python entry-point group.
+Explicit CUDA requests raise an error when the CUDA package or CUDA-enabled
+PyTorch is unavailable.
 
 ```python
 import torch

@@ -15,25 +15,18 @@
 """CUDA adapter for PyTorch conversions."""
 
 from contextlib import nullcontext
-from functools import lru_cache
+
+from cuda_buffer import CudaBuffer
 
 import torch
 
 from torch_conversions._adapter import TensorMetadata
-
-
-@lru_cache(maxsize=1)
-def _load_cuda_support():
-    from cuda_buffer import CudaBuffer
-    from torch_conversions._cuda_dlpack_bridge import _cuda_buffer_available
-    from torch_conversions._cuda_dlpack_bridge import _from_input_dlpack
-    from torch_conversions._cuda_dlpack_bridge import _from_output_dlpack
-
-    if not _cuda_buffer_available():
-        raise RuntimeError(
-            'CUDA buffer support is not installed or has an incompatible C ABI'
-        )
-    return CudaBuffer, _from_input_dlpack, _from_output_dlpack
+from torch_conversions_cuda_plugin._cuda_dlpack_bridge import (
+    _from_input_dlpack
+)
+from torch_conversions_cuda_plugin._cuda_dlpack_bridge import (
+    _from_output_dlpack
+)
 
 
 class CudaTorchConversionAdapter:
@@ -44,20 +37,14 @@ class CudaTorchConversionAdapter:
     priority = 100
 
     def is_available(self) -> bool:
-        if not torch.cuda.is_available():
-            return False
-        try:
-            _load_cuda_support()
-        except (ImportError, RuntimeError):
-            return False
-        return True
+        return torch.cuda.is_available()
 
     def matches(self, data: object) -> bool:
         del data
         return False
 
     def allocate(self, byte_count: int, device: torch.device) -> object:
-        CudaBuffer, _, _ = self._require()
+        self._require()
         if device.index is None:
             device_context = nullcontext()
         else:
@@ -68,8 +55,8 @@ class CudaTorchConversionAdapter:
     def from_input(
         self, data: object, metadata: TensorMetadata
     ) -> torch.Tensor:
-        _, from_input_dlpack, _ = self._require()
-        capsule = from_input_dlpack(
+        self._require()
+        capsule = _from_input_dlpack(
             data,
             list(metadata.shape),
             list(metadata.strides),
@@ -84,8 +71,8 @@ class CudaTorchConversionAdapter:
     def from_output(
         self, data: object, metadata: TensorMetadata
     ) -> torch.Tensor:
-        _, _, from_output_dlpack = self._require()
-        capsule = from_output_dlpack(
+        self._require()
+        capsule = _from_output_dlpack(
             data,
             list(metadata.shape),
             list(metadata.strides),
@@ -102,21 +89,13 @@ class CudaTorchConversionAdapter:
         return torch.cuda.stream(torch.cuda.Stream())
 
     def unavailable_error(self) -> RuntimeError:
-        if not torch.cuda.is_available():
-            return RuntimeError(
-                'CUDA was requested but is not available to PyTorch'
-            )
         return RuntimeError(
-            'CUDA buffer support is not installed or has an incompatible C ABI'
+            'CUDA was requested but is not available to PyTorch'
         )
 
-    def _require(self):
-        if not torch.cuda.is_available():
+    def _require(self) -> None:
+        if not self.is_available():
             raise self.unavailable_error()
-        try:
-            return _load_cuda_support()
-        except (ImportError, RuntimeError) as error:
-            raise self.unavailable_error() from error
 
     @staticmethod
     def _current_stream() -> int:
