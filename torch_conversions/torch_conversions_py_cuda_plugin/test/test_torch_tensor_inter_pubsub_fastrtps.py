@@ -34,7 +34,7 @@ from torch_conversions import from_input_tensor_msg
 from torch_conversions import set_stream
 
 
-CUDA_AVAILABLE = torch_conversions._cuda_available()
+CUDA_AVAILABLE = torch_conversions._adapter_available('cuda')
 TENSOR_SHAPE = (2, 3, 4)
 TENSOR_VALUES = (
     3, 17, 29, 43, 59, 71, 89, 101, 113, 127, 139, 149,
@@ -59,7 +59,7 @@ def generate_test_description():
         ])
 
     publisher = Node(
-        package='torch_conversions_py',
+        package='torch_conversions_py_cuda_plugin',
         executable='torch_tensor_publisher_node',
         output='screen',
         parameters=[{

@@ -26,7 +26,9 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
   `rosidl::Buffer` backend is registered (CUDA when available, CPU
   otherwise).
 - **torch_conversions_py** -- Python conversions between
-  `tensor_msgs/ExperimentalTensor` and `torch.Tensor` for CPU and CUDA storage.
+  `tensor_msgs/ExperimentalTensor` and CPU `torch.Tensor` storage.
+- **torch_conversions_py_cuda_plugin** -- Optional CUDA adapter for
+  `torch_conversions_py`, including zero-copy DLPack conversion.
 
 ## Deb build status
 
