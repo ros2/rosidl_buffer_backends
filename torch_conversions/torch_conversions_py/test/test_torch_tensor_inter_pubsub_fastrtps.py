@@ -50,10 +50,14 @@ def _expected_tensor(device):
     ).reshape(TENSOR_SHAPE)
 
 
-@pytest.mark.skipif(not CUDA_AVAILABLE, reason='CUDA support is unavailable')
 @pytest.mark.launch_test
 @launch_testing.markers.keep_alive
 def generate_test_description():
+    if not CUDA_AVAILABLE:
+        return LaunchDescription([
+            launch_testing.actions.ReadyToTest(),
+        ])
+
     publisher = Node(
         package='torch_conversions_py',
         executable='torch_tensor_publisher_node',
@@ -73,6 +77,7 @@ def generate_test_description():
     ])
 
 
+@unittest.skipUnless(CUDA_AVAILABLE, 'CUDA support is unavailable')
 class TestTorchTensorInterProcess(unittest.TestCase):
 
     @classmethod
@@ -136,6 +141,7 @@ class TestTorchTensorInterProcess(unittest.TestCase):
 
 
 @launch_testing.post_shutdown_test()
+@unittest.skipUnless(CUDA_AVAILABLE, 'CUDA support is unavailable')
 class TestTorchTensorInterProcessShutdown(unittest.TestCase):
 
     def test_exit_codes(self, proc_info):

@@ -33,11 +33,12 @@ if(cuda_buffer_FOUND)
   )
 
   target_include_directories(_cuda_dlpack_bridge PRIVATE
+    ${cuda_buffer_INCLUDE_DIRS}
     "${TORCH_DLPACK_INCLUDE_DIR}"
   )
 
   target_link_libraries(_cuda_dlpack_bridge PRIVATE
-    cuda_buffer::cuda_buffer
+    ${CMAKE_DL_LIBS}
     rosidl_buffer::rosidl_buffer
   )
 endif()
@@ -63,6 +64,11 @@ if(BUILD_TESTING)
   )
 
   if(cuda_buffer_FOUND)
+    ament_add_pytest_test(test_optional_cuda_runtime
+      test/test_optional_cuda_runtime.py
+      TIMEOUT 90
+    )
+
     install(PROGRAMS test/torch_tensor_publisher_node.py
       DESTINATION "lib/${PROJECT_NAME}"
       RENAME torch_tensor_publisher_node

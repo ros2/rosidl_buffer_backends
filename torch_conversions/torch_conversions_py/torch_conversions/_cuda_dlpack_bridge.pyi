@@ -17,6 +17,8 @@ from typing import Sequence
 from rosidl_buffer import Buffer
 
 
+def _cuda_buffer_available() -> bool: ...
+
 def _from_input_dlpack(
     buffer: Buffer,
     shape: Sequence[int],
