@@ -32,6 +32,7 @@ colcon test-result --verbose
 |---|---|
 | `cuda_buffer` | Core CUDA buffer implementation: memory pool, IPC manager, host endpoint manager, and user-facing `allocate_buffer` / `from_input_buffer` / `from_output_buffer` / `to_buffer` APIs |
 | `cuda_buffer_py` | Python CUDA buffer allocation plus scoped read/write handles for rclpy publishers and subscribers |
+| `cuda_buffer_rs` | Rust bindings over the `cuda_buffer_c.h` C ABI: raw FFI plus RAII read/write guards on opaque buffer pointers |
 | `cuda_buffer_backend` | Plugin registration via `pluginlib`, endpoint discovery, and descriptor serialization |
 | `cuda_buffer_backend_msgs` | ROS 2 message definition for `CudaBufferDescriptor` |
 
@@ -240,6 +241,36 @@ def callback(msg):
     else:
         host_image_bytes = bytes(msg.data)
 ```
+
+### Rust
+
+`cuda_buffer_c.h` exposes the allocation and scoped-access subset of the C++ API
+through an exception-safe C ABI, and the `cuda_buffer_rs` crate wraps it in RAII
+guards. Buffers stay opaque `rosidl::Buffer<uint8_t>` pointers and streams stay
+raw `cudaStream_t` values, so the crate does not depend on any Rust CUDA
+ecosystem crate:
+
+```rust
+use cuda_buffer_rs::{CudaBuffer, CudaStream};
+
+let stream = unsafe { CudaStream::from_raw(consumer_stream) };
+let mut buffer = CudaBuffer::allocate(height * step)?;
+
+{
+    let guard = buffer.write(stream)?;
+    produce_device_data(guard.device_ptr(), guard.len(), stream.as_raw());
+}
+
+let guard = buffer.read(stream)?;
+consume_device_data(guard.device_ptr(), guard.len(), stream.as_raw());
+```
+
+Guards expose a device pointer rather than a slice, and dropping a guard records
+the write or read event exactly like the C++ handles. `CudaBuffer::write` on a
+buffer adopted from non-CUDA storage promotes it and adopts the new allocation,
+so `CudaBuffer::as_ptr()` afterwards reports the pointer that must be published.
+Rust message integration still depends on the `rosidl_buffer` C ABI and
+`rclrs` work described in the Rust native Buffer design.
 
 ## IPC Behavior
 
