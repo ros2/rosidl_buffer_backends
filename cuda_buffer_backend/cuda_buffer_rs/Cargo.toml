@@ -1,0 +1,18 @@
+[package]
+name = "cuda_buffer_rs"
+version = "0.1.0"
+authors = ["Yuankun Zhu <yuankunz@nvidia.com>"]
+edition = "2021"
+license = "Apache-2.0"
+description = "Rust bindings for the CUDA-backed rosidl::Buffer C ABI"
+rust-version = "1.75"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rosidl_runtime_rs = "0.6"
+
+[dev-dependencies]
+rclrs = "0.7"
+std_msgs = "*"

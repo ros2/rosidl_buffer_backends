@@ -35,6 +35,7 @@ find_package(CUDAToolkit REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/cuda_buffer.cpp
+  src/cuda_buffer_c.cpp
   src/cuda_buffer_impl.cpp
   src/cuda_buffer_ipc_manager.cpp
   src/cuda_memory_pool.cpp
@@ -89,6 +90,19 @@ if(BUILD_TESTING)
   )
   if(TARGET test_cuda_buffer)
     target_link_libraries(test_cuda_buffer
+      ${PROJECT_NAME}
+      rosidl_buffer::rosidl_buffer
+      CUDA::cudart
+      CUDA::cuda_driver
+      rt
+    )
+  endif()
+
+  ament_add_gtest(test_cuda_buffer_c
+    test/test_cuda_buffer_c.cpp
+  )
+  if(TARGET test_cuda_buffer_c)
+    target_link_libraries(test_cuda_buffer_c
       ${PROJECT_NAME}
       rosidl_buffer::rosidl_buffer
       CUDA::cudart
