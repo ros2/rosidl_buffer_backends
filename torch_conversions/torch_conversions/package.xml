@@ -4,7 +4,7 @@
   <name>torch_conversions</name>
   <version>0.1.2</version>
   <description>Header-only helper library that converts between a
-  tensor_msgs/ExperimentalTensor message and an at::Tensor backed by rosidl::Buffer storage.</description>
+  tensor_msgs/ExperimentalTensor or sensor_msgs/Image message and an at::Tensor backed by rosidl::Buffer storage.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -16,11 +16,13 @@
   <depend>rcutils</depend>
   <depend>rmw</depend>
   <depend>rosidl_buffer</depend>
+  <depend>sensor_msgs</depend>
   <depend>tensor_msgs</depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>launch_ros</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
   <test_depend>rclcpp</test_depend>
   <test_depend>rclcpp_components</test_depend>

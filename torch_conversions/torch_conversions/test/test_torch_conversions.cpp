@@ -19,7 +19,16 @@
 
 #include "torch_conversions/torch_conversions.hpp"
 
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+#include <torch/cuda.h>
+#endif
+
 using torch_conversions::TensorMsg;
+using torch_conversions::ImageMsg;
+using torch_conversions::allocate_image_msg;
+using torch_conversions::from_input_image_msg;
+using torch_conversions::from_output_image_msg;
+using torch_conversions::to_image_msg;
 using torch_conversions::allocate_tensor_msg;
 using torch_conversions::from_input_tensor_msg;
 using torch_conversions::from_output_tensor_msg;
@@ -259,6 +268,147 @@ TEST(TorchTensorBridge, DlpackPtrFreesOnScopeExit)
   ASSERT_NE(raw, nullptr);
   raw->deleter(raw);  // caller takes over ownership
 }
+
+TEST(TorchImageBridge, AllocateCpuImageInitializesMetadataAndStorage)
+{
+  auto msg = allocate_image_msg(2, 3, "rgb8", c10::kCPU);
+
+  EXPECT_EQ(msg->height, 2u);
+  EXPECT_EQ(msg->width, 3u);
+  EXPECT_EQ(msg->encoding, "rgb8");
+  EXPECT_EQ(msg->is_bigendian, 0u);
+  EXPECT_EQ(msg->step, 9u);
+  EXPECT_EQ(msg->data.size(), 18u);
+  EXPECT_EQ(msg->data.get_backend_type(), "cpu");
+}
+
+TEST(TorchImageBridge, WritableAndReadOnlyViewsRoundTripAsHwc)
+{
+  auto msg = allocate_image_msg(2, 3, "rgb8", c10::kCPU);
+  {
+    at::Tensor output = from_output_image_msg(*msg);
+    EXPECT_EQ(output.sizes(), (std::vector<int64_t>{2, 3, 3}));
+    EXPECT_EQ(output.strides(), (std::vector<int64_t>{9, 3, 1}));
+    EXPECT_EQ(output.scalar_type(), at::kByte);
+    output.copy_(torch::arange(0, 18, at::kByte).reshape({2, 3, 3}));
+  }
+
+  at::Tensor view = from_input_image_msg(*msg, false);
+  EXPECT_EQ(view.data_ptr<uint8_t>(), msg->data.data());
+  EXPECT_TRUE(torch::equal(
+    view.flatten(), torch::arange(0, 18, at::kByte)));
+}
+
+TEST(TorchImageBridge, PaddedRowsProduceStridedHwcView)
+{
+  ImageMsg msg;
+  msg.height = 2;
+  msg.width = 2;
+  msg.encoding = "rgb8";
+  msg.step = 8;
+  msg.data.resize(16);
+
+  at::Tensor view = from_output_image_msg(msg);
+  EXPECT_EQ(view.sizes(), (std::vector<int64_t>{2, 2, 3}));
+  EXPECT_EQ(view.strides(), (std::vector<int64_t>{8, 3, 1}));
+  view.fill_(7);
+  EXPECT_EQ(msg.data[5], 7u);
+  EXPECT_EQ(msg.data[6], 0u);
+  EXPECT_EQ(msg.data[7], 0u);
+  EXPECT_EQ(msg.data[8], 7u);
+}
+
+TEST(TorchImageBridge, CopyPreservesImageMetadataAndHeader)
+{
+  auto msg = allocate_image_msg(2, 3, "rgb8", c10::kCPU);
+  msg->header.frame_id = "camera";
+  at::Tensor source = torch::arange(0, 18, at::kByte).reshape({2, 3, 3});
+
+  to_image_msg(*msg, source);
+
+  EXPECT_EQ(msg->header.frame_id, "camera");
+  EXPECT_EQ(msg->encoding, "rgb8");
+  EXPECT_EQ(msg->step, 9u);
+  EXPECT_TRUE(torch::equal(from_input_image_msg(*msg, false), source));
+}
+
+TEST(TorchImageBridge, AllocatingCopyDerivesDimensionsFromHwcTensor)
+{
+  at::Tensor source = torch::ones({4, 5, 3}, at::kByte);
+  auto msg = to_image_msg(source, "bgr8");
+
+  EXPECT_EQ(msg->height, 4u);
+  EXPECT_EQ(msg->width, 5u);
+  EXPECT_EQ(msg->step, 15u);
+  EXPECT_EQ(msg->encoding, "bgr8");
+  EXPECT_TRUE(torch::equal(from_input_image_msg(*msg, false), source));
+}
+
+TEST(TorchImageBridge, SignedByteEncodingProducesCharTensor)
+{
+  auto msg = allocate_image_msg(2, 3, "8SC1", c10::kCPU);
+  EXPECT_EQ(from_output_image_msg(*msg).scalar_type(), at::kChar);
+}
+
+TEST(TorchImageBridge, RejectsInvalidImageBoundsAndEncoding)
+{
+  ImageMsg short_step;
+  short_step.height = 2;
+  short_step.width = 3;
+  short_step.encoding = "rgb8";
+  short_step.step = 8;
+  short_step.data.resize(16);
+  EXPECT_THROW(from_input_image_msg(short_step, false), std::runtime_error);
+
+  ImageMsg short_data;
+  short_data.height = 2;
+  short_data.width = 3;
+  short_data.encoding = "rgb8";
+  short_data.step = 9;
+  short_data.data.resize(17);
+  EXPECT_THROW(from_input_image_msg(short_data, false), std::runtime_error);
+
+  EXPECT_THROW(allocate_image_msg(2, 3, "mono16", c10::kCPU), std::runtime_error);
+  EXPECT_THROW(allocate_image_msg(2, 3, "nv12", c10::kCPU), std::runtime_error);
+}
+
+TEST(TorchImageBridge, RejectsTensorShapeAndDtypeMismatch)
+{
+  auto msg = allocate_image_msg(2, 3, "rgb8", c10::kCPU);
+  EXPECT_THROW(to_image_msg(*msg, torch::zeros({2, 3}, at::kByte)), std::runtime_error);
+  EXPECT_THROW(to_image_msg(*msg, torch::zeros({2, 3, 3}, at::kFloat)), std::runtime_error);
+  EXPECT_THROW(to_image_msg(torch::zeros({2, 3}, at::kByte), "rgb8"), std::runtime_error);
+}
+
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+TEST(TorchImageBridge, CudaStorageViewsAndAsyncCopyRoundTrip)
+{
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA is not available at runtime";
+  }
+
+  auto stream_guard = torch_conversions::set_stream();
+  auto msg = allocate_image_msg(2, 3, "rgb8", c10::kCUDA);
+  EXPECT_EQ(msg->data.get_backend_type(), "cuda");
+
+  at::Tensor output = from_output_image_msg(*msg);
+  EXPECT_TRUE(output.is_cuda());
+  output = {};  // Release the WriteHandle before acquiring subscriber input.
+
+  at::Tensor source = torch::arange(
+    0, 18, torch::TensorOptions().dtype(at::kByte).device(c10::kCUDA))
+    .reshape({2, 3, 3});
+  to_image_msg(*msg, source);
+
+  at::Tensor input = from_input_image_msg(*msg, false);
+  EXPECT_TRUE(input.is_cuda());
+  EXPECT_EQ(input.sizes(), (std::vector<int64_t>{2, 3, 3}));
+
+  // Synchronization belongs to the materializing test/sink, not conversions.
+  torch::cuda::synchronize();
+  EXPECT_TRUE(torch::equal(input.cpu(), source.cpu()));
+}
+#endif
 
 int main(int argc, char ** argv)
 {

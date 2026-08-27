@@ -21,8 +21,10 @@
 #include <rcutils/logging_macros.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -31,6 +33,8 @@
 #include <vector>
 
 #include "rosidl_buffer/buffer.hpp"
+#include "sensor_msgs/image_encodings.hpp"
+#include "sensor_msgs/msg/image.hpp"
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
 #if __has_include("cuda_buffer/cuda_buffer_api.hpp")
@@ -44,6 +48,7 @@ namespace torch_conversions
 {
 
 using TensorMsg = tensor_msgs::msg::ExperimentalTensor;
+using ImageMsg = sensor_msgs::msg::Image;
 
 namespace detail
 {
@@ -170,6 +175,84 @@ inline int64_t numel_of(const std::vector<int64_t> & shape)
     n *= d;
   }
   return n;
+}
+
+struct ImageMetadata
+{
+  std::vector<int64_t> shape;
+  std::vector<int64_t> strides;
+  at::ScalarType dtype;
+  size_t byte_count;
+};
+
+inline size_t checked_multiply(size_t lhs, size_t rhs, const char * context)
+{
+  if (rhs != 0 && lhs > std::numeric_limits<size_t>::max() / rhs) {
+    throw std::runtime_error(
+            std::string("torch_conversions::") + context + ": image size overflows size_t");
+  }
+  return lhs * rhs;
+}
+
+/// Resolve native Image metadata into an HWC torch view.
+/// Only byte-oriented packed encodings are supported because PyTorch does
+/// not have a portable dtype corresponding to every ROS image encoding.
+inline ImageMetadata image_metadata(const ImageMsg & msg, const char * context)
+{
+  if (msg.encoding.empty()) {
+    throw std::runtime_error(
+            std::string("torch_conversions::") + context + ": Image.encoding is empty");
+  }
+  if (sensor_msgs::image_encodings::isPlanar(msg.encoding)) {
+    throw std::runtime_error(
+            std::string("torch_conversions::") + context +
+            ": planar Image encoding " + msg.encoding + " cannot be represented as HWC");
+  }
+
+  int channels;
+  int bits;
+  try {
+    channels = sensor_msgs::image_encodings::numChannels(msg.encoding);
+    bits = sensor_msgs::image_encodings::bitDepth(msg.encoding);
+  } catch (const std::runtime_error & error) {
+    throw std::runtime_error(
+            std::string("torch_conversions::") + context + ": " + error.what());
+  }
+  if (channels <= 0) {
+    throw std::runtime_error(
+            std::string("torch_conversions::") + context +
+            ": encoding has a non-positive channel count");
+  }
+  if (bits != 8) {
+    throw std::runtime_error(
+            std::string("torch_conversions::") + context + ": Image encoding " +
+            msg.encoding + " has " + std::to_string(bits) +
+            "-bit channels; only byte-oriented encodings are supported");
+  }
+
+  const bool signed_bytes = msg.encoding.rfind("8SC", 0) == 0;
+  const size_t packed_row = checked_multiply(
+    static_cast<size_t>(msg.width), static_cast<size_t>(channels), context);
+  if (msg.step < packed_row) {
+    throw std::runtime_error(
+            std::string("torch_conversions::") + context + ": Image.step (" +
+            std::to_string(msg.step) + ") is smaller than the packed row size (" +
+            std::to_string(packed_row) + ")");
+  }
+  const size_t byte_count = checked_multiply(
+    static_cast<size_t>(msg.height), static_cast<size_t>(msg.step), context);
+  if (msg.data.size() < byte_count) {
+    throw std::runtime_error(
+            std::string("torch_conversions::") + context + ": Image.data has " +
+            std::to_string(msg.data.size()) + " bytes, but height * step requires " +
+            std::to_string(byte_count));
+  }
+
+  return ImageMetadata{
+    {static_cast<int64_t>(msg.height), static_cast<int64_t>(msg.width), channels},
+    {static_cast<int64_t>(msg.step), channels, 1},
+    signed_bytes ? at::kChar : at::kByte,
+    byte_count};
 }
 
 #ifdef TORCH_CONVERSIONS_HAS_CUDA
@@ -386,6 +469,118 @@ inline DLManagedTensor * make_output_dlpack(TensorMsg & msg)
 
 #endif  // TORCH_CONVERSIONS_HAS_CUDA
 
+inline void populate_image_dl_tensor(
+  DLManagedTensor & dlm,
+  const ImageMetadata & metadata,
+  const DlpackContext & ctx,
+  void * data_ptr,
+  int32_t dev_type,
+  int32_t dev_id)
+{
+  dlm.dl_tensor.data = data_ptr;
+  dlm.dl_tensor.device = DLDevice{static_cast<DLDeviceType>(dev_type), dev_id};
+  dlm.dl_tensor.ndim = static_cast<int32_t>(ctx.shape.size());
+  dlm.dl_tensor.dtype = dl_dtype_from_scalar(metadata.dtype);
+  dlm.dl_tensor.shape = const_cast<int64_t *>(ctx.shape.data());
+  dlm.dl_tensor.strides = const_cast<int64_t *>(ctx.strides.data());
+  dlm.dl_tensor.byte_offset = 0;
+}
+
+/// Export a read-only HWC DLPack view over Image.data.
+inline DLManagedTensor * make_input_image_dlpack(
+  const ImageMsg & msg
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+  , cudaStream_t consumer_stream = nullptr
+#endif
+)
+{
+  const auto metadata = image_metadata(msg, "from_input_image_msg");
+  auto ctx = std::make_unique<DlpackContext>();
+  ctx->shape = metadata.shape;
+  ctx->strides = metadata.strides;
+
+  void * data_ptr = nullptr;
+  int32_t dev_type = kDLCPU;
+  int32_t dev_id = 0;
+  const std::string & backend = msg.data.get_backend_type();
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+  if (backend == "cuda") {
+    const auto * cuda_impl =
+      dynamic_cast<const cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(
+      msg.data.get_impl());
+    if (!cuda_impl) {
+      throw std::runtime_error(
+              "torch_conversions::from_input_image_msg: cuda backend but not CudaBufferImpl");
+    }
+    ctx->rh = std::make_shared<cuda_buffer_backend::ReadHandle>(
+      cuda_impl->get_cuda_buffer().get_read_handle(consumer_stream));
+    data_ptr = const_cast<void *>(static_cast<const void *>(ctx->rh->get_ptr()));
+    dev_type = kDLCUDA;
+    dev_id = cuda_impl->get_device_id();
+  } else  // NOLINT(readability/braces)
+#endif
+  if (backend == "cpu") {
+    data_ptr = const_cast<void *>(static_cast<const void *>(msg.data.data()));
+  } else {
+    throw std::runtime_error(
+            "torch_conversions::from_input_image_msg: unsupported backend " + backend);
+  }
+
+  auto * dlm = new DLManagedTensor;
+  populate_image_dl_tensor(*dlm, metadata, *ctx, data_ptr, dev_type, dev_id);
+  dlm->manager_ctx = ctx.release();
+  dlm->deleter = dlpack_deleter;
+  return dlm;
+}
+
+/// Export a writable HWC DLPack view over Image.data.
+inline DLManagedTensor * make_output_image_dlpack(
+  ImageMsg & msg
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+  , cudaStream_t consumer_stream = nullptr
+#endif
+)
+{
+  const auto metadata = image_metadata(msg, "from_output_image_msg");
+  auto ctx = std::make_unique<DlpackContext>();
+  ctx->shape = metadata.shape;
+  ctx->strides = metadata.strides;
+
+  void * data_ptr = nullptr;
+  int32_t dev_type = kDLCPU;
+  int32_t dev_id = 0;
+  const std::string & backend = msg.data.get_backend_type();
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+  if (backend == "cuda") {
+    auto * cuda_impl = const_cast<cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(
+      dynamic_cast<const cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(
+        msg.data.get_impl()));
+    if (!cuda_impl) {
+      throw std::runtime_error(
+              "torch_conversions::from_output_image_msg: cuda backend but not CudaBufferImpl");
+    }
+    cuda_impl->set_stream(consumer_stream);
+    ctx->wh = std::make_shared<cuda_buffer_backend::WriteHandle>(
+      cuda_impl->get_cuda_buffer().get_write_handle(consumer_stream));
+    data_ptr = static_cast<void *>(ctx->wh->get_ptr());
+    dev_type = kDLCUDA;
+    dev_id = cuda_impl->get_device_id();
+  } else  // NOLINT(readability/braces)
+#endif
+  if (backend == "cpu") {
+    data_ptr = static_cast<void *>(msg.data.data());
+  } else {
+    throw std::runtime_error(
+            "torch_conversions::from_output_image_msg: unsupported backend " + backend);
+  }
+
+  auto * dlm = new DLManagedTensor;
+  populate_image_dl_tensor(*dlm, metadata, *ctx, data_ptr, dev_type, dev_id);
+  dlm->manager_ctx = ctx.release();
+  dlm->deleter = dlpack_deleter;
+  return dlm;
+}
+
 /// RAII wrapper for a DLManagedTensor. Useful when you're not immediately
 /// handing the tensor off to a framework's `from_dlpack` (which would take
 /// ownership itself). Calling `.release()` hands the raw pointer to such a
@@ -509,6 +704,157 @@ inline std::unique_ptr<TensorMsg> allocate_tensor_msg(
   throw std::runtime_error(
           "torch_conversions: unsupported device type " +
           std::to_string(static_cast<int>(dev)));
+}
+
+
+// ---------------------------------------------------------------------------
+// sensor_msgs/Image allocation and conversion
+// ---------------------------------------------------------------------------
+
+/// Allocate a packed HWC Image with a pre-sized data buffer. The metadata is
+/// initialized completely, and data uses CUDA storage when CUDA is selected.
+inline std::unique_ptr<ImageMsg> allocate_image_msg(
+  uint32_t height,
+  uint32_t width,
+  const std::string & encoding,
+  std::optional<c10::DeviceType> device = std::nullopt)
+{
+  if (encoding.empty() || sensor_msgs::image_encodings::isPlanar(encoding)) {
+    throw std::runtime_error(
+            "torch_conversions::allocate_image_msg: encoding must be a packed byte encoding");
+  }
+  int channels;
+  int bits;
+  try {
+    channels = sensor_msgs::image_encodings::numChannels(encoding);
+    bits = sensor_msgs::image_encodings::bitDepth(encoding);
+  } catch (const std::runtime_error & error) {
+    throw std::runtime_error(
+            std::string("torch_conversions::allocate_image_msg: ") + error.what());
+  }
+  if (channels <= 0 || bits != 8) {
+    throw std::runtime_error(
+            "torch_conversions::allocate_image_msg: only byte-oriented packed "
+            "encodings are supported");
+  }
+
+  const size_t step = detail::checked_multiply(
+    static_cast<size_t>(width), static_cast<size_t>(channels), "allocate_image_msg");
+  if (step > std::numeric_limits<uint32_t>::max()) {
+    throw std::runtime_error(
+            "torch_conversions::allocate_image_msg: packed row size exceeds Image.step");
+  }
+  const size_t byte_count = detail::checked_multiply(
+    static_cast<size_t>(height), step, "allocate_image_msg");
+
+  auto msg = std::make_unique<ImageMsg>();
+  msg->height = height;
+  msg->width = width;
+  msg->encoding = encoding;
+  msg->is_bigendian = 0;
+  msg->step = static_cast<uint32_t>(step);
+
+  const c10::DeviceType dev = device.value_or(detail::default_device());
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+  if (dev == c10::kCUDA) {
+    auto cuda_impl =
+      std::make_unique<cuda_buffer_backend::CudaBufferImpl<uint8_t>>(byte_count);
+    msg->data = rosidl::Buffer<uint8_t>(std::move(cuda_impl));
+    return msg;
+  }
+#endif
+  if (dev == c10::kCPU) {
+    msg->data.resize(byte_count);
+    return msg;
+  }
+  throw std::runtime_error(
+          "torch_conversions::allocate_image_msg: unsupported device type " +
+          std::to_string(static_cast<int>(dev)));
+}
+
+/// Return a writable HWC tensor view over Image.data. The CUDA WriteHandle
+/// remains alive until the returned tensor is destroyed.
+inline at::Tensor from_output_image_msg(ImageMsg & msg)
+{
+  if (msg.data.empty() && msg.height == 0 && msg.width == 0) {return {};}
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+  cudaStream_t stream = nullptr;
+  if (msg.data.get_backend_type() == "cuda") {
+    stream = detail::current_cuda_stream_or_warn("from_output_image_msg");
+  }
+  detail::DlpackPtr guard{detail::make_output_image_dlpack(msg, stream)};
+#else
+  detail::DlpackPtr guard{detail::make_output_image_dlpack(msg)};
+#endif
+  at::Tensor tensor = at::fromDLPack(guard.get());
+  (void)guard.release();
+  return tensor;
+}
+
+/// Return an HWC tensor for subscriber input. clone=false is a zero-copy,
+/// read-only view whose CUDA ReadHandle remains alive with the tensor.
+inline at::Tensor from_input_image_msg(const ImageMsg & msg, bool clone = true)
+{
+  if (msg.data.empty() && msg.height == 0 && msg.width == 0) {return {};}
+#ifdef TORCH_CONVERSIONS_HAS_CUDA
+  cudaStream_t stream = nullptr;
+  if (msg.data.get_backend_type() == "cuda") {
+    stream = detail::current_cuda_stream_or_warn("from_input_image_msg");
+  }
+  detail::DlpackPtr guard{detail::make_input_image_dlpack(msg, stream)};
+#else
+  detail::DlpackPtr guard{detail::make_input_image_dlpack(msg)};
+#endif
+  at::Tensor tensor = at::fromDLPack(guard.get());
+  (void)guard.release();
+  return clone ? tensor.clone() : tensor;
+}
+
+/// Copy an HWC tensor into an existing Image allocation. Existing header and
+/// image metadata are preserved; the tensor must match them exactly.
+inline void to_image_msg(ImageMsg & msg, const at::Tensor & tensor)
+{
+  if (!tensor.defined()) {
+    throw std::runtime_error("torch_conversions::to_image_msg: tensor is undefined");
+  }
+  const auto metadata = detail::image_metadata(msg, "to_image_msg");
+  if (tensor.dim() != 3 ||
+    !std::equal(tensor.sizes().begin(), tensor.sizes().end(), metadata.shape.begin()))
+  {
+    throw std::runtime_error(
+            "torch_conversions::to_image_msg: tensor shape must match Image HWC metadata");
+  }
+  if (tensor.scalar_type() != metadata.dtype) {
+    throw std::runtime_error(
+            "torch_conversions::to_image_msg: tensor dtype does not match Image encoding");
+  }
+  at::Tensor output = from_output_image_msg(msg);
+  // Keep CUDA work stream-ordered. The WriteHandle records the event when
+  // output leaves scope; no device or stream synchronization is performed here.
+  output.copy_(tensor, /*non_blocking=*/ true);
+}
+
+/// Allocate an Image matching an HWC tensor and copy the tensor into it.
+inline std::unique_ptr<ImageMsg> to_image_msg(
+  const at::Tensor & tensor, const std::string & encoding)
+{
+  if (!tensor.defined() || tensor.dim() != 3) {
+    throw std::runtime_error(
+            "torch_conversions::to_image_msg: tensor must be a defined HWC tensor");
+  }
+  if (tensor.size(0) < 0 || tensor.size(0) > std::numeric_limits<uint32_t>::max() ||
+    tensor.size(1) < 0 || tensor.size(1) > std::numeric_limits<uint32_t>::max())
+  {
+    throw std::runtime_error(
+            "torch_conversions::to_image_msg: tensor dimensions exceed Image metadata");
+  }
+  auto msg = allocate_image_msg(
+    static_cast<uint32_t>(tensor.size(0)),
+    static_cast<uint32_t>(tensor.size(1)),
+    encoding,
+    tensor.device().type());
+  to_image_msg(*msg, tensor);
+  return msg;
 }
 
 
