@@ -30,20 +30,20 @@ namespace py = pybind11;
 namespace
 {
 
-class PyCudaReadHandle
+class CudaReadHandleWrapper
 {
 public:
-  PyCudaReadHandle(
+  CudaReadHandleWrapper(
     cuda_buffer_backend::ReadHandle && handle,
     py::object owner)
   : owner_(std::move(owner)), handle_(std::move(handle))
   {
   }
 
-  PyCudaReadHandle(const PyCudaReadHandle &) = delete;
-  PyCudaReadHandle & operator=(const PyCudaReadHandle &) = delete;
-  PyCudaReadHandle(PyCudaReadHandle &&) = default;
-  PyCudaReadHandle & operator=(PyCudaReadHandle &&) = default;
+  CudaReadHandleWrapper(const CudaReadHandleWrapper &) = delete;
+  CudaReadHandleWrapper & operator=(const CudaReadHandleWrapper &) = delete;
+  CudaReadHandleWrapper(CudaReadHandleWrapper &&) = default;
+  CudaReadHandleWrapper & operator=(CudaReadHandleWrapper &&) = default;
 
   uintptr_t get_ptr() const
   {
@@ -67,20 +67,20 @@ private:
   std::optional<cuda_buffer_backend::ReadHandle> handle_;
 };
 
-class PyCudaWriteHandle
+class CudaWriteHandleWrapper
 {
 public:
-  PyCudaWriteHandle(
+  CudaWriteHandleWrapper(
     cuda_buffer_backend::WriteHandle && handle,
     py::object buffer)
   : buffer_(std::move(buffer)), handle_(std::move(handle))
   {
   }
 
-  PyCudaWriteHandle(const PyCudaWriteHandle &) = delete;
-  PyCudaWriteHandle & operator=(const PyCudaWriteHandle &) = delete;
-  PyCudaWriteHandle(PyCudaWriteHandle &&) = default;
-  PyCudaWriteHandle & operator=(PyCudaWriteHandle &&) = default;
+  CudaWriteHandleWrapper(const CudaWriteHandleWrapper &) = delete;
+  CudaWriteHandleWrapper & operator=(const CudaWriteHandleWrapper &) = delete;
+  CudaWriteHandleWrapper(CudaWriteHandleWrapper &&) = default;
+  CudaWriteHandleWrapper & operator=(CudaWriteHandleWrapper &&) = default;
 
   uintptr_t get_ptr()
   {
@@ -165,41 +165,41 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
 {
   module.doc() = "Python bindings for creating CUDA-backed rosidl buffers";
 
-  py::class_<PyCudaReadHandle>(module, "CudaReadHandle")
-  .def_property_readonly("device_ptr", &PyCudaReadHandle::get_ptr)
-  .def_property_readonly("closed", &PyCudaReadHandle::is_closed)
-  .def("get_ptr", &PyCudaReadHandle::get_ptr)
-  .def("close", &PyCudaReadHandle::close)
+  py::class_<CudaReadHandleWrapper>(module, "CudaReadHandle")
+  .def_property_readonly("device_ptr", &CudaReadHandleWrapper::get_ptr)
+  .def_property_readonly("closed", &CudaReadHandleWrapper::is_closed)
+  .def("get_ptr", &CudaReadHandleWrapper::get_ptr)
+  .def("close", &CudaReadHandleWrapper::close)
   .def(
     "__enter__",
-    [](PyCudaReadHandle & self) -> PyCudaReadHandle & {
+    [](CudaReadHandleWrapper & self) -> CudaReadHandleWrapper & {
       (void)self.get_ptr();
       return self;
     },
     py::return_value_policy::reference_internal)
   .def(
     "__exit__",
-    [](PyCudaReadHandle & self, py::object, py::object, py::object) {
+    [](CudaReadHandleWrapper & self, py::object, py::object, py::object) {
       self.close();
       return false;
     });
 
-  py::class_<PyCudaWriteHandle>(module, "CudaWriteHandle")
-  .def_property_readonly("device_ptr", &PyCudaWriteHandle::get_ptr)
-  .def_property_readonly("buffer", &PyCudaWriteHandle::get_buffer)
-  .def_property_readonly("closed", &PyCudaWriteHandle::is_closed)
-  .def("get_ptr", &PyCudaWriteHandle::get_ptr)
-  .def("close", &PyCudaWriteHandle::close)
+  py::class_<CudaWriteHandleWrapper>(module, "CudaWriteHandle")
+  .def_property_readonly("device_ptr", &CudaWriteHandleWrapper::get_ptr)
+  .def_property_readonly("buffer", &CudaWriteHandleWrapper::get_buffer)
+  .def_property_readonly("closed", &CudaWriteHandleWrapper::is_closed)
+  .def("get_ptr", &CudaWriteHandleWrapper::get_ptr)
+  .def("close", &CudaWriteHandleWrapper::close)
   .def(
     "__enter__",
-    [](PyCudaWriteHandle & self) -> PyCudaWriteHandle & {
+    [](CudaWriteHandleWrapper & self) -> CudaWriteHandleWrapper & {
       (void)self.get_ptr();
       return self;
     },
     py::return_value_policy::reference_internal)
   .def(
     "__exit__",
-    [](PyCudaWriteHandle & self, py::object, py::object, py::object) {
+    [](CudaWriteHandleWrapper & self, py::object, py::object, py::object) {
       self.close();
       return false;
     });
@@ -237,7 +237,7 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
       auto * cpp_buffer = reinterpret_cast<rosidl::Buffer<uint8_t> *>(ptr);
       auto write_handle = cuda_buffer_backend::from_output_buffer(
         *cpp_buffer, stream_from_python(stream));
-      return PyCudaWriteHandle(std::move(write_handle), std::move(buffer));
+      return CudaWriteHandleWrapper(std::move(write_handle), std::move(buffer));
     },
     py::arg("buffer"),
     py::arg("stream") = py::none());
@@ -251,7 +251,7 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
       auto * cpp_buffer = reinterpret_cast<rosidl::Buffer<uint8_t> *>(ptr);
       auto read_handle = cuda_buffer_backend::from_input_buffer(
         *cpp_buffer, stream_from_python(stream));
-      return PyCudaReadHandle(std::move(read_handle), std::move(buffer));
+      return CudaReadHandleWrapper(std::move(read_handle), std::move(buffer));
     },
     py::arg("buffer"),
     py::arg("stream") = py::none());
@@ -264,7 +264,7 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
       rosidl::Buffer<uint8_t> cpu_buffer(std::move(storage));
       auto read_handle = cuda_buffer_backend::from_input_buffer(
         cpu_buffer, stream_from_python(stream));
-      return PyCudaReadHandle(std::move(read_handle), py::none());
+      return CudaReadHandleWrapper(std::move(read_handle), py::none());
     },
     py::arg("data"),
     py::arg("stream") = py::none());
