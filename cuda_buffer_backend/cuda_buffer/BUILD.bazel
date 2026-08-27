@@ -1,9 +1,17 @@
 package(default_visibility = ["//visibility:public"])
 
+exports_files(["package.xml"])
+
+filegroup(
+    name = "public_headers",
+    srcs = glob(["include/cuda_buffer/**"]),
+)
+
 cc_library(
     name = "cuda_buffer",
     srcs = [
         "src/cuda_buffer.cpp",
+        "src/cuda_buffer_impl.cpp",
         "src/cuda_buffer_ipc_manager.cpp",
         "src/cuda_memory_pool.cpp",
         "src/host_endpoint_manager.cpp",
