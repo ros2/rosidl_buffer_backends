@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "cuda_buffer/cuda_buffer.hpp"
 #include "cuda_buffer/cuda_buffer_impl.hpp"
@@ -121,8 +122,24 @@ ReadHandle from_input_buffer(
   auto * promoted_impl = detail::cuda_impl_of(*promoted);
   {
     auto wh = promoted_impl->get_cuda_buffer().get_write_handle(stream);
-    CUDA_CHECK(cudaMemcpyAsync(
-      wh.get_ptr(), buffer.data(), byte_count, cudaMemcpyHostToDevice, stream));
+    if (impl->get_backend_type() == "cpu") {
+      // Host storage, and it outlives this call, so copy straight out of it.
+      CUDA_CHECK(cudaMemcpyAsync(
+        wh.get_ptr(), buffer.data(), byte_count, cudaMemcpyHostToDevice, stream));
+    } else {
+      // Some other non-CPU backend: another accelerator, or a buffer delivered
+      // by a transport. data() throws for every one of them -- it is CPU-only
+      // by contract -- so the portable way in is rosidl_buffer's explicit
+      // conversion. Reaching here at all means a copy was already unavoidable.
+      //
+      // The staging vector is local, so the copy has to land before it goes
+      // away; that is what the synchronize is for, and why it is only on this
+      // branch.
+      const std::vector<T> host = buffer.to_vector();
+      CUDA_CHECK(cudaMemcpyAsync(
+        wh.get_ptr(), host.data(), byte_count, cudaMemcpyHostToDevice, stream));
+      CUDA_CHECK(cudaStreamSynchronize(stream));
+    }
   }
   auto rh = promoted_impl->get_cuda_buffer().get_read_handle(stream);
   rh.set_promoted_buffer(std::move(promoted));
