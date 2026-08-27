@@ -187,27 +187,40 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
 
   cudaEvent_t write_event = cuda_impl->get_cuda_buffer().get_write_event();
 
+  descriptor->event_type = cuda_buffer_backend_msgs::msg::CudaBufferDescriptor::EVENT_NONE;
+  std::memset(descriptor->ipc_event_handle.data(), 0, descriptor->ipc_event_handle.size());
+
   rmw_gid_t gid;
   gid.implementation_identifier = "";
   std::memcpy(gid.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);
   auto locality = get_endpoint_manager()->query_endpoint_locality(gid);
-  if (locality.found &&
-    locality.locality == host_endpoint_manager::EndpointLocality::INTRA_PROCESS &&
-    write_event)
-  {
-    RCUTILS_LOG_WARN_ONCE_NAMED("cuda_buffer_backend",
-      "Same-process CUDA IPC requires cudaEventSynchronize on the publish path. "
-      "Enable intra-process communication to avoid this overhead.");
-    cudaEventSynchronize(write_event);
-  }
+  const bool is_same_process = locality.found &&
+    locality.locality == host_endpoint_manager::EndpointLocality::INTRA_PROCESS;
 
   if (write_event) {
-    cudaIpcEventHandle_t event_handle;
-    CUDA_CHECK(cudaIpcGetEventHandle(&event_handle, write_event));
-    std::memcpy(
-      descriptor->ipc_event_handle.data(), &event_handle, sizeof(cudaIpcEventHandle_t));
-  } else {
-    std::memset(descriptor->ipc_event_handle.data(), 0, sizeof(cudaIpcEventHandle_t));
+    if (is_same_process && block->local_event) {
+      cudaStream_t stream = get_internal_stream();
+      CUDA_CHECK(cudaStreamWaitEvent(stream, write_event, 0));
+      CUDA_CHECK(cudaEventRecord(block->local_event, stream));
+
+      static_assert(sizeof(cudaEvent_t) <= sizeof(cudaIpcEventHandle_t));
+      descriptor->event_type =
+        cuda_buffer_backend_msgs::msg::CudaBufferDescriptor::EVENT_LOCAL;
+      std::memcpy(
+        descriptor->ipc_event_handle.data(), &block->local_event, sizeof(cudaEvent_t));
+    } else if (is_same_process) {
+      RCUTILS_LOG_WARN_ONCE_NAMED(
+        "cuda_buffer_backend",
+        "No local CUDA synchronization event is available; synchronizing the publish path");
+      CUDA_CHECK(cudaEventSynchronize(write_event));
+    } else {
+      cudaIpcEventHandle_t event_handle;
+      CUDA_CHECK(cudaIpcGetEventHandle(&event_handle, write_event));
+      descriptor->event_type =
+        cuda_buffer_backend_msgs::msg::CudaBufferDescriptor::EVENT_IPC;
+      std::memcpy(
+        descriptor->ipc_event_handle.data(), &event_handle, sizeof(cudaIpcEventHandle_t));
+    }
   }
 
   return descriptor;
@@ -257,28 +270,34 @@ std::unique_ptr<void, void (*)(void *)> CudaBufferBackend::from_descriptor_with_
         reinterpret_cast<void *>(import_result.va), byte_size,
         descriptor->device_id, deleter);
 
-      bool has_event = false;
-      for (size_t i = 0; i < descriptor->ipc_event_handle.size(); ++i) {
-        if (descriptor->ipc_event_handle[i] != 0) {
-          has_event = true;
+      switch (descriptor->event_type) {
+        case cuda_buffer_backend_msgs::msg::CudaBufferDescriptor::EVENT_LOCAL:
+          {
+            cudaEvent_t local_event = nullptr;
+            std::memcpy(
+              &local_event, descriptor->ipc_event_handle.data(), sizeof(cudaEvent_t));
+            if (local_event) {
+              imported_buffer.set_write_event(local_event, false);
+            }
+          }
           break;
-        }
-      }
+        case cuda_buffer_backend_msgs::msg::CudaBufferDescriptor::EVENT_IPC:
+          {
+            cudaIpcEventHandle_t event_handle;
+            std::memcpy(&event_handle, descriptor->ipc_event_handle.data(),
+                sizeof(cudaIpcEventHandle_t));
 
-      if (has_event) {
-        cudaIpcEventHandle_t event_handle;
-        std::memcpy(&event_handle, descriptor->ipc_event_handle.data(),
-            sizeof(cudaIpcEventHandle_t));
-
-        cudaEvent_t imported_event = nullptr;
-        cudaError_t ev_err = cudaIpcOpenEventHandle(&imported_event, event_handle);
-        if (ev_err == cudaSuccess) {
-          imported_buffer.set_write_event(imported_event, true);
-        } else {
-          // Same-process: IPC event handles can't be opened in the originating
-          // process.
-          (void)cudaGetLastError();
-        }
+            cudaEvent_t imported_event = nullptr;
+            CUDA_CHECK(cudaIpcOpenEventHandle(&imported_event, event_handle));
+            imported_buffer.set_write_event(imported_event, true);
+          }
+          break;
+        case cuda_buffer_backend_msgs::msg::CudaBufferDescriptor::EVENT_NONE:
+          break;
+        default:
+          throw CudaError(
+                "CudaBufferDescriptor contains an unknown CUDA event type: " +
+                std::to_string(descriptor->event_type));
       }
 
       auto result = std::make_unique<CudaBufferImpl<uint8_t>>(

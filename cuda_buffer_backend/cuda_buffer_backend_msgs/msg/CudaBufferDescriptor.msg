@@ -24,5 +24,10 @@ uint64 vmm_block_size          # Block size (for import mapping)
 string vmm_socket_path         # Unix socket path to receive block FD
 uint64 ipc_uid                 # Unique ID per publish for staleness detection
 
-# CUDA IPC event for inter-process GPU synchronization
-uint8[64] ipc_event_handle     # cudaIpcEventHandle_t (64 bytes)
+# CUDA event for GPU synchronization. Same-process descriptors carry a raw
+# cudaEvent_t; inter-process descriptors carry a cudaIpcEventHandle_t.
+uint8 EVENT_NONE=0
+uint8 EVENT_LOCAL=1
+uint8 EVENT_IPC=2
+uint8 event_type
+uint8[64] ipc_event_handle
