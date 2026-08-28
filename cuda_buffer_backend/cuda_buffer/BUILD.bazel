@@ -14,6 +14,7 @@ cc_library(
         "src/cuda_buffer_impl.cpp",
         "src/cuda_buffer_ipc_manager.cpp",
         "src/cuda_memory_pool.cpp",
+        "src/external_memory_pool.cpp",
         "src/host_endpoint_manager.cpp",
     ],
     hdrs = glob(["include/cuda_buffer/**"]),

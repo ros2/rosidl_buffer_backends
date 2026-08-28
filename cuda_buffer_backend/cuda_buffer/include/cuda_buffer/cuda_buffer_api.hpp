@@ -25,6 +25,7 @@
 #include "cuda_buffer/cuda_buffer.hpp"
 #include "cuda_buffer/cuda_buffer_impl.hpp"
 #include "cuda_buffer/cuda_error.hpp"
+#include "cuda_buffer/external_memory_pool.hpp"
 #include "rosidl_buffer/buffer.hpp"
 
 namespace cuda_buffer_backend
@@ -39,6 +40,41 @@ inline rosidl::Buffer<uint8_t> allocate_buffer(size_t count)
 {
   return rosidl::Buffer<uint8_t>(
     std::make_unique<CudaBufferImpl<uint8_t>>(count));
+}
+
+/// \brief Allocate \p count elements out of a caller-owned device region.
+///
+/// The counterpart to allocate_buffer() for a process that already has a device
+/// allocator of its own and wants ROS payloads to come out of *it* -- a
+/// middleware whose transport memory is an NvSciBuf pool being the case this
+/// was built for. See ExternalMemoryPool::import_nvscibuf().
+///
+/// The returned buffer is a normal CUDA-backed rosidl::Buffer in every respect
+/// an application can observe: backend \c "cuda", the same read and write
+/// handles, the same event ordering, and no promotion or host round trip in
+/// from_input_buffer() / from_output_buffer(). It differs from allocate_buffer()
+/// only in where the bytes live and who reclaims them -- the block returns to
+/// \p pool when the buffer dies, and the pool's region is never freed by this
+/// backend.
+///
+/// Unlike adopt_buffer(), the result *can* be resized: growth reallocates
+/// within the same pool, which needs room for the old and new blocks at once
+/// because the copy happens before the old one is released.
+///
+/// \param pool The region to allocate from. Kept alive by the returned buffer.
+/// \param count Elements, not bytes.
+/// \throw CudaError if \p pool is null or has no contiguous run left for
+///   \p count elements. \c count == 0 returns an empty buffer and allocates
+///   nothing.
+template<typename T = uint8_t>
+rosidl::Buffer<T> allocate_buffer_from(
+  std::shared_ptr<ExternalMemoryPool> pool, size_t count)
+{
+  if (!pool) {
+    throw CudaError("allocate_buffer_from called with a null pool");
+  }
+  return rosidl::Buffer<T>(
+    std::make_unique<CudaBufferImpl<T>>(std::move(pool), count));
 }
 
 /// \brief Wrap \p count elements of device memory allocated somewhere else.

@@ -25,6 +25,7 @@
 #include "cuda_buffer/cuda_buffer.hpp"
 #include "cuda_buffer/cuda_error.hpp"
 #include "cuda_buffer/cuda_memory_pool.hpp"
+#include "cuda_buffer/external_memory_pool.hpp"
 #include "cuda_buffer/visibility_control.h"
 #include "rosidl_buffer/buffer.hpp"
 #include "rosidl_buffer/buffer_impl_base.hpp"
@@ -104,6 +105,32 @@ public:
 
   explicit CudaBufferImpl(CudaBuffer && buffer, size_t size)
   : size_(size), cuda_buffer_(std::move(buffer)) {}
+
+  /// \brief Allocate \p size elements out of a caller-owned device region.
+  ///
+  /// The pool-allocating constructor above takes its memory from this process's
+  /// global VMM pool. This one takes it from an ExternalMemoryPool -- a region
+  /// somebody else allocated and mapped, an NvSciBuf transport arena being the
+  /// motivating case -- and is otherwise identical: same events, same handles,
+  /// same backend name.
+  ///
+  /// The pool reference is kept so that a later resize() can grow *within the
+  /// same region*. That is the one behavioural difference from adoption, and it
+  /// is the reason a pool is worth having: adopted storage is a single block
+  /// with nowhere to grow, whereas a pool has the rest of its arena.
+  ///
+  /// \throw CudaError if \p pool is null, or has no run of \p size elements
+  ///   left.
+  CudaBufferImpl(std::shared_ptr<ExternalMemoryPool> pool, size_t size)
+  : size_(size), external_pool_(std::move(pool))
+  {
+    if (!external_pool_) {
+      throw CudaError("CudaBufferImpl: null ExternalMemoryPool");
+    }
+    if (size_ > 0) {
+      allocate_buffer(size_);
+    }
+  }
 
   ~CudaBufferImpl() = default;
 
@@ -188,6 +215,19 @@ public:
   /// \brief True when this buffer wraps storage allocated outside the backend.
   bool is_adopted() const {return cuda_buffer_.is_adopted();}
 
+  /// \brief True when this buffer was suballocated from an ExternalMemoryPool.
+  ///
+  /// Distinct from is_adopted(): both name memory the backend did not allocate
+  /// from the driver, but an adopted buffer is a single block it cannot grow,
+  /// whereas this one has the rest of its pool to grow into.
+  bool is_external() const {return external_pool_ != nullptr;}
+
+  /// \brief The pool this buffer was suballocated from, or null.
+  const std::shared_ptr<ExternalMemoryPool> & get_external_pool() const
+  {
+    return external_pool_;
+  }
+
   std::unique_ptr<rosidl::BufferImplBase<T>> to_cpu() const override
   {
     auto cpu = std::make_unique<rosidl::CpuBufferImpl<T>>();
@@ -205,6 +245,13 @@ public:
     return cpu;
   }
 
+  /// \brief Copy into storage of our own.
+  ///
+  /// Deliberately the *global* pool even when this buffer came from an external
+  /// one. A clone is what a caller asks for when it needs the data to outlive
+  /// the original, and the original's arena is precisely what it needs to
+  /// outlive: cloning back into a transport's slot pool would consume a slot to
+  /// escape a slot. The copy is ordinary CUDA memory with no borrowed lifetime.
   std::unique_ptr<rosidl::BufferImplBase<T>> clone() const override
   {
     auto copy = std::make_unique<CudaBufferImpl<T>>(size_);
@@ -247,8 +294,14 @@ private:
 
   void allocate_buffer_internal(CudaBuffer & buffer, size_t n)
   {
-    auto pool = get_or_create_global_pool();
     size_t byte_size = n * sizeof(T);
+
+    if (external_pool_) {
+      allocate_from_external(buffer, byte_size);
+      return;
+    }
+
+    auto pool = get_or_create_global_pool();
 
     VmmBlock * block = pool->allocate(byte_size);
 
@@ -263,9 +316,43 @@ private:
     }
   }
 
+  /// Carve \p byte_size out of the external pool and wrap it.
+  ///
+  /// The resulting CudaBuffer is *not* marked adopted. Adoption means "this
+  /// block is not mine to reallocate"; a pool block is, because the pool can
+  /// hand out a different one. What both share is that the deleter frees
+  /// nothing to the driver -- here it returns the block to the free list.
+  void allocate_from_external(CudaBuffer & buffer, size_t byte_size)
+  {
+    ExternalBlock * block = external_pool_->allocate(byte_size);
+    if (block == nullptr) {
+      // Exhaustion is reported by the pool as null because it is ordinary for a
+      // fixed arena, but by the time a buffer is being constructed the caller
+      // has asked for storage and there is no half-answer to give it.
+      throw CudaError(
+              "CudaBufferImpl: external memory pool is exhausted; "
+              "no contiguous run left for this allocation");
+    }
+
+    cudaEvent_t ev = make_buffer_write_event();
+
+    buffer = CudaBuffer(
+      block->ptr, byte_size, external_pool_->get_device_id(),
+      external_pool_->deleter(block));
+
+    if (ev) {
+      buffer.set_write_event(ev, true);
+    }
+  }
+
   size_t size_;
   CudaBuffer cuda_buffer_;
   cudaStream_t stream_{nullptr};
+
+  /// Null for an ordinary buffer; set when this one was suballocated from a
+  /// caller-owned region. Held rather than merely consulted at construction so
+  /// that resize() can grow within the same region.
+  std::shared_ptr<ExternalMemoryPool> external_pool_;
 };
 
 }  // namespace cuda_buffer_backend
