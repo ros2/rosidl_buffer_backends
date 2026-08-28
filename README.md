@@ -1,8 +1,8 @@
 # rosidl_buffer_backends
 
 CUDA buffer backend implementation for `rosidl::Buffer`, enabling zero-copy
-GPU memory sharing between ROS 2 publishers and subscribers, plus a
-PyTorch-side helper library that builds on the same buffer infrastructure.
+GPU memory sharing between ROS 2 publishers and subscribers, plus tensor
+conversion libraries that build on the same buffer infrastructure.
 
 ## Packages
 
@@ -20,17 +20,16 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
   `cu130` wheel from the detected CUDA Toolkit; JetPack provides the
   required installation on Tegra.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **torch_conversions** -- Stable C++ API and CMake target.
-- **torch_conversions_cpu** -- CPU C++ runtime using `libtorch-dev`.
-- **torch_conversions_cuda** -- CPU/CUDA C++ runtime using
-  `libtorch_vendor`.
-- **torch_conversions_py** -- Stable Python API and plugin registry.
-- **torch_conversions_py_cpu** -- CPU Python runtime using `python3-torch`.
-- **torch_conversions_py_cuda** -- CPU/CUDA Python runtime using
-  `python3_torch_cuda_vendor`.
-
-Install `torch_conversions_cpu` or `torch_conversions_cuda`, and
-`torch_conversions_py_cpu` or `torch_conversions_py_cuda`.
+- **onnxruntime_conversions** -- C++ zero-copy views between
+  `tensor_msgs/ExperimentalTensor` and ONNX Runtime `Ort::Value` tensors.
+- **torch_conversions** -- Header-only helper library that converts between
+  `tensor_msgs/ExperimentalTensor` and `at::Tensor` and exposes DLPack import /
+  export. Replaces the older `torch_buffer_backend` plugin approach with a
+  plain message + bridge library that rides on top of whichever
+  `rosidl::Buffer` backend is registered (CUDA when available, CPU
+  otherwise).
+- **torch_conversions_py** -- Python CPU conversions and optional, lazily
+  loaded CUDA buffer support for `tensor_msgs/ExperimentalTensor`.
 
 ## Deb build status
 
@@ -67,6 +66,7 @@ Install `torch_conversions_cpu` or `torch_conversions_cuda`, and
 Per-package build, test, and run details live in each package's README:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
+- [`onnxruntime_conversions/README.md`](onnxruntime_conversions/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## API overview
