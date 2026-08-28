@@ -1,8 +1,8 @@
 # rosidl_buffer_backends
 
 CUDA buffer backend implementation for `rosidl::Buffer`, enabling zero-copy
-GPU memory sharing between ROS 2 publishers and subscribers, plus a
-PyTorch-side helper library that builds on the same buffer infrastructure.
+GPU memory sharing between ROS 2 publishers and subscribers, plus tensor
+conversion libraries that build on the same buffer infrastructure.
 
 ## Packages
 
@@ -28,6 +28,8 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
 - **dlpack_conversions_py** -- Framework-free Python core and plugin registry.
 - **dlpack_conversions_py_cpu** -- Host memory storage plugin for Python.
 - **dlpack_conversions_py_cuda** -- CUDA storage plugin for Python.
+- **onnxruntime_conversions** -- C++ zero-copy views between
+  `tensor_msgs/ExperimentalTensor` and ONNX Runtime `Ort::Value` tensors.
 - **torch_conversions** -- Header-only C++ adapter between PyTorch tensors and
   the DLPack core.
 - **torch_conversions_py** -- Python adapter between PyTorch tensors and the
@@ -78,6 +80,7 @@ Per-package build, test, and run details live in each package's README:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
 - [`dlpack_conversions/README.md`](dlpack_conversions/README.md)
+- [`onnxruntime_conversions/README.md`](onnxruntime_conversions/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## API overview
