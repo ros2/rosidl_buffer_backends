@@ -15,23 +15,21 @@ find_package(cuda_buffer_backend_msgs REQUIRED)
 find_package(rmw REQUIRED)
 find_package(rcutils REQUIRED)
 
-# Workaround for CMake's FindCUDAToolkit on Ubuntu's split nvidia-cuda-dev
-# layout in the bloom build pipeline. Pre-populate the cache variable to
-# skip the broken auto-detection.
-# Related: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=995122
-find_path(_CUDA_RUNTIME_DIR
-  NAMES cuda_runtime.h
-  HINTS
-    ENV CUDA_HOME
-    ENV CUDA_PATH
-    /usr/local/cuda/include
-    /usr/include
-)
-if(_CUDA_RUNTIME_DIR AND NOT DEFINED CUDAToolkit_INCLUDE_DIRECTORIES)
-  set(CUDAToolkit_INCLUDE_DIRECTORIES "${_CUDA_RUNTIME_DIR}" CACHE PATH
-    "CUDA include dir (FindCUDAToolkit nvidia-cuda-dev workaround)")
+# CUDA 13 only. Consumers of this backend build against CUDA 13, and a
+# cuda_buffer linked against CUDA 12 pulls a second CUDA runtime into every
+# process that loads the backend. FindCUDAToolkit treats a requested version as
+# a minimum and does not handle version ranges (no HANDLE_VERSION_RANGE on its
+# find_package_handle_standard_args call), so the upper bound is checked here.
+#
+# This requires the NVIDIA cuda-toolkit-13 packages, which install a complete
+# toolkit under /usr/local/cuda-13.x. It deliberately does not fall back to
+# Ubuntu's split nvidia-cuda-toolkit layout: that ships CUDA 12.x on Noble and
+# was what previously got picked up in the bloom build pipeline.
+find_package(CUDAToolkit 13 REQUIRED)
+if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 14)
+  message(FATAL_ERROR
+    "cuda_buffer requires CUDA 13.x; found ${CUDAToolkit_VERSION}")
 endif()
-find_package(CUDAToolkit REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/cuda_buffer.cpp

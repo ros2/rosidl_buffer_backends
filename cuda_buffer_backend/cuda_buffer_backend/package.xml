@@ -14,6 +14,7 @@
 
   <depend>cuda_buffer</depend>
   <depend>cuda_buffer_backend_msgs</depend>
+  <depend>nvidia-cuda-13</depend>
   <depend>pluginlib</depend>
   <depend>rcutils</depend>
   <depend>rosidl_buffer_backend</depend>
