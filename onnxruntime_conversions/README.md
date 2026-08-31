@@ -23,11 +23,13 @@ io_binding.BindOutput("output", output.value());
 `ExperimentalTensor` carries DLPack-compatible dtype, shape, stride, and
 offset metadata, but ONNX Runtime's public C++ API has no direct
 `from_dlpack`. This package validates that metadata and uses
-`Ort::Value::CreateTensor` to wrap the message's CPU pointer without copying.
+`Ort::Value::CreateTensor` to wrap the message's pointer without copying.
 
-This package is always CPU-only and uses the released `onnxruntime_vendor`
-package from ros-controls. Use `onnxruntime_cuda_conversions` when both CPU and
-CUDA-backed tensor messages must be handled by a CUDA-capable ONNX Runtime.
+CPU conversion support is always available. CUDA-buffer support is compiled
+only when `onnxruntime_gpu_vendor` selected a CUDA archive and both
+`CUDAToolkit` and `cuda_buffer` are available. Pass `"cuda"` to
+`allocate_tensor_msg` and the execution stream to the view functions when
+using CUDA storage.
 
 ## Limitations
 

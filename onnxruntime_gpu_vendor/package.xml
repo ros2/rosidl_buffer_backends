@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>onnxruntime_cuda_vendor</name>
+  <name>onnxruntime_gpu_vendor</name>
   <version>0.1.2</version>
-  <description>Vendor package for the ONNX Runtime 1.28 CUDA 13 amd64 distribution.</description>
+  <description>Vendor package for official ONNX Runtime CPU and CUDA distributions.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -12,11 +12,6 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
-
-  <depend>nvidia-cuda</depend>
-  <depend>nvidia-cudnn</depend>
-
-  <conflict>onnxruntime_vendor</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>
   <test_depend>ament_lint_auto</test_depend>

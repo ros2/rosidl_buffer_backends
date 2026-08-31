@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "tensor_msgs/msg/experimental_tensor.hpp"
@@ -50,23 +51,28 @@ private:
 
   friend OrtTensorView from_input_tensor_msg(
     std::shared_ptr<const TensorMsg>,
-    const Ort::MemoryInfo &);
+    const Ort::MemoryInfo &,
+    void *);
   friend OrtTensorView from_output_tensor_msg(
     std::shared_ptr<TensorMsg>,
-    const Ort::MemoryInfo &);
+    const Ort::MemoryInfo &,
+    void *);
 };
 
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
-  ONNXTensorElementDataType dtype);
+  ONNXTensorElementDataType dtype,
+  const std::string & backend = "cpu");
 
 OrtTensorView from_input_tensor_msg(
   std::shared_ptr<const TensorMsg> msg,
-  const Ort::MemoryInfo & memory_info);
+  const Ort::MemoryInfo & memory_info,
+  void * execution_stream = nullptr);
 
 OrtTensorView from_output_tensor_msg(
   std::shared_ptr<TensorMsg> msg,
-  const Ort::MemoryInfo & memory_info);
+  const Ort::MemoryInfo & memory_info,
+  void * execution_stream = nullptr);
 
 void to_tensor_msg(TensorMsg & msg, const Ort::Value & value);
 
