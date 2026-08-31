@@ -19,13 +19,13 @@ conversion libraries that build on the same buffer infrastructure.
   distribution using the same platform and CUDA selection policy as
   `libtorch_vendor`.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **onnxruntime_conversions** -- Deterministic CPU-only views between tensor
-  messages and the ONNX Runtime supplied by the released
-  `onnxruntime_vendor`.
-- **onnxruntime_cuda_vendor** -- Deterministic amd64 vendor for the official
-  ONNX Runtime 1.28.0 CUDA 13 distribution.
-- **onnxruntime_cuda_conversions** -- CPU and CUDA tensor-message views using
-  the GPU-capable runtime from `onnxruntime_cuda_vendor`.
+- **onnxruntime_gpu_vendor** -- Source-configurable vendor for the official
+  ONNX Runtime CPU, CUDA 12, or CUDA 13 distributions.
+- **onnxruntime_conversions** -- C++ zero-copy views between tensor messages
+  and ONNX Runtime, with CUDA-buffer support when the GPU vendor variant and
+  CUDA dependencies are available.
+- **onnxruntime_conversions_py** -- Python CPU and CUDA conversions using
+  NumPy views or ONNX Runtime's public DLPack protocol.
 - **torch_conversions** -- Header-only helper library that converts between
   `tensor_msgs/ExperimentalTensor` and `at::Tensor` and exposes DLPack import /
   export. Replaces the older `torch_buffer_backend` plugin approach with a
@@ -69,22 +69,21 @@ conversion libraries that build on the same buffer infrastructure.
 
 ## ONNX Runtime variants
 
-| Intent | Conversion package | Runtime package | Storage |
-| ------ | ------------------ | --------------- | ------- |
-| CPU-only deployment | `onnxruntime_conversions` | `onnxruntime_vendor` from ros-controls | CPU |
-| CUDA 13 amd64 deployment | `onnxruntime_cuda_conversions` | `onnxruntime_cuda_vendor` | CPU and CUDA |
+`onnxruntime_gpu_vendor` selects a CPU archive when no CUDA toolkit is found
+and the matching CUDA 12 or CUDA 13 archive otherwise. Source builds can
+override this with `ONNXRUNTIME_GPU_VENDOR_VARIANT`. A binary package contains
+the variant selected when that package was built; it does not change after
+installation.
 
-Select one variant explicitly. The CUDA packages never probe the build host to
-choose a CPU or CUDA archive, and the package conflicts prevent binary
-installations of both variants at once. CUDA installations require the public
-`nvidia-cuda` and `nvidia-cudnn` rosdep keys.
+The Python conversion package requires the user to install a matching
+`onnxruntime` or `onnxruntime-gpu` Python distribution.
 
 Per-package build, test, and run details live in each package's README:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
 - [`onnxruntime_conversions/README.md`](onnxruntime_conversions/README.md)
-- [`onnxruntime_cuda_conversions/README.md`](onnxruntime_cuda_conversions/README.md)
-- [`onnxruntime_cuda_vendor/README.md`](onnxruntime_cuda_vendor/README.md)
+- [`onnxruntime_conversions_py/README.md`](onnxruntime_conversions_py/README.md)
+- [`onnxruntime_gpu_vendor/README.md`](onnxruntime_gpu_vendor/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## API overview
