@@ -217,6 +217,12 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
     });
 
   module.def(
+    "_get_internal_stream",
+    []() {
+      return reinterpret_cast<uintptr_t>(cuda_buffer_backend::get_internal_stream());
+    });
+
+  module.def(
     "_from_cpu_data",
     [](py::bytes data) {
       std::string bytes = data;

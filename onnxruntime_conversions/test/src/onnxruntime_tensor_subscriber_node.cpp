@@ -21,7 +21,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "onnxruntime_cuda_conversions/onnxruntime_cuda_conversions.hpp"
+#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include "std_msgs/msg/bool.hpp"
@@ -41,12 +41,12 @@ const uint8_t identity_model[] = {
 
 }  // namespace
 
-class OnnxRuntimeCudaTensorSubscriber : public rclcpp::Node
+class OnnxRuntimeTensorSubscriber : public rclcpp::Node
 {
 public:
-  explicit OnnxRuntimeCudaTensorSubscriber(const rclcpp::NodeOptions & options)
-  : Node("onnxruntime_cuda_tensor_subscriber", options),
-    env_(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_cuda_tensor_subscriber"),
+  explicit OnnxRuntimeTensorSubscriber(const rclcpp::NodeOptions & options)
+  : Node("onnxruntime_tensor_subscriber", options),
+    env_(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_tensor_subscriber"),
     session_(nullptr),
     memory_info_("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault)
   {
@@ -57,17 +57,13 @@ public:
     cuda_options.UpdateWithValue("user_compute_stream", stream_);
     Ort::SessionOptions session_options;
     session_options.AppendExecutionProvider_CUDA_V2(*cuda_options);
-    session_ = Ort::Session(
-      env_, identity_model, sizeof(identity_model), session_options);
+    session_ = Ort::Session(env_, identity_model, sizeof(identity_model), session_options);
 
     rclcpp::SubscriptionOptions subscription_options;
     subscription_options.acceptable_buffer_backends = "any";
-    subscription_ =
-      this->create_subscription<tensor_msgs::msg::ExperimentalTensor>(
-      "test_onnxruntime_cuda_tensor", 10,
-      std::bind(
-        &OnnxRuntimeCudaTensorSubscriber::receive, this,
-        std::placeholders::_1),
+    subscription_ = this->create_subscription<tensor_msgs::msg::ExperimentalTensor>(
+      "test_onnxruntime_tensor", 10,
+      std::bind(&OnnxRuntimeTensorSubscriber::receive, this, std::placeholders::_1),
       subscription_options);
     count_publisher_ = this->create_publisher<std_msgs::msg::UInt32>(
       "subscriber_count", 10);
@@ -75,7 +71,7 @@ public:
       "validation_result", 10);
   }
 
-  ~OnnxRuntimeCudaTensorSubscriber() override
+  ~OnnxRuntimeTensorSubscriber() override
   {
     session_ = Ort::Session(nullptr);
     if (stream_ != nullptr) {
@@ -91,15 +87,15 @@ private:
       if (msg->data.get_backend_type() != "cuda") {
         throw std::runtime_error("Received tensor is not CUDA-backed");
       }
-      auto output = std::shared_ptr<onnxruntime_cuda_conversions::TensorMsg>(
-        onnxruntime_cuda_conversions::allocate_tensor_msg(
+      auto output = std::shared_ptr<onnxruntime_conversions::TensorMsg>(
+        onnxruntime_conversions::allocate_tensor_msg(
           {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda"));
       {
         Ort::IoBinding binding(session_);
-        std::shared_ptr<const onnxruntime_cuda_conversions::TensorMsg> input = msg;
-        auto input_view = onnxruntime_cuda_conversions::from_input_tensor_msg(
+        std::shared_ptr<const onnxruntime_conversions::TensorMsg> input = msg;
+        auto input_view = onnxruntime_conversions::from_input_tensor_msg(
           input, memory_info_, stream_);
-        auto output_view = onnxruntime_cuda_conversions::from_output_tensor_msg(
+        auto output_view = onnxruntime_conversions::from_output_tensor_msg(
           output, memory_info_, stream_);
         binding.BindInput("input", input_view.value());
         binding.BindOutput("output", output_view.value());
@@ -110,20 +106,18 @@ private:
       std::vector<float> input_values(6);
       std::vector<float> output_values(6);
       {
-        std::shared_ptr<const onnxruntime_cuda_conversions::TensorMsg> input = msg;
-        std::shared_ptr<const onnxruntime_cuda_conversions::TensorMsg> result = output;
-        auto input_view = onnxruntime_cuda_conversions::from_input_tensor_msg(
+        std::shared_ptr<const onnxruntime_conversions::TensorMsg> input = msg;
+        std::shared_ptr<const onnxruntime_conversions::TensorMsg> result = output;
+        auto input_view = onnxruntime_conversions::from_input_tensor_msg(
           input, memory_info_, stream_);
-        auto output_view = onnxruntime_cuda_conversions::from_input_tensor_msg(
+        auto output_view = onnxruntime_conversions::from_input_tensor_msg(
           result, memory_info_, stream_);
         if (cudaMemcpyAsync(
             input_values.data(), input_view.value().GetTensorRawData(),
-            input_values.size() * sizeof(float), cudaMemcpyDeviceToHost,
-            stream_) != cudaSuccess ||
+            input_values.size() * sizeof(float), cudaMemcpyDeviceToHost, stream_) != cudaSuccess ||
           cudaMemcpyAsync(
             output_values.data(), output_view.value().GetTensorRawData(),
-            output_values.size() * sizeof(float), cudaMemcpyDeviceToHost,
-            stream_) != cudaSuccess)
+            output_values.size() * sizeof(float), cudaMemcpyDeviceToHost, stream_) != cudaSuccess)
         {
           throw std::runtime_error("Failed to copy inference result");
         }
@@ -157,4 +151,4 @@ private:
   bool validation_passed_{true};
 };
 
-RCLCPP_COMPONENTS_REGISTER_NODE(OnnxRuntimeCudaTensorSubscriber)
+RCLCPP_COMPONENTS_REGISTER_NODE(OnnxRuntimeTensorSubscriber)

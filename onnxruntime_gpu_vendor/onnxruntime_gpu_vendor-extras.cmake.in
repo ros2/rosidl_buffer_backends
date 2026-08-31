@@ -1,0 +1,41 @@
+# Copyright 2026 Open Source Robotics Foundation, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set(onnxruntime_gpu_vendor_VERSION "@ONNXRUNTIME_GPU_VENDOR_VERSION@")
+set(ONNXRUNTIME_GPU_VENDOR_VARIANT "@ONNXRUNTIME_GPU_VENDOR_VARIANT@")
+set(ONNXRUNTIME_GPU_VENDOR_HAS_CUDA "@ONNXRUNTIME_GPU_VENDOR_HAS_CUDA@")
+
+get_filename_component(
+  _onnxruntime_gpu_vendor_prefix
+  "${onnxruntime_gpu_vendor_DIR}/../../.."
+  ABSOLUTE)
+set(onnxruntime_gpu_vendor_ROOT
+  "${_onnxruntime_gpu_vendor_prefix}/opt/onnxruntime_gpu_vendor")
+set(onnxruntime_gpu_vendor_INCLUDE_DIRS
+  "${onnxruntime_gpu_vendor_ROOT}/include")
+set(onnxruntime_gpu_vendor_LIBRARY_DIRS
+  "${onnxruntime_gpu_vendor_ROOT}/lib")
+
+if(NOT TARGET onnxruntime::onnxruntime)
+  add_library(onnxruntime::onnxruntime SHARED IMPORTED)
+  set_target_properties(onnxruntime::onnxruntime PROPERTIES
+    IMPORTED_LOCATION
+      "${onnxruntime_gpu_vendor_LIBRARY_DIRS}/libonnxruntime.so"
+    INTERFACE_INCLUDE_DIRECTORIES
+      "${onnxruntime_gpu_vendor_INCLUDE_DIRS}"
+    INTERFACE_LINK_OPTIONS
+      "$<$<PLATFORM_ID:Linux>:LINKER:-rpath,${onnxruntime_gpu_vendor_LIBRARY_DIRS}>")
+endif()
+
+unset(_onnxruntime_gpu_vendor_prefix)
