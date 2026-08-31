@@ -49,13 +49,13 @@ def generate_test_description():
         return LaunchDescription([launch_testing.actions.ReadyToTest()])
 
     subscriber = Node(
-        package='onnxruntime_conversions',
-        executable='onnxruntime_tensor_subscriber_node',
+        package='onnxruntime_cuda_conversions',
+        executable='onnxruntime_cuda_tensor_subscriber_node',
         output='screen',
     )
     publisher = Node(
-        package='onnxruntime_conversions',
-        executable='onnxruntime_tensor_publisher_node',
+        package='onnxruntime_cuda_conversions',
+        executable='onnxruntime_cuda_tensor_publisher_node',
         output='screen',
         parameters=[{'publish_rate_ms': 100}],
     )
@@ -71,7 +71,7 @@ def generate_test_description():
 
 
 @unittest.skipUnless(CUDA_AVAILABLE, 'CUDA device is unavailable')
-class TestOnnxRuntimeTensorInterPubSubFastRTPS(unittest.TestCase):
+class TestOnnxRuntimeCudaTensorInterPubSubFastRTPS(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -83,7 +83,7 @@ class TestOnnxRuntimeTensorInterPubSubFastRTPS(unittest.TestCase):
 
     def setUp(self):
         self.node = rclpy.create_node(
-            'test_onnxruntime_tensor_inter_pubsub_fastrtps')
+            'test_onnxruntime_cuda_tensor_inter_pubsub_fastrtps')
         self.publisher_count = 0
         self.subscriber_count = 0
         self.validation_passed = True
@@ -117,7 +117,7 @@ class TestOnnxRuntimeTensorInterPubSubFastRTPS(unittest.TestCase):
 
 
 @launch_testing.post_shutdown_test()
-class TestOnnxRuntimeTensorInterPubSubFastRTPSShutdown(unittest.TestCase):
+class TestOnnxRuntimeCudaTensorInterPubSubFastRTPSShutdown(unittest.TestCase):
 
     def test_exit_codes(self, proc_info):
         launch_testing.asserts.assertExitCodes(

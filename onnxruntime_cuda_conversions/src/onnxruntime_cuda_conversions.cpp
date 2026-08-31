@@ -12,16 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
+#include "onnxruntime_cuda_conversions/onnxruntime_cuda_conversions.hpp"
+
+#include <cuda_runtime.h>
 
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
-namespace onnxruntime_conversions
+#include "cuda_buffer/cuda_buffer_api.hpp"
+#include "cuda_buffer/cuda_buffer_impl.hpp"
+#include "rosidl_buffer/buffer.hpp"
+
+namespace onnxruntime_cuda_conversions
 {
 namespace
 {
@@ -232,12 +238,11 @@ TensorMetadata validate_metadata(const TensorMsg & msg)
   }
 
   const auto expected_strides = contiguous_strides(metadata.shape);
-  if (!msg.strides.empty()) {
-    if (msg.strides.size() != expected_strides.size() ||
-      !std::equal(msg.strides.begin(), msg.strides.end(), expected_strides.begin()))
-    {
-      throw std::invalid_argument("ONNX Runtime conversion requires contiguous tensor strides");
-    }
+  if (!msg.strides.empty() &&
+    (msg.strides.size() != expected_strides.size() ||
+    !std::equal(msg.strides.begin(), msg.strides.end(), expected_strides.begin())))
+  {
+    throw std::invalid_argument("ONNX Runtime conversion requires contiguous tensor strides");
   }
 
   metadata.byte_count = checked_multiply(
@@ -261,13 +266,21 @@ void validate_memory_info(
 {
   const auto device_type = memory_info.GetDeviceType();
   const std::string & backend = msg.data.get_backend_type();
-  if (backend != "cpu") {
-    throw std::invalid_argument(
-            "onnxruntime_conversions requires CPU rosidl buffer storage");
+  if (backend == "cpu") {
+    if (device_type != OrtMemoryInfoDeviceType_CPU) {
+      throw std::invalid_argument("CPU buffer requires CPU Ort::MemoryInfo");
+    }
+    return;
   }
-  if (device_type != OrtMemoryInfoDeviceType_CPU) {
-    throw std::invalid_argument("CPU buffer requires CPU Ort::MemoryInfo");
+  if (backend == "cuda") {
+    if (device_type != OrtMemoryInfoDeviceType_GPU ||
+      memory_info.GetAllocatorName() != "Cuda")
+    {
+      throw std::invalid_argument("CUDA buffer requires CUDA Ort::MemoryInfo");
+    }
+    return;
   }
+  throw std::invalid_argument("Unsupported rosidl buffer backend '" + backend + "'");
 }
 
 uint8_t empty_storage;
@@ -280,6 +293,8 @@ struct OrtTensorView::Impl
   : owner(std::move(owner_arg)), value(nullptr) {}
 
   std::shared_ptr<const TensorMsg> owner;
+  std::optional<cuda_buffer_backend::ReadHandle> read_handle;
+  std::optional<cuda_buffer_backend::WriteHandle> write_handle;
   Ort::Value value;
 };
 
@@ -310,7 +325,8 @@ const Ort::Value & OrtTensorView::value() const
 
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
-  ONNXTensorElementDataType dtype)
+  ONNXTensorElementDataType dtype,
+  const std::string & backend)
 {
   size_t element_count = 1;
   for (const int64_t dimension : shape) {
@@ -333,13 +349,23 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
   msg->strides.assign(strides.begin(), strides.end());
   msg->byte_offset = 0;
 
-  msg->data.resize(byte_count);
-  return msg;
+  if (backend == "cpu") {
+    msg->data.resize(byte_count);
+    return msg;
+  }
+  if (backend == "cuda") {
+    auto cuda_impl =
+      std::make_unique<cuda_buffer_backend::CudaBufferImpl<uint8_t>>(byte_count);
+    msg->data = rosidl::Buffer<uint8_t>(std::move(cuda_impl));
+    return msg;
+  }
+  throw std::invalid_argument("Unsupported allocation backend '" + backend + "'");
 }
 
 OrtTensorView from_input_tensor_msg(
   std::shared_ptr<const TensorMsg> msg,
-  const Ort::MemoryInfo & memory_info)
+  const Ort::MemoryInfo & memory_info,
+  void * execution_stream)
 {
   if (!msg) {
     throw std::invalid_argument("Input tensor message must not be null");
@@ -348,9 +374,25 @@ OrtTensorView from_input_tensor_msg(
   validate_memory_info(*msg, memory_info);
   auto impl = std::make_unique<OrtTensorView::Impl>(msg);
 
-  void * data = msg->data.empty() ?
-    static_cast<void *>(&empty_storage) :
-    const_cast<void *>(static_cast<const void *>(msg->data.data()));
+  void * data = nullptr;
+  if (msg->data.get_backend_type() == "cpu") {
+    data = msg->data.empty() ?
+      static_cast<void *>(&empty_storage) :
+      const_cast<void *>(static_cast<const void *>(msg->data.data()));
+  } else {
+    const auto * cuda_impl =
+      dynamic_cast<const cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(
+      msg->data.get_impl());
+    if (!cuda_impl) {
+      throw std::runtime_error("CUDA backend is not a CudaBufferImpl");
+    }
+    if (memory_info.GetDeviceId() != cuda_impl->get_device_id()) {
+      throw std::invalid_argument("CUDA buffer and Ort::MemoryInfo device IDs differ");
+    }
+    const auto stream = reinterpret_cast<cudaStream_t>(execution_stream);
+    impl->read_handle.emplace(cuda_impl->get_cuda_buffer().get_read_handle(stream));
+    data = const_cast<uint8_t *>(impl->read_handle->get_ptr());
+  }
 
   data = static_cast<uint8_t *>(data) + msg->byte_offset;
   impl->value = Ort::Value::CreateTensor(
@@ -361,7 +403,8 @@ OrtTensorView from_input_tensor_msg(
 
 OrtTensorView from_output_tensor_msg(
   std::shared_ptr<TensorMsg> msg,
-  const Ort::MemoryInfo & memory_info)
+  const Ort::MemoryInfo & memory_info,
+  void * execution_stream)
 {
   if (!msg) {
     throw std::invalid_argument("Output tensor message must not be null");
@@ -370,9 +413,26 @@ OrtTensorView from_output_tensor_msg(
   validate_memory_info(*msg, memory_info);
   auto impl = std::make_unique<OrtTensorView::Impl>(msg);
 
-  void * data = msg->data.empty() ?
-    static_cast<void *>(&empty_storage) :
-    static_cast<void *>(msg->data.data());
+  void * data = nullptr;
+  if (msg->data.get_backend_type() == "cpu") {
+    data = msg->data.empty() ?
+      static_cast<void *>(&empty_storage) :
+      static_cast<void *>(msg->data.data());
+  } else {
+    auto * cuda_impl =
+      dynamic_cast<cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(
+      msg->data.get_impl());
+    if (!cuda_impl) {
+      throw std::runtime_error("CUDA backend is not a CudaBufferImpl");
+    }
+    if (memory_info.GetDeviceId() != cuda_impl->get_device_id()) {
+      throw std::invalid_argument("CUDA buffer and Ort::MemoryInfo device IDs differ");
+    }
+    const auto stream = reinterpret_cast<cudaStream_t>(execution_stream);
+    cuda_impl->set_stream(stream);
+    impl->write_handle.emplace(cuda_impl->get_cuda_buffer().get_write_handle(stream));
+    data = impl->write_handle->get_ptr();
+  }
 
   data = static_cast<uint8_t *>(data) + msg->byte_offset;
   impl->value = Ort::Value::CreateTensor(
@@ -423,4 +483,4 @@ std::unique_ptr<TensorMsg> to_tensor_msg(const Ort::Value & value)
   return msg;
 }
 
-}  // namespace onnxruntime_conversions
+}  // namespace onnxruntime_cuda_conversions

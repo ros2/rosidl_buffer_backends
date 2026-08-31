@@ -22,17 +22,17 @@
 #include <stdexcept>
 #include <vector>
 
-#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
+#include "onnxruntime_cuda_conversions/onnxruntime_cuda_conversions.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include "std_msgs/msg/u_int32.hpp"
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
-class OnnxRuntimeTensorPublisher : public rclcpp::Node
+class OnnxRuntimeCudaTensorPublisher : public rclcpp::Node
 {
 public:
-  explicit OnnxRuntimeTensorPublisher(const rclcpp::NodeOptions & options)
-  : Node("onnxruntime_tensor_publisher", options),
+  explicit OnnxRuntimeCudaTensorPublisher(const rclcpp::NodeOptions & options)
+  : Node("onnxruntime_cuda_tensor_publisher", options),
     memory_info_("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault)
   {
     this->declare_parameter<int>("publish_rate_ms", 100);
@@ -40,17 +40,16 @@ public:
     if (cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking) != cudaSuccess) {
       throw std::runtime_error("Failed to create publisher CUDA stream");
     }
-
     publisher_ = this->create_publisher<tensor_msgs::msg::ExperimentalTensor>(
-      "test_onnxruntime_tensor", 10);
+      "test_onnxruntime_cuda_tensor", 10);
     count_publisher_ = this->create_publisher<std_msgs::msg::UInt32>(
       "publisher_count", 10);
     timer_ = this->create_wall_timer(
       std::chrono::milliseconds(publish_rate),
-      std::bind(&OnnxRuntimeTensorPublisher::publish, this));
+      std::bind(&OnnxRuntimeCudaTensorPublisher::publish, this));
   }
 
-  ~OnnxRuntimeTensorPublisher() override
+  ~OnnxRuntimeCudaTensorPublisher() override
   {
     if (stream_ != nullptr) {
       cudaStreamDestroy(stream_);
@@ -60,22 +59,23 @@ public:
 private:
   void publish()
   {
-    auto msg = onnxruntime_conversions::allocate_tensor_msg(
+    auto msg = onnxruntime_cuda_conversions::allocate_tensor_msg(
       {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
     const std::vector<float> values(6, static_cast<float>(count_ + 1));
     {
-      auto owner = std::shared_ptr<onnxruntime_conversions::TensorMsg>(std::move(msg));
-      auto view = onnxruntime_conversions::from_output_tensor_msg(
+      auto owner = std::shared_ptr<onnxruntime_cuda_conversions::TensorMsg>(
+        std::move(msg));
+      auto view = onnxruntime_cuda_conversions::from_output_tensor_msg(
         owner, memory_info_, stream_);
-      const auto result = cudaMemcpyAsync(
-        view.value().GetTensorMutableRawData(), values.data(),
-        values.size() * sizeof(float), cudaMemcpyHostToDevice, stream_);
-      if (result != cudaSuccess) {
+      if (cudaMemcpyAsync(
+          view.value().GetTensorMutableRawData(), values.data(),
+          values.size() * sizeof(float), cudaMemcpyHostToDevice, stream_) != cudaSuccess)
+      {
         throw std::runtime_error("Failed to populate CUDA tensor");
       }
-      msg = std::make_unique<onnxruntime_conversions::TensorMsg>(std::move(*owner));
+      msg = std::make_unique<onnxruntime_cuda_conversions::TensorMsg>(
+        std::move(*owner));
     }
-
     publisher_->publish(std::move(msg));
     std_msgs::msg::UInt32 count_msg;
     count_msg.data = ++count_;
@@ -90,4 +90,4 @@ private:
   uint32_t count_{0};
 };
 
-RCLCPP_COMPONENTS_REGISTER_NODE(OnnxRuntimeTensorPublisher)
+RCLCPP_COMPONENTS_REGISTER_NODE(OnnxRuntimeCudaTensorPublisher)

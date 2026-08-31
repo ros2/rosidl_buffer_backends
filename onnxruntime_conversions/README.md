@@ -17,13 +17,17 @@ auto output =
 io_binding.BindOutput("output", output.value());
 ```
 
-`OrtTensorView` keeps the message storage and any CUDA buffer handle alive.
-Keep the view alive while its `Ort::Value` is bound or used by a session.
+`OrtTensorView` keeps the message storage alive. Keep the view alive while its
+`Ort::Value` is bound or used by a session.
 
-CPU buffers are always supported. If `cuda_buffer` is available while this
-package is built, CUDA buffers are also supported. Pass the same CUDA stream
-to the conversion functions that is configured as ONNX Runtime's
-`user_compute_stream`.
+`ExperimentalTensor` carries DLPack-compatible dtype, shape, stride, and
+offset metadata, but ONNX Runtime's public C++ API has no direct
+`from_dlpack`. This package validates that metadata and uses
+`Ort::Value::CreateTensor` to wrap the message's CPU pointer without copying.
+
+This package is always CPU-only and uses the released `onnxruntime_vendor`
+package from ros-controls. Use `onnxruntime_cuda_conversions` when both CPU and
+CUDA-backed tensor messages must be handled by a CUDA-capable ONNX Runtime.
 
 ## Limitations
 
