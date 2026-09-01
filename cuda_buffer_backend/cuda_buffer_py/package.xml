@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cuda_buffer_py</name>
+  <version>0.1.2</version>
+  <description>Python bindings for creating CUDA-backed rosidl buffers for rclpy.</description>
+
+  <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
+  <license>Apache-2.0</license>
+  <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <depend>cuda_buffer</depend>
+  <depend>rosidl_buffer</depend>
+  <depend>rosidl_buffer_py</depend>
+
+  <exec_depend>cuda_buffer_backend</exec_depend>
+
+  <build_depend>pybind11-dev</build_depend>
+  <build_depend>python3-dev</build_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>sensor_msgs</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

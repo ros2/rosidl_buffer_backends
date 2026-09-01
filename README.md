@@ -8,6 +8,8 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
 
 - **cuda_buffer** -- Core CUDA buffer library (VMM-backed IPC memory pool,
   host endpoint manager, ReadHandle/WriteHandle with CUDA event sync).
+- **cuda_buffer_py** -- Python CUDA buffer allocation and scoped read/write
+  handles for rclpy publishers and subscribers.
 - **cuda_buffer_backend** -- BufferBackend plugin for CUDA IPC transport.
 - **cuda_buffer_backend_msgs** -- ROS 2 message definitions for CUDA buffer
   descriptors.
