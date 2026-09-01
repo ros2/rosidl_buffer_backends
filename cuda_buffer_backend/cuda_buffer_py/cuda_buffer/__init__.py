@@ -25,7 +25,6 @@ from cuda_buffer._cuda_buffer_py import _from_input_buffer
 from cuda_buffer._cuda_buffer_py import _from_input_cpu_data
 from cuda_buffer._cuda_buffer_py import _from_output_buffer
 from cuda_buffer._cuda_buffer_py import _from_size
-from cuda_buffer._cuda_buffer_py import _get_internal_stream
 from cuda_buffer._cuda_buffer_py import CudaReadHandle
 from cuda_buffer._cuda_buffer_py import CudaWriteHandle
 from rosidl_buffer import Buffer
@@ -50,11 +49,6 @@ class CudaBuffer:
     def allocate_buffer(size: int) -> Buffer:
         """Allocate an uninitialized CUDA-backed buffer without synchronizing."""
         return _allocate_buffer(size)
-
-    @staticmethod
-    def get_internal_stream() -> int:
-        """Return the CUDA stream used when no explicit stream is supplied."""
-        return _get_internal_stream()
 
     @staticmethod
     def from_output_buffer(
