@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
+#ifndef ONNXRUNTIME_CONVERSIONS__DETAIL__ONNXRUNTIME_CONVERSIONS_IMPL_HPP_
+#define ONNXRUNTIME_CONVERSIONS__DETAIL__ONNXRUNTIME_CONVERSIONS_IMPL_HPP_
 
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "rosidl_buffer/buffer.hpp"
 
@@ -33,15 +36,15 @@
 
 namespace onnxruntime_conversions
 {
-namespace
+namespace detail
 {
 
-constexpr uint8_t kDlInt = 0;
-constexpr uint8_t kDlUInt = 1;
-constexpr uint8_t kDlFloat = 2;
-constexpr uint8_t kDlBfloat = 4;
-constexpr uint8_t kDlComplex = 5;
-constexpr uint8_t kDlBool = 6;
+inline constexpr uint8_t kDlInt = 0;
+inline constexpr uint8_t kDlUInt = 1;
+inline constexpr uint8_t kDlFloat = 2;
+inline constexpr uint8_t kDlBfloat = 4;
+inline constexpr uint8_t kDlComplex = 5;
+inline constexpr uint8_t kDlBool = 6;
 
 struct TensorMetadata
 {
@@ -51,7 +54,7 @@ struct TensorMetadata
   size_t byte_count;
 };
 
-size_t checked_multiply(size_t lhs, size_t rhs, const char * context)
+inline size_t checked_multiply(size_t lhs, size_t rhs, const char * context)
 {
   if (rhs != 0 && lhs > std::numeric_limits<size_t>::max() / rhs) {
     throw std::overflow_error(context);
@@ -59,7 +62,7 @@ size_t checked_multiply(size_t lhs, size_t rhs, const char * context)
   return lhs * rhs;
 }
 
-std::vector<int64_t> contiguous_strides(const std::vector<int64_t> & shape)
+inline std::vector<int64_t> contiguous_strides(const std::vector<int64_t> & shape)
 {
   std::vector<int64_t> strides(shape.size());
   int64_t stride = 1;
@@ -75,7 +78,7 @@ std::vector<int64_t> contiguous_strides(const std::vector<int64_t> & shape)
   return strides;
 }
 
-size_t element_size(ONNXTensorElementDataType dtype)
+inline size_t element_size(ONNXTensorElementDataType dtype)
 {
   switch (dtype) {
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL:
@@ -103,7 +106,7 @@ size_t element_size(ONNXTensorElementDataType dtype)
   }
 }
 
-ONNXTensorElementDataType dtype_from_msg(const TensorMsg & msg)
+inline ONNXTensorElementDataType dtype_from_msg(const TensorMsg & msg)
 {
   if (msg.dtype_lanes != 1) {
     throw std::invalid_argument("ONNX Runtime tensors require dtype_lanes == 1");
@@ -153,7 +156,7 @@ ONNXTensorElementDataType dtype_from_msg(const TensorMsg & msg)
   throw std::invalid_argument("ExperimentalTensor dtype is unsupported by ONNX Runtime");
 }
 
-void set_msg_dtype(TensorMsg & msg, ONNXTensorElementDataType dtype)
+inline void set_msg_dtype(TensorMsg & msg, ONNXTensorElementDataType dtype)
 {
   msg.dtype_lanes = 1;
   switch (dtype) {
@@ -222,7 +225,7 @@ void set_msg_dtype(TensorMsg & msg, ONNXTensorElementDataType dtype)
   }
 }
 
-TensorMetadata validate_metadata(const TensorMsg & msg)
+inline TensorMetadata validate_metadata(const TensorMsg & msg)
 {
   TensorMetadata metadata;
   metadata.shape.assign(msg.shape.begin(), msg.shape.end());
@@ -265,7 +268,7 @@ TensorMetadata validate_metadata(const TensorMsg & msg)
   return metadata;
 }
 
-void validate_memory_info(
+inline void validate_memory_info(
   const TensorMsg & msg,
   const Ort::MemoryInfo & memory_info)
 {
@@ -282,17 +285,16 @@ void validate_memory_info(
       return;
     }
 #endif
-    throw std::invalid_argument(
-            "Unsupported rosidl buffer backend '" + backend + "'");
+    throw std::invalid_argument("Unsupported rosidl buffer backend '" + backend + "'");
   }
   if (device_type != OrtMemoryInfoDeviceType_CPU) {
     throw std::invalid_argument("CPU buffer requires CPU Ort::MemoryInfo");
   }
 }
 
-uint8_t empty_storage;
+inline uint8_t empty_storage = 0;
 
-}  // namespace
+}  // namespace detail
 
 struct OrtTensorView::Impl
 {
@@ -307,16 +309,16 @@ struct OrtTensorView::Impl
   Ort::Value value;
 };
 
-OrtTensorView::OrtTensorView(std::unique_ptr<Impl> impl)
+inline OrtTensorView::OrtTensorView(std::unique_ptr<Impl> impl)
 : impl_(std::move(impl)) {}
 
-OrtTensorView::OrtTensorView(OrtTensorView &&) noexcept = default;
+inline OrtTensorView::OrtTensorView(OrtTensorView &&) noexcept = default;
 
-OrtTensorView & OrtTensorView::operator=(OrtTensorView &&) noexcept = default;
+inline OrtTensorView & OrtTensorView::operator=(OrtTensorView &&) noexcept = default;
 
-OrtTensorView::~OrtTensorView() = default;
+inline OrtTensorView::~OrtTensorView() = default;
 
-Ort::Value & OrtTensorView::value()
+inline Ort::Value & OrtTensorView::value()
 {
   if (!impl_) {
     throw std::logic_error("OrtTensorView has been moved from");
@@ -324,7 +326,7 @@ Ort::Value & OrtTensorView::value()
   return impl_->value;
 }
 
-const Ort::Value & OrtTensorView::value() const
+inline const Ort::Value & OrtTensorView::value() const
 {
   if (!impl_) {
     throw std::logic_error("OrtTensorView has been moved from");
@@ -332,7 +334,7 @@ const Ort::Value & OrtTensorView::value() const
   return impl_->value;
 }
 
-std::unique_ptr<TensorMsg> allocate_tensor_msg(
+inline std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
   const std::string & backend)
@@ -345,16 +347,16 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
     if (static_cast<uint64_t>(dimension) > std::numeric_limits<size_t>::max()) {
       throw std::overflow_error("Tensor shape dimension exceeds size_t");
     }
-    element_count = checked_multiply(
+    element_count = detail::checked_multiply(
       element_count, static_cast<size_t>(dimension), "Tensor element count overflow");
   }
-  const size_t byte_count = checked_multiply(
-    element_count, element_size(dtype), "Tensor byte count overflow");
+  const size_t byte_count = detail::checked_multiply(
+    element_count, detail::element_size(dtype), "Tensor byte count overflow");
 
   auto msg = std::make_unique<TensorMsg>();
-  set_msg_dtype(*msg, dtype);
+  detail::set_msg_dtype(*msg, dtype);
   msg->shape.assign(shape.begin(), shape.end());
-  const auto strides = contiguous_strides(shape);
+  const auto strides = detail::contiguous_strides(shape);
   msg->strides.assign(strides.begin(), strides.end());
   msg->byte_offset = 0;
 
@@ -373,7 +375,7 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
   throw std::invalid_argument("Unsupported allocation backend '" + backend + "'");
 }
 
-OrtTensorView from_input_tensor_msg(
+inline OrtTensorView from_input_tensor_msg(
   std::shared_ptr<const TensorMsg> msg,
   const Ort::MemoryInfo & memory_info,
   void * execution_stream)
@@ -381,14 +383,14 @@ OrtTensorView from_input_tensor_msg(
   if (!msg) {
     throw std::invalid_argument("Input tensor message must not be null");
   }
-  const TensorMetadata metadata = validate_metadata(*msg);
-  validate_memory_info(*msg, memory_info);
+  const detail::TensorMetadata metadata = detail::validate_metadata(*msg);
+  detail::validate_memory_info(*msg, memory_info);
   auto impl = std::make_unique<OrtTensorView::Impl>(msg);
 
   void * data = nullptr;
   if (msg->data.get_backend_type() == "cpu") {
     data = msg->data.empty() ?
-      static_cast<void *>(&empty_storage) :
+      static_cast<void *>(&detail::empty_storage) :
       const_cast<void *>(static_cast<const void *>(msg->data.data()));
   } else {
 #ifdef ONNXRUNTIME_CONVERSIONS_HAS_CUDA
@@ -417,7 +419,7 @@ OrtTensorView from_input_tensor_msg(
   return OrtTensorView(std::move(impl));
 }
 
-OrtTensorView from_output_tensor_msg(
+inline OrtTensorView from_output_tensor_msg(
   std::shared_ptr<TensorMsg> msg,
   const Ort::MemoryInfo & memory_info,
   void * execution_stream)
@@ -425,14 +427,14 @@ OrtTensorView from_output_tensor_msg(
   if (!msg) {
     throw std::invalid_argument("Output tensor message must not be null");
   }
-  const TensorMetadata metadata = validate_metadata(*msg);
-  validate_memory_info(*msg, memory_info);
+  const detail::TensorMetadata metadata = detail::validate_metadata(*msg);
+  detail::validate_memory_info(*msg, memory_info);
   auto impl = std::make_unique<OrtTensorView::Impl>(msg);
 
   void * data = nullptr;
   if (msg->data.get_backend_type() == "cpu") {
     data = msg->data.empty() ?
-      static_cast<void *>(&empty_storage) :
+      static_cast<void *>(&detail::empty_storage) :
       static_cast<void *>(msg->data.data());
   } else {
 #ifdef ONNXRUNTIME_CONVERSIONS_HAS_CUDA
@@ -462,7 +464,7 @@ OrtTensorView from_output_tensor_msg(
   return OrtTensorView(std::move(impl));
 }
 
-void to_tensor_msg(TensorMsg & msg, const Ort::Value & value)
+inline void to_tensor_msg(TensorMsg & msg, const Ort::Value & value)
 {
   if (!value.IsTensor()) {
     throw std::invalid_argument("Ort::Value is not a tensor");
@@ -477,8 +479,8 @@ void to_tensor_msg(TensorMsg & msg, const Ort::Value & value)
   const auto type_info = value.GetTensorTypeAndShapeInfo();
   const auto dtype = type_info.GetElementType();
   const auto shape = type_info.GetShape();
-  const size_t byte_count = checked_multiply(
-    type_info.GetElementCount(), element_size(dtype), "Tensor byte count overflow");
+  const size_t byte_count = detail::checked_multiply(
+    type_info.GetElementCount(), detail::element_size(dtype), "Tensor byte count overflow");
   if (byte_count > msg.data.size()) {
     throw std::out_of_range("Ort::Value tensor exceeds the destination buffer");
   }
@@ -486,14 +488,14 @@ void to_tensor_msg(TensorMsg & msg, const Ort::Value & value)
   if (byte_count != 0) {
     std::memcpy(msg.data.data(), value.GetTensorRawData(), byte_count);
   }
-  set_msg_dtype(msg, dtype);
+  detail::set_msg_dtype(msg, dtype);
   msg.shape.assign(shape.begin(), shape.end());
-  const auto strides = contiguous_strides(shape);
+  const auto strides = detail::contiguous_strides(shape);
   msg.strides.assign(strides.begin(), strides.end());
   msg.byte_offset = 0;
 }
 
-std::unique_ptr<TensorMsg> to_tensor_msg(const Ort::Value & value)
+inline std::unique_ptr<TensorMsg> to_tensor_msg(const Ort::Value & value)
 {
   if (!value.IsTensor()) {
     throw std::invalid_argument("Ort::Value is not a tensor");
@@ -505,3 +507,5 @@ std::unique_ptr<TensorMsg> to_tensor_msg(const Ort::Value & value)
 }
 
 }  // namespace onnxruntime_conversions
+
+#endif  // ONNXRUNTIME_CONVERSIONS__DETAIL__ONNXRUNTIME_CONVERSIONS_IMPL_HPP_
