@@ -12,7 +12,8 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <depend>rosidl_buffer</depend>
+  <build_depend>pybind11-dev</build_depend>
+  <build_depend>python3-dev</build_depend>
 
   <exec_depend>pytorch_vendor</exec_depend>
   <exec_depend>rosidl_buffer_py</exec_depend>
@@ -21,6 +22,12 @@
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>cuda_buffer_backend</test_depend>
+  <test_depend>cuda_buffer_py</test_depend>
+  <test_depend>launch_ros</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>rmw_fastrtps_cpp</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

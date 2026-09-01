@@ -28,6 +28,7 @@ import torch
 from torch_conversions._adapter import TensorMetadata
 from torch_conversions._adapter import TorchConversionRegistry
 from torch_conversions._cpu_adapter import CpuTorchConversionAdapter
+from torch_conversions._cuda_adapter import CudaTorchConversionAdapter
 
 
 _DTYPE_TO_DLPACK = {
@@ -46,8 +47,11 @@ _DLPACK_TO_DTYPE = {value: key for key, value in _DTYPE_TO_DLPACK.items()}
 
 _registry = TorchConversionRegistry()
 _registry.register(CpuTorchConversionAdapter())
+_registry.register(CudaTorchConversionAdapter())
 
 for _entry_point in entry_points(group='torch_conversions.adapters'):
+    if _entry_point.name in {'cpu', 'cuda'}:
+        continue
     _entry_point.load()(_registry)
 
 

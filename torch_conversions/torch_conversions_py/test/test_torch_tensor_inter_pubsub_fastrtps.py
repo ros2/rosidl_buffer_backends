@@ -59,7 +59,7 @@ def generate_test_description():
         ])
 
     publisher = Node(
-        package='torch_conversions_py_cuda_plugin',
+        package='torch_conversions_py',
         executable='torch_tensor_publisher_node',
         output='screen',
         parameters=[{

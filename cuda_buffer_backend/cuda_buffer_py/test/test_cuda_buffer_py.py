@@ -61,6 +61,11 @@ def test_allocate_buffer_is_uninitialized_cuda_storage():
     assert len(buffer) == 64
 
 
+def test_internal_stream_is_exposed():
+    assert isinstance(CudaBuffer.get_internal_stream(), int)
+    assert CudaBuffer.get_internal_stream() == CudaBuffer.get_internal_stream()
+
+
 def test_from_output_cuda_buffer():
     buffer = CudaBuffer.allocate_buffer(64)
 
@@ -68,6 +73,7 @@ def test_from_output_cuda_buffer():
         assert isinstance(handle, CudaWriteHandle)
         assert handle.buffer is buffer
         assert handle.device_ptr != 0
+        assert handle.device_id >= 0
         assert handle.get_ptr() == handle.device_ptr
         assert not handle.closed
 
@@ -112,6 +118,7 @@ def test_from_input_cuda_buffer():
     with CudaBuffer.from_input_buffer(buffer) as handle:
         assert isinstance(handle, CudaReadHandle)
         assert handle.device_ptr != 0
+        assert handle.device_id >= 0
         assert handle.get_ptr() == handle.device_ptr
         assert not handle.closed
 

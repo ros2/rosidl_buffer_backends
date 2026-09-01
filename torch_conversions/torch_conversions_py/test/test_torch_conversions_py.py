@@ -13,6 +13,8 @@
 # limitations under the License.
 
 from array import array
+import subprocess
+import sys
 
 import pytest
 
@@ -30,6 +32,29 @@ from torch_conversions._cpu_adapter import CpuTorchConversionAdapter
 
 
 CUDA_AVAILABLE = torch_conversions._adapter_available('cuda')
+
+
+def test_cpu_import_does_not_require_cuda_buffer():
+    subprocess.run(
+        [
+            sys.executable,
+            '-c',
+            (
+                "import sys; sys.modules['cuda_buffer'] = None; "
+                'import torch, torch_conversions; '
+                'msg = torch_conversions.allocate_tensor_msg('
+                "(1,), torch.uint8, 'cpu'); "
+                'assert len(msg.data) == 1; '
+                '\ntry: torch_conversions.allocate_tensor_msg('
+                "(1,), torch.uint8, 'cuda')"
+                '\nexcept RuntimeError as error: '
+                " assert 'cuda_buffer_py' in str(error)"
+                '\nelse: raise AssertionError("'
+                'CUDA request unexpectedly succeeded")'
+            ),
+        ],
+        check=True,
+    )
 
 
 def test_conversion_registry_rejects_duplicate_device():
@@ -192,5 +217,5 @@ def test_cpu_only_configuration_defaults_to_cpu_and_rejects_cuda():
     msg = allocate_tensor_msg((4,), torch.float32)
 
     assert isinstance(msg.data, array)
-    with pytest.raises(RuntimeError, match='conversion adapter'):
+    with pytest.raises(RuntimeError, match='cuda_buffer_py|not available'):
         allocate_tensor_msg((4,), torch.float32, 'cuda')
