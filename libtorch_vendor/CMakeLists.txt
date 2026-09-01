@@ -10,7 +10,7 @@ find_package(ament_cmake_vendor_package REQUIRED)
 set(LIBTORCH_VERSION "" CACHE STRING
   "LibTorch version to download. Auto-selected per CUDA variant if empty.")
 set(LIBTORCH_CUDA_VERSION "" CACHE STRING
-  "CUDA variant override (cu118, cu121, cu124, cu126, cu128, cu129, cpu). Auto-detected if empty.")
+  "CUDA variant override (cu118, cu121, cu124, cu126, cu128, cu129, cu130, cu132, cpu). Auto-detected if empty.")
 
 option(FORCE_BUILD_VENDOR_PKG
   "Build vendor packages from source, even if system-installed packages are available"
@@ -19,7 +19,11 @@ option(FORCE_BUILD_VENDOR_PKG
 if(LIBTORCH_CUDA_VERSION STREQUAL "")
   find_package(CUDAToolkit QUIET)
   if(CUDAToolkit_FOUND)
-    if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.9")
+    if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "13.2")
+      set(LIBTORCH_CUDA_VERSION "cu132")
+    elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "13.0")
+      set(LIBTORCH_CUDA_VERSION "cu130")
+    elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.9")
       set(LIBTORCH_CUDA_VERSION "cu129")
     elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8")
       set(LIBTORCH_CUDA_VERSION "cu128")
@@ -40,7 +44,9 @@ if(LIBTORCH_CUDA_VERSION STREQUAL "")
 endif()
 
 if(LIBTORCH_VERSION STREQUAL "")
-  if(LIBTORCH_CUDA_VERSION STREQUAL "cu118")
+  if(LIBTORCH_CUDA_VERSION STREQUAL "cu132")
+    set(LIBTORCH_VERSION "2.12.0")
+  elseif(LIBTORCH_CUDA_VERSION STREQUAL "cu118")
     set(LIBTORCH_VERSION "2.7.1")
   elseif(LIBTORCH_CUDA_VERSION STREQUAL "cu121")
     set(LIBTORCH_VERSION "2.5.1")

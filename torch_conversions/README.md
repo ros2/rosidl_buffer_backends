@@ -19,6 +19,7 @@ and interoperate over the wire without re-encoding shape / dtype metadata.
 |---|---|
 | `tensor_msgs` | `ExperimentalTensor.msg` definition: DLPack-aligned `{dtype_code, dtype_bits, dtype_lanes}`, `shape[]`, `strides[]`, `byte_offset`, `data[]`. |
 | `torch_conversions` | Header-only library: allocation, `at::Tensor` ↔ `ExperimentalTensor.msg` conversion, DLPack export, and CUDA stream helpers. |
+| `torch_conversions_py` | Python CPU conversions and optional, lazily loaded CUDA buffer support with scoped DLPack ownership. |
 
 The `uint8[] data` field maps to `rosidl::Buffer<uint8_t>`,
 so storage and transport are delegated to whichever buffer backend is
@@ -120,6 +121,48 @@ publisher_->publish(std::move(msg));
 `to_tensor_msg(t)` allocates a message, copies tensor data into `msg.data`,
 and updates shape / strides / dtype metadata to match `t`. Use
 `to_tensor_msg(*msg, t)` when you want to reuse a pre-sized message buffer.
+
+### Python
+
+CPU-backed conversions are available from `torch_conversions_py`. CUDA-backed
+conversions are enabled when the optional `cuda_buffer_py` package and a
+CUDA-enabled PyTorch runtime are available. CPU imports do not load
+`cuda_buffer_py`; explicit CUDA requests report a clear error when it is
+missing or CUDA is unavailable. Future external adapters can register through
+the `torch_conversions.adapters` Python entry-point group.
+
+```python
+import torch
+from torch_conversions import allocate_tensor_msg
+from torch_conversions import from_input_tensor_msg
+from torch_conversions import from_output_tensor_msg
+
+# Publisher
+# Fill a preallocated message without copying.
+msg = allocate_tensor_msg((480, 640, 3), torch.uint8, 'cuda')
+output = from_output_tensor_msg(msg)
+output.fill_(42)
+publisher.publish(msg)
+
+# Subscriber
+def callback(msg):
+    tensor = from_input_tensor_msg(msg)  # Independent clone.
+    view = from_input_tensor_msg(msg, clone=False)  # Zero-copy, treat as read-only.
+```
+
+#### Publishing an existing tensor
+
+```python
+from torch_conversions import to_tensor_msg
+
+# CUDA tensors produce CUDA-backed messages; CPU tensors produce CPU messages.
+msg = to_tensor_msg(torch.arange(12, device='cuda').reshape(3, 4))
+publisher.publish(msg)
+```
+
+`to_tensor_msg(tensor)` copies non-empty tensor data into message-owned storage.
+To avoid this copy, use `allocate_tensor_msg()` and write directly through the
+view returned by `from_output_tensor_msg()`.
 
 ## License
 
