@@ -20,12 +20,16 @@ conversion libraries that build on the same buffer infrastructure.
   `libtorch_vendor`.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
 - **onnxruntime_gpu_vendor** -- Source-configurable vendor for the official
-  ONNX Runtime CPU, CUDA 12, or CUDA 13 distributions.
-- **onnxruntime_conversions** -- C++ zero-copy views between tensor messages
-  and ONNX Runtime, with CUDA-buffer support when the GPU vendor variant and
-  CUDA dependencies are available.
-- **onnxruntime_conversions_py** -- Python CPU and CUDA conversions using
-  NumPy views or ONNX Runtime's public DLPack protocol.
+  ONNX Runtime C++ SDK and native CPU, CUDA 12, or CUDA 13 runtime.
+- **python_onnxruntime_vendor** -- Coordinated vendor for the matching Python
+  ONNX Runtime wheel.
+- **onnxruntime_conversions** -- C++ ROS package under the shared
+  `onnxruntime_conversions/` source container, providing zero-copy views
+  between tensor messages and ONNX Runtime, with CUDA-buffer support when the
+  GPU vendor variant and CUDA dependencies are available.
+- **onnxruntime_conversions_py** -- Python ROS package under the shared
+  `onnxruntime_conversions/` source container, providing CPU and CUDA
+  conversions using NumPy views or ONNX Runtime's public DLPack protocol.
 - **torch_conversions** -- Header-only helper library that converts between
   `tensor_msgs/ExperimentalTensor` and `at::Tensor` and exposes DLPack import /
   export. Replaces the older `torch_buffer_backend` plugin approach with a
@@ -71,19 +75,23 @@ conversion libraries that build on the same buffer infrastructure.
 
 `onnxruntime_gpu_vendor` selects a CPU archive when no CUDA toolkit is found
 and the matching CUDA 12 or CUDA 13 archive otherwise. Source builds can
-override this with `ONNXRUNTIME_GPU_VENDOR_VARIANT`. A binary package contains
-the variant selected when that package was built; it does not change after
-installation.
+override this with `ONNXRUNTIME_GPU_VENDOR_VARIANT`. `python_onnxruntime_vendor`
+installs the matching `onnxruntime` or `onnxruntime-gpu` wheel and uses the
+native vendor libraries as the canonical runtime. A binary package contains
+the variant selected when it was built; it does not change after installation.
 
-The Python conversion package requires the user to install a matching
-`onnxruntime` or `onnxruntime-gpu` Python distribution.
+The vendored Python runtime is constrained to the Python ABI, operating system,
+and architecture of its wheel. The C++ and Python conversion packages depend
+on their corresponding coordinated vendor packages; no external ONNX Runtime
+installation is required.
 
 Per-package build, test, and run details live in each package's README:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
-- [`onnxruntime_conversions/README.md`](onnxruntime_conversions/README.md)
-- [`onnxruntime_conversions_py/README.md`](onnxruntime_conversions_py/README.md)
+- [`onnxruntime_conversions/onnxruntime_conversions/README.md`](onnxruntime_conversions/onnxruntime_conversions/README.md)
+- [`onnxruntime_conversions/onnxruntime_conversions_py/README.md`](onnxruntime_conversions/onnxruntime_conversions_py/README.md)
 - [`onnxruntime_gpu_vendor/README.md`](onnxruntime_gpu_vendor/README.md)
+- [`python_onnxruntime_vendor/README.md`](python_onnxruntime_vendor/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## API overview

@@ -13,6 +13,7 @@
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <depend>python3-numpy</depend>
+  <depend>python_onnxruntime_vendor</depend>
   <depend>tensor_msgs</depend>
 
   <build_depend>pybind11-dev</build_depend>
