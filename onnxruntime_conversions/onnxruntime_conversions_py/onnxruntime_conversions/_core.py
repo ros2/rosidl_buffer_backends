@@ -310,15 +310,18 @@ def _cuda_view(
     stream: Optional[int],
     output: bool,
 ) -> OrtTensorView:
+    if not isinstance(stream, int) or isinstance(stream, bool):
+        raise TypeError(
+            'CUDA tensor conversion requires an explicit integer stream')
+    if stream <= 0:
+        raise ValueError(
+            'CUDA tensor conversion requires a positive nonzero explicit '
+            'integer stream')
     cuda_buffer, bridge = _require_cuda()
-    resolved_stream = (
-        cuda_buffer.get_internal_stream() if stream is None else int(stream))
-    if resolved_stream == 0:
-        raise RuntimeError('CUDA tensor conversion requires a valid stream')
     factory = (
         cuda_buffer.from_output_buffer if output
         else cuda_buffer.from_input_buffer)
-    handle = factory(msg.data, resolved_stream)
+    handle = factory(msg.data, stream)
     capsule_code = (
         _DL_UINT if metadata.element_type == 9 else metadata.dtype_code)
     capsule = bridge.make_dlpack_capsule(

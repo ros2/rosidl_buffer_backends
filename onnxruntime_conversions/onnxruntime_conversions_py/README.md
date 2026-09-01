@@ -27,14 +27,32 @@ import onnxruntime as ort
 from onnxruntime_conversions import allocate_tensor_msg
 from onnxruntime_conversions import from_output_tensor_msg
 
-msg = allocate_tensor_msg((1, 4), np.float32)
-with from_output_tensor_msg(msg) as output:
-    binding.bind_ortvalue_output('output', output)
-    session.run_with_iobinding(binding)
-    binding.clear_binding_outputs()
+stream = create_cuda_stream()
+try:
+    session = ort.InferenceSession(
+        model,
+        providers=[
+            (
+                'CUDAExecutionProvider',
+                {'user_compute_stream': str(stream)},
+            ),
+            'CPUExecutionProvider',
+        ],
+    )
+    msg = allocate_tensor_msg((1, 4), np.float32, device_type='cuda')
+    with from_output_tensor_msg(msg, stream=stream) as output:
+        binding.bind_ortvalue_output('output', output.value)
+        session.run_with_iobinding(binding)
+        binding.clear_binding_outputs()
+finally:
+    destroy_cuda_stream(stream)
 ```
 
 An output view must be closed after synchronous inference and before the
-message is published. When using CUDA, pass the same explicit stream to the
-conversion functions and to the ONNX Runtime CUDA execution provider through
-its `user_compute_stream` option.
+message is published. The application owns the CUDA stream and must keep it
+alive until all conversions, inference, and queued work are complete. Create
+the stream with the CUDA runtime or the application's existing CUDA API, pass
+its nonzero integer `cudaStream_t` pointer to every conversion, and pass the
+same pointer as a decimal string to the ONNX Runtime CUDA execution provider's
+`user_compute_stream` option. CUDA conversions reject an omitted or zero
+stream. CPU conversions continue to require `stream=None`.

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from contextlib import contextmanager
+import ctypes
 import os
 import subprocess
 import sys
@@ -23,6 +25,52 @@ import onnxruntime as ort
 import pytest
 
 
+@contextmanager
+def _cuda_stream():
+    runtime = ctypes.CDLL('libcudart.so')
+    runtime.cudaStreamCreateWithFlags.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
+    runtime.cudaStreamCreateWithFlags.restype = ctypes.c_int
+    runtime.cudaStreamDestroy.argtypes = [ctypes.c_void_p]
+    runtime.cudaStreamDestroy.restype = ctypes.c_int
+    stream = ctypes.c_void_p()
+    result = runtime.cudaStreamCreateWithFlags(ctypes.byref(stream), 1)
+    if result != 0:
+        raise RuntimeError(
+            f'cudaStreamCreateWithFlags failed with error {result}')
+    try:
+        yield stream.value
+    finally:
+        if runtime.cudaStreamDestroy(stream) != 0:
+            raise RuntimeError('cudaStreamDestroy failed')
+
+
+def _with_cuda_stream(source):
+    setup = """
+import ctypes
+
+runtime = ctypes.CDLL('libcudart.so')
+runtime.cudaStreamCreateWithFlags.argtypes = [
+    ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
+runtime.cudaStreamCreateWithFlags.restype = ctypes.c_int
+runtime.cudaStreamDestroy.argtypes = [ctypes.c_void_p]
+runtime.cudaStreamDestroy.restype = ctypes.c_int
+cuda_stream = ctypes.c_void_p()
+result = runtime.cudaStreamCreateWithFlags(ctypes.byref(cuda_stream), 1)
+if result != 0:
+    raise RuntimeError(
+        f'cudaStreamCreateWithFlags failed with error {result}')
+stream = cuda_stream.value
+"""
+    cleanup = """
+finally:
+    if runtime.cudaStreamDestroy(cuda_stream) != 0:
+        raise RuntimeError('cudaStreamDestroy failed')
+"""
+    return textwrap.dedent(setup) + '\ntry:\n' + textwrap.indent(
+        source, '    ') + textwrap.dedent(cleanup)
+
+
 def _cuda_unavailable_reason():
     if 'CUDAExecutionProvider' not in ort.get_available_providers():
         return 'ONNX Runtime CUDAExecutionProvider is unavailable'
@@ -31,13 +79,11 @@ def _cuda_unavailable_reason():
     except (ImportError, OSError) as error:
         return f'cuda_buffer is unavailable: {error}'
     try:
-        stream = CudaBuffer.get_internal_stream()
-        probe = CudaBuffer.from_cpu(b'\x00')
-        probe.to_bytes()
-    except RuntimeError as error:
+        with _cuda_stream():
+            probe = CudaBuffer.from_cpu(b'\x00')
+            probe.to_bytes()
+    except (OSError, RuntimeError) as error:
         return f'CUDA device is unavailable: {error}'
-    if stream == 0:
-        return 'CUDA internal stream is unavailable'
     return None
 
 
@@ -46,7 +92,7 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
     if unavailable_reason is not None:
         pytest.skip(unavailable_reason)
     topic = f'onnxruntime_tensor_{uuid.uuid4().hex}'
-    subscriber_source = textwrap.dedent(f"""
+    subscriber_source = _with_cuda_stream(textwrap.dedent(f"""
         import time
 
         import numpy as np
@@ -57,7 +103,6 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
         import rclpy
         from rclpy.node import Node
         from rosidl_buffer import Buffer
-        from cuda_buffer import CudaBuffer
         from onnxruntime_conversions import allocate_tensor_msg
         from onnxruntime_conversions import from_input_tensor_msg
         from onnxruntime_conversions import from_output_tensor_msg
@@ -76,7 +121,6 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
             opset_imports=[helper.make_opsetid('', 18)],
             ir_version=onnx.IR_VERSION,
         )
-        stream = CudaBuffer.get_internal_stream()
         session = ort.InferenceSession(
             model.SerializeToString(),
             providers=[
@@ -144,15 +188,15 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
         node.destroy_subscription(subscription)
         node.destroy_node()
         rclpy.shutdown()
+        del session
         print('SUBSCRIBER_CUDA_ONNX_OK')
-    """)
-    publisher_source = textwrap.dedent(f"""
+    """))
+    publisher_source = _with_cuda_stream(textwrap.dedent(f"""
         import time
 
         import numpy as np
         import rclpy
         from rclpy.node import Node
-        from cuda_buffer import CudaBuffer
         from onnxruntime_conversions import allocate_tensor_msg
         from onnxruntime_conversions import from_output_tensor_msg
         from tensor_msgs.msg import ExperimentalTensor
@@ -167,7 +211,6 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
             'publisher discovery timed out')
         time.sleep(1.0)
 
-        stream = CudaBuffer.get_internal_stream()
         for message_index in range(5):
             msg = allocate_tensor_msg(
                 (2, 3), np.float32, device_type='cuda')
@@ -185,7 +228,7 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
         node.destroy_node()
         rclpy.shutdown()
         print('PUBLISHER_CUDA_ONNX_OK')
-    """)
+    """))
     environment = os.environ.copy()
     environment['RMW_IMPLEMENTATION'] = 'rmw_fastrtps_cpp'
     environment['ROS_LOCALHOST_ONLY'] = '1'

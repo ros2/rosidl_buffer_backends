@@ -29,7 +29,10 @@ CPU conversion support is always available. CUDA-buffer support is compiled
 only when `onnxruntime_gpu_vendor` selected a CUDA archive and both
 `CUDAToolkit` and `cuda_buffer` are available. Pass `"cuda"` to
 `allocate_tensor_msg` and the execution stream to the view functions when
-using CUDA storage.
+using CUDA storage. The caller creates, owns, and destroys that CUDA stream.
+Configure ONNX Runtime's CUDA execution provider with the same `cudaStream_t`
+pointer through `user_compute_stream`, and keep the stream alive until all
+views and queued inference work are complete.
 
 ## Limitations
 
