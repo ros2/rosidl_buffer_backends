@@ -25,14 +25,24 @@ offset metadata, but ONNX Runtime's public C++ API has no direct
 `from_dlpack`. This package validates that metadata and uses
 `Ort::Value::CreateTensor` to wrap the message's pointer without copying.
 
-CPU conversion support is always available. CUDA-buffer support is compiled
-only when `onnxruntime_gpu_vendor` selected a CUDA archive and both
-`CUDAToolkit` and `cuda_buffer` are available. Pass `"cuda"` to
-`allocate_tensor_msg` and the execution stream to the view functions when
-using CUDA storage. The caller creates, owns, and destroys that CUDA stream.
-Configure ONNX Runtime's CUDA execution provider with the same `cudaStream_t`
-pointer through `user_compute_stream`, and keep the stream alive until all
-views and queued inference work are complete.
+The package is a header-only interface library, and CPU conversion support is
+always available. When a downstream project calls
+`find_package(onnxruntime_conversions)`, CUDA-buffer support is enabled for that
+project only if `onnxruntime_gpu_vendor` provides CUDA and both `CUDAToolkit`
+and `cuda_buffer` can be found. Their targets and
+`ONNXRUNTIME_CONVERSIONS_HAS_CUDA` are then propagated through
+`onnxruntime_conversions::onnxruntime_conversions`. A missing optional CUDA
+dependency does not prevent CPU consumers from configuring or building.
+
+CUDA selection happens while each downstream application is configured and
+compiled. Installing CUDA or `cuda_buffer` later does not add CUDA support to
+an already-built application; reconfigure and rebuild that application.
+
+Pass `"cuda"` to `allocate_tensor_msg` and the execution stream to the view
+functions when using CUDA storage. The application creates, owns, and destroys
+that CUDA stream. Configure ONNX Runtime's CUDA execution provider with the
+same `cudaStream_t` pointer through `user_compute_stream`, and keep the stream
+alive until all views and queued inference work are complete.
 
 ## Limitations
 

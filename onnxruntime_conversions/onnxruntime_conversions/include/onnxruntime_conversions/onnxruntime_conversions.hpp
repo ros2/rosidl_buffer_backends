@@ -80,4 +80,6 @@ std::unique_ptr<TensorMsg> to_tensor_msg(const Ort::Value & value);
 
 }  // namespace onnxruntime_conversions
 
+#include "onnxruntime_conversions/detail/onnxruntime_conversions_impl.hpp"
+
 #endif  // ONNXRUNTIME_CONVERSIONS__ONNXRUNTIME_CONVERSIONS_HPP_
