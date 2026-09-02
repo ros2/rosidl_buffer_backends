@@ -56,6 +56,37 @@ inline cudaStream_t get_internal_stream()
   return s;
 }
 
+/// \brief Create the write event a CudaBuffer uses to order its readers.
+///
+/// Interprocess-capable when the driver allows it, local otherwise, and null
+/// when neither works: a buffer with no event still reads and writes correctly,
+/// it just cannot order a later reader behind an earlier writer.
+///
+/// Shared by the pool allocator and by adoption, so that memory this backend
+/// did not allocate is ordered exactly like memory it did.
+inline cudaEvent_t make_buffer_write_event()
+{
+  cudaEvent_t ev = nullptr;
+  cudaError_t ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_DEFAULT_EVENT_FLAGS);
+  if (ev_err != cudaSuccess) {
+    const cudaError_t interprocess_event_error = ev_err;
+    (void)cudaGetLastError();
+    ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_MINIMUM_EVENT_FLAGS);
+    if (ev_err != cudaSuccess) {
+      ev = nullptr;
+      (void)cudaGetLastError();
+      RCUTILS_LOG_WARN_NAMED("cuda_buffer_backend",
+        "Failed to create CUDA event; stream ordering disabled for this buffer");
+    } else {
+      RCUTILS_LOG_WARN_ONCE_NAMED(
+        "cuda_buffer_backend",
+        "Failed to create interprocess CUDA event (%s); falling back to a local event",
+        cudaGetErrorName(interprocess_event_error));
+    }
+  }
+  return ev;
+}
+
 template<typename T>
 class CudaBufferImpl : public rosidl::BufferImplBase<T>
 {
@@ -91,6 +122,21 @@ public:
       return;
     }
 
+    // Adopted storage is not ours to reallocate. Growing would need memory to
+    // grow into, which is exactly what a buffer in this position does not have;
+    // shrinking is only a change to the reported count, so it is allowed and
+    // costs nothing. Reallocating here instead would silently swap the caller's
+    // storage -- a transport slot, say -- for a pool block, and every later
+    // "zero copy" would quietly be a copy.
+    if (cuda_buffer_.is_adopted()) {
+      if (!shrink(n)) {
+        throw CudaError(
+                "CudaBufferImpl::resize: cannot grow adopted storage; "
+                "the allocation belongs to whoever lent it");
+      }
+      return;
+    }
+
     if (n == 0) {
       clear();
       return;
@@ -118,6 +164,29 @@ public:
     cuda_buffer_ = CudaBuffer();
     size_ = 0;
   }
+
+  /// \brief Report fewer elements than the storage holds, without touching it.
+  ///
+  /// For a producer handed fixed-size storage that filled less than all of it.
+  /// Neither reallocates nor copies, so the device pointer, the event state and
+  /// any adoption survive unchanged; only the count this buffer reports moves.
+  ///
+  /// Growing is refused rather than reallocating, because the caller that needs
+  /// this is precisely the one whose storage is not its own.
+  ///
+  /// \return true if the count is now \p n; false if \p n exceeds the current
+  ///         size, leaving the buffer untouched.
+  bool shrink(size_t n)
+  {
+    if (n > size_) {
+      return false;
+    }
+    size_ = n;
+    return true;
+  }
+
+  /// \brief True when this buffer wraps storage allocated outside the backend.
+  bool is_adopted() const {return cuda_buffer_.is_adopted();}
 
   std::unique_ptr<rosidl::BufferImplBase<T>> to_cpu() const override
   {
@@ -183,24 +252,7 @@ private:
 
     VmmBlock * block = pool->allocate(byte_size);
 
-    cudaEvent_t ev = nullptr;
-    cudaError_t ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_DEFAULT_EVENT_FLAGS);
-    if (ev_err != cudaSuccess) {
-      const cudaError_t interprocess_event_error = ev_err;
-      (void)cudaGetLastError();
-      ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_MINIMUM_EVENT_FLAGS);
-      if (ev_err != cudaSuccess) {
-        ev = nullptr;
-        (void)cudaGetLastError();
-        RCUTILS_LOG_WARN_NAMED("cuda_buffer_backend",
-          "Failed to create CUDA event; stream ordering disabled for this buffer");
-      } else {
-        RCUTILS_LOG_WARN_ONCE_NAMED(
-          "cuda_buffer_backend",
-          "Failed to create interprocess CUDA event (%s); falling back to a local event",
-          cudaGetErrorName(interprocess_event_error));
-      }
-    }
+    cudaEvent_t ev = make_buffer_write_event();
 
     buffer = CudaBuffer(
       reinterpret_cast<void *>(block->va), byte_size, pool->get_device_id(),

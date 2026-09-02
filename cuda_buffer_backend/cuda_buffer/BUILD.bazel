@@ -1,0 +1,21 @@
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "cuda_buffer",
+    # Globbed rather than listed, because a list here rots silently. This one
+    # was written before src/cuda_buffer_impl.cpp existed and was not updated
+    # when it arrived, so `get_or_create_global_pool()` was declared in the
+    # header and compiled into nothing. A shared library tolerates that; the
+    # first consumer to link an executable does not.
+    srcs = glob(["src/*.cpp"]),
+    hdrs = glob(["include/cuda_buffer/**"]),
+    includes = ["include"],
+    linkopts = ["-lrt"],
+    deps = [
+        "@cuda//:cuda",
+        "@ros2packages//rcutils:cc_lib",
+        "@ros2packages//rmw:cc_lib",
+        "@ros2packages//rosidl-buffer:cc_lib",
+        "@rules_cuda//cuda:runtime",
+    ],
+)
