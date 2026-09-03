@@ -23,10 +23,10 @@ conversion libraries that build on the same buffer infrastructure.
   runtime, and shared provider support extracted from an official GPU archive.
 - **onnxruntime_cuda_vendor** -- Optional CUDA execution-provider
   library installed beside the canonical core runtime.
-- **python_onnxruntime_vendor** -- CPU-only Python ONNX Runtime wheel linked to
-  the canonical core vendor.
-- **python_onnxruntime_cuda_vendor** -- CUDA Python ONNX Runtime wheel linked
-  to the canonical core and CUDA provider vendors.
+- **python_onnxruntime_vendor** -- Unmodified CPU-only Python ONNX Runtime
+  wheel packaged for ROS.
+- **python_onnxruntime_cuda_vendor** -- Unmodified CUDA Python ONNX Runtime
+  wheel packaged for ROS.
 - **onnxruntime_conversions** -- Compiled C++ conversion library and plugin
   registry, including its required runtime-discovered CPU plugin.
 - **onnxruntime_conversions_cuda_plugin** -- Optional runtime-discovered CUDA
@@ -99,11 +99,12 @@ JetPack itself supplies CUDA and cuDNN but not the ONNX Runtime C++ SDK.
 
 `python_onnxruntime_vendor` installs only the CPU `onnxruntime` wheel.
 `python_onnxruntime_cuda_vendor` installs the matching `onnxruntime-gpu` wheel;
-it derives CUDA 12 or CUDA 13 directly from the provider vendor configuration.
-Both stage links to canonical core/shared libraries, and the CUDA vendor also
-links the canonical CUDA provider. The two Python vendors are mutually
-exclusive because they own the same `onnxruntime` import path. The CUDA wheel
-already contains the CPU execution provider.
+`PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT` selects its CUDA 12 or CUDA 13
+distribution. Both wheels are installed unchanged and retain their bundled
+native libraries. They are independent of the C++ ONNX Runtime vendors.
+The two Python vendors declare a package conflict because they own the same
+`onnxruntime` import path. The CUDA wheel already contains the CPU execution
+provider.
 
 The vendored Python runtime is constrained to the Python ABI, operating system,
 and architecture of its wheel. No external ONNX Runtime installation is
@@ -111,9 +112,8 @@ required.
 
 Install `onnxruntime_conversions_py_cpu` for CPU Python use or
 `onnxruntime_conversions_py_cuda` for CUDA Python use; no package depends on
-both vendors. For CUDA, install the core and provider vendors into one merged
-prefix before the CUDA Python vendor. C++ conversion backends are discovered
-at runtime.
+both vendors. C++ conversion backends are discovered at runtime and remain
+separate from the Python wheel runtime.
 
 ```bash
 # CPU Python

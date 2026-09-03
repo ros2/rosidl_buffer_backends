@@ -13,8 +13,9 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <depend>onnxruntime_core_vendor</depend>
   <build_depend>python3-pip</build_depend>
+
+  <conflict>python_onnxruntime_cuda_vendor</conflict>
 
   <exec_depend>python3-flatbuffers</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
