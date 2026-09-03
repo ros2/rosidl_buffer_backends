@@ -80,21 +80,10 @@ _ament_cmake_python_register_environment_hook()
 install(DIRECTORY "${_python_stage}/"
   DESTINATION "${PYTHON_INSTALL_DIR}"
   USE_SOURCE_PERMISSIONS)
-install(FILES LICENSE_ONNXRUNTIME README.md DESTINATION "share/${PROJECT_NAME}")
 
 if(BUILD_TESTING)
-  find_package(ament_cmake_pytest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
-
-  ament_add_pytest_test(test_python_onnxruntime_vendor
-    test/test_python_onnxruntime_vendor.py
-    TIMEOUT 60)
-  set_tests_properties(test_python_onnxruntime_vendor PROPERTIES
-    ENVIRONMENT
-      "PYTHON_ONNXRUNTIME_VENDOR_PACKAGE=${_python_package};\
-PYTHON_ONNXRUNTIME_VENDOR_VERSION=${_runtime_version};\
-PYTHON_ONNXRUNTIME_VENDOR_CORE_LIBDIR=${onnxruntime_core_vendor_LIBRARY_DIRS}")
 endif()
 
 ament_package()

@@ -144,18 +144,6 @@ missing required CPU plugin reports
 `Required onnxruntime_conversions CPU plugin is unavailable.` with the same
 details.
 
-Per-package build, test, and run details live in each package's README:
-
-- [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
-- [`onnxruntime_conversions/onnxruntime_conversions/README.md`](onnxruntime_conversions/onnxruntime_conversions/README.md)
-- [`onnxruntime_conversions/onnxruntime_conversions_cuda_plugin/README.md`](onnxruntime_conversions/onnxruntime_conversions_cuda_plugin/README.md)
-- [`onnxruntime_conversions/onnxruntime_conversions_py_core/README.md`](onnxruntime_conversions/onnxruntime_conversions_py_core/README.md)
-- [`onnxruntime_vendor/onnxruntime_core_vendor/README.md`](onnxruntime_vendor/onnxruntime_core_vendor/README.md)
-- [`onnxruntime_vendor/onnxruntime_cuda_vendor/README.md`](onnxruntime_vendor/onnxruntime_cuda_vendor/README.md)
-- [`onnxruntime_vendor/python_onnxruntime_cuda_vendor/README.md`](onnxruntime_vendor/python_onnxruntime_cuda_vendor/README.md)
-- [`onnxruntime_vendor/python_onnxruntime_vendor/README.md`](onnxruntime_vendor/python_onnxruntime_vendor/README.md)
-- [`torch_conversions/README.md`](torch_conversions/README.md)
-
 ## API overview
 
 ### CUDA buffer backend (`cuda_buffer_backend`)
