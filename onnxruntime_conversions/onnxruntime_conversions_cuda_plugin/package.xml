@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>onnxruntime_conversions_cuda_plugin</name>
+  <version>0.1.2</version>
+  <description>CUDA storage and execution-provider plugin for onnxruntime_conversions.</description>
+
+  <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
+  <license>Apache-2.0</license>
+  <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>cuda_buffer</depend>
+  <depend>nvidia-cuda</depend>
+  <depend>onnxruntime_conversions</depend>
+  <depend>onnxruntime_cuda_vendor</depend>
+  <depend>pluginlib</depend>
+  <exec_depend>cuda_buffer_backend</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>cuda_buffer_backend</test_depend>
+  <test_depend>launch_ros</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>rclcpp</test_depend>
+  <test_depend>rclcpp_components</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>rmw_fastrtps_cpp</test_depend>
+  <test_depend>python3-dev</test_depend>
+  <test_depend>std_msgs</test_depend>
+  <test_depend>tensor_msgs</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

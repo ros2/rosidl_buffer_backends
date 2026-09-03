@@ -25,6 +25,7 @@ from cuda_buffer._cuda_buffer_py import _from_input_buffer
 from cuda_buffer._cuda_buffer_py import _from_input_cpu_data
 from cuda_buffer._cuda_buffer_py import _from_output_buffer
 from cuda_buffer._cuda_buffer_py import _from_size
+from cuda_buffer._cuda_buffer_py import _is_available
 from cuda_buffer._cuda_buffer_py import CudaReadHandle
 from cuda_buffer._cuda_buffer_py import CudaWriteHandle
 from rosidl_buffer import Buffer
@@ -32,6 +33,11 @@ from rosidl_buffer import Buffer
 
 class CudaBuffer:
     """Create CUDA-backed :class:`rosidl_buffer.Buffer` objects."""
+
+    @staticmethod
+    def is_available(stream: int, device_id: int = 0) -> bool:
+        """Return whether the CUDA runtime can use the explicit stream."""
+        return _is_available(stream, device_id)
 
     @staticmethod
     def from_cpu(data: Union[bytes, bytearray, Iterable[int]]) -> Buffer:
