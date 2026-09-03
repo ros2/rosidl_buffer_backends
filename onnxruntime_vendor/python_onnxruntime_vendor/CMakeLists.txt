@@ -3,14 +3,10 @@ project(python_onnxruntime_vendor)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
-find_package(onnxruntime_core_vendor REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(_runtime_version "${ONNXRUNTIME_CORE_VENDOR_VERSION}")
-if(NOT _runtime_version)
-  set(_runtime_version "${onnxruntime_core_vendor_VERSION}")
-endif()
-
+set(PYTHON_ONNXRUNTIME_VENDOR_VERSION "1.28.0" CACHE STRING
+  "ONNX Runtime Python wheel version")
 set(_python_package "onnxruntime")
 set(_index_url "https://pypi.org/simple")
 
@@ -20,15 +16,9 @@ set(_stage_root "${CMAKE_CURRENT_BINARY_DIR}/python_stage")
 set(_python_stage "${_stage_root}/${PYTHON_INSTALL_DIR}")
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 string(CONCAT _stage_marker
-  "${_stage_root}/.${_python_package}-${_runtime_version}-"
-  "cpu-"
+  "${_stage_root}/.${_python_package}-${PYTHON_ONNXRUNTIME_VENDOR_VERSION}-"
+  "cpu-bundled-"
   "py${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}-${_system_arch}")
-
-get_filename_component(_installed_capi
-  "${CMAKE_INSTALL_PREFIX}/${PYTHON_INSTALL_DIR}/onnxruntime/capi"
-  ABSOLUTE)
-file(RELATIVE_PATH _relative_core_lib
-  "${_installed_capi}" "${onnxruntime_core_vendor_LIBRARY_DIRS}")
 
 if(NOT EXISTS "${_stage_marker}")
   file(REMOVE_RECURSE "${_wheel_dir}" "${_stage_root}")
@@ -42,7 +32,7 @@ if(NOT EXISTS "${_stage_marker}")
       --only-binary=:all:
       --dest "${_wheel_dir}"
       --index-url "${_index_url}"
-      "${_python_package}==${_runtime_version}"
+      "${_python_package}==${PYTHON_ONNXRUNTIME_VENDOR_VERSION}"
     COMMAND_ERROR_IS_FATAL ANY)
 
   file(GLOB _onnxruntime_wheels "${_wheel_dir}/*.whl")
@@ -62,17 +52,6 @@ if(NOT EXISTS "${_stage_marker}")
       "${_onnxruntime_wheels}"
     COMMAND_ERROR_IS_FATAL ANY)
 
-  execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env
-      "PYTHONNOUSERSITE=1"
-      "${Python3_EXECUTABLE}"
-      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_onnxruntime.py"
-      "${_python_stage}"
-      "${onnxruntime_core_vendor_LIBRARY_DIRS}"
-      "${_relative_core_lib}"
-      "${_python_package}"
-      "${_runtime_version}"
-    COMMAND_ERROR_IS_FATAL ANY)
   file(WRITE "${_stage_marker}" "")
 endif()
 

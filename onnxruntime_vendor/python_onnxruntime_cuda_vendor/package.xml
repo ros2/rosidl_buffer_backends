@@ -13,10 +13,12 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <depend>onnxruntime_core_vendor</depend>
-  <depend>onnxruntime_cuda_vendor</depend>
   <build_depend>python3-pip</build_depend>
 
+  <conflict>python_onnxruntime_vendor</conflict>
+
+  <exec_depend>nvidia-cuda</exec_depend>
+  <exec_depend>nvidia-cudnn</exec_depend>
   <exec_depend>python3-flatbuffers</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-packaging</exec_depend>
