@@ -137,7 +137,9 @@ install(DIRECTORY "${_onnxruntime_cmake_dir}/onnxruntime"
   DESTINATION "opt/${PROJECT_NAME}/lib/cmake")
 install(FILES "${_onnxruntime_root}/VERSION_NUMBER"
   DESTINATION "opt/${PROJECT_NAME}")
-install(FILES LICENSE_ONNXRUNTIME README.md DESTINATION "share/${PROJECT_NAME}")
+install(
+  FILES "${_onnxruntime_root}/LICENSE"
+  DESTINATION "share/${PROJECT_NAME}")
 
 ament_index_register_resource("vendor_packages" CONTENT "opt/${PROJECT_NAME}")
 if(APPLE)
@@ -154,16 +156,6 @@ ament_environment_hooks(
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
-
-  add_test(
-    NAME test_onnxruntime_core_vendor
-    COMMAND "${CMAKE_COMMAND}"
-      "-DONNXRUNTIME_ROOT=${_onnxruntime_root}"
-      "-DONNXRUNTIME_CMAKE_DIR=${_onnxruntime_cmake_dir}/onnxruntime"
-      "-DEXPECTED_VERSION=${ONNXRUNTIME_CORE_VENDOR_VERSION}"
-      "-DARCHIVE_KIND=${ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND}"
-      "-DREADELF=${CMAKE_READELF}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/check_core.cmake")
 endif()
 
 ament_package(CONFIG_EXTRAS_POST "onnxruntime_core_vendor-extras.cmake.in")

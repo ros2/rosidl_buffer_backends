@@ -64,7 +64,6 @@ install(
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
-install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 ament_export_targets(onnxruntime_conversions HAS_LIBRARY_TARGET)
 ament_export_dependencies(

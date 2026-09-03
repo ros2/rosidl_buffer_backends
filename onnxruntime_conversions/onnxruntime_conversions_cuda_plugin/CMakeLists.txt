@@ -62,13 +62,11 @@ install(
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
-install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
   find_package(ament_cmake_gtest REQUIRED)
-  find_package(Python3 REQUIRED COMPONENTS Development)
 
   ament_add_gtest(test_onnxruntime_conversions_cuda_plugin
     test/test_cuda_conversion_backend.cpp
@@ -81,7 +79,6 @@ if(BUILD_TESTING)
       CUDA::cudart
       CUDA::cuda_driver
       pluginlib::pluginlib
-      Python3::Python
     )
     add_dependencies(test_onnxruntime_conversions_cuda_plugin ${PROJECT_NAME})
     set_target_properties(test_onnxruntime_conversions_cuda_plugin PROPERTIES
@@ -106,7 +103,6 @@ if(BUILD_TESTING)
     rclcpp_components::component
     CUDA::cudart
     CUDA::cuda_driver
-    Python3::Python
     ${std_msgs_TARGETS}
     ${tensor_msgs_TARGETS}
   )
@@ -126,7 +122,6 @@ if(BUILD_TESTING)
     rclcpp_components::component
     CUDA::cudart
     CUDA::cuda_driver
-    Python3::Python
     ${std_msgs_TARGETS}
     ${tensor_msgs_TARGETS}
   )
