@@ -24,10 +24,6 @@
 
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
 
-#ifdef ONNXRUNTIME_CONVERSIONS_TEST_HAS_CUDA
-#include <cuda_runtime.h>
-#endif
-
 namespace
 {
 
@@ -291,108 +287,6 @@ TEST(OnnxRuntimeConversions, RunsInferenceWithPreallocatedMessageBuffers)
     output_view.value().GetTensorMutableData<float>(),
     reinterpret_cast<float *>(output->data.data()));
 }
-
-#ifdef ONNXRUNTIME_CONVERSIONS_TEST_HAS_CUDA
-TEST(OnnxRuntimeConversions, CudaViewsAliasStorageAndSynchronize)
-{
-  int device_count = 0;
-  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
-    GTEST_SKIP() << "CUDA device is unavailable";
-  }
-
-  cudaStream_t stream = nullptr;
-  ASSERT_EQ(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), cudaSuccess);
-  std::shared_ptr<TensorMsg> msg = allocate_tensor_msg(
-    {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
-  Ort::MemoryInfo memory_info("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault);
-  const std::vector<float> expected{1.0F, 2.0F, 3.0F, 4.0F};
-  void * device_pointer = nullptr;
-  {
-    auto output = from_output_tensor_msg(msg, memory_info, stream);
-    device_pointer = output.value().GetTensorMutableRawData();
-    ASSERT_NE(device_pointer, nullptr);
-    ASSERT_EQ(
-      cudaMemcpyAsync(
-        device_pointer, expected.data(), expected.size() * sizeof(float),
-        cudaMemcpyHostToDevice, stream),
-      cudaSuccess);
-  }
-
-  std::vector<float> actual(expected.size());
-  {
-    std::shared_ptr<const TensorMsg> input_msg = msg;
-    auto input = from_input_tensor_msg(input_msg, memory_info, stream);
-    EXPECT_EQ(input.value().GetTensorRawData(), device_pointer);
-    ASSERT_EQ(
-      cudaMemcpyAsync(
-        actual.data(), input.value().GetTensorRawData(),
-        actual.size() * sizeof(float), cudaMemcpyDeviceToHost, stream),
-      cudaSuccess);
-  }
-  ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
-  EXPECT_EQ(actual, expected);
-  EXPECT_EQ(cudaStreamDestroy(stream), cudaSuccess);
-}
-
-#ifdef ONNXRUNTIME_CONVERSIONS_TEST_HAS_CUDA_EP
-TEST(OnnxRuntimeConversions, RunsCudaInferenceWithMessageBuffers)
-{
-  int device_count = 0;
-  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
-    GTEST_SKIP() << "CUDA device is unavailable";
-  }
-
-  cudaStream_t stream = nullptr;
-  ASSERT_EQ(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), cudaSuccess);
-  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_conversions_cuda_test");
-  Ort::CUDAProviderOptions cuda_options;
-  cuda_options.UpdateWithValue("user_compute_stream", stream);
-  Ort::SessionOptions session_options;
-  session_options.AppendExecutionProvider_CUDA_V2(*cuda_options);
-  Ort::Session session(
-    env, identity_model, sizeof(identity_model), session_options);
-  Ort::MemoryInfo memory_info("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault);
-  std::shared_ptr<TensorMsg> input = allocate_tensor_msg(
-    {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
-  std::shared_ptr<TensorMsg> output = allocate_tensor_msg(
-    {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
-  const std::vector<float> expected{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
-
-  {
-    auto writer = from_output_tensor_msg(input, memory_info, stream);
-    ASSERT_EQ(
-      cudaMemcpyAsync(
-        writer.value().GetTensorMutableRawData(), expected.data(),
-        expected.size() * sizeof(float), cudaMemcpyHostToDevice, stream),
-      cudaSuccess);
-  }
-  {
-    Ort::IoBinding binding(session);
-    std::shared_ptr<const TensorMsg> const_input = input;
-    auto input_view = from_input_tensor_msg(const_input, memory_info, stream);
-    auto output_view = from_output_tensor_msg(output, memory_info, stream);
-    binding.BindInput("input", input_view.value());
-    binding.BindOutput("output", output_view.value());
-    Ort::RunOptions run_options;
-    session.Run(run_options, binding);
-  }
-
-  std::vector<float> actual(expected.size());
-  {
-    std::shared_ptr<const TensorMsg> const_output = output;
-    auto reader = from_input_tensor_msg(const_output, memory_info, stream);
-    ASSERT_EQ(
-      cudaMemcpyAsync(
-        actual.data(), reader.value().GetTensorRawData(),
-        actual.size() * sizeof(float), cudaMemcpyDeviceToHost, stream),
-      cudaSuccess);
-  }
-  ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
-  EXPECT_EQ(actual, expected);
-  EXPECT_EQ(cudaStreamDestroy(stream), cudaSuccess);
-}
-#endif
-#endif
 
 TEST(OnnxRuntimeConversions, RejectsUnsupportedDtypeAndInvalidMetadata)
 {

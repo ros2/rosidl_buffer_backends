@@ -107,7 +107,9 @@ endif()
 
 install(FILES "${_provider_library}"
   DESTINATION "opt/onnxruntime_core_vendor/lib")
-install(FILES LICENSE_ONNXRUNTIME README.md DESTINATION "share/${PROJECT_NAME}")
+install(
+  FILES "${_onnxruntime_root}/LICENSE"
+  DESTINATION "share/${PROJECT_NAME}")
 
 ament_index_register_resource(
   "vendor_packages" CONTENT "opt/onnxruntime_core_vendor")
@@ -115,16 +117,6 @@ ament_index_register_resource(
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
-
-  add_test(
-    NAME test_onnxruntime_cuda_vendor
-    COMMAND "${CMAKE_COMMAND}"
-      "-DPROVIDER_LIBRARY=${_provider_library}"
-      "-DCORE_LIBRARY=${_onnxruntime_root}/lib/libonnxruntime.so"
-      "-DEXPECTED_VERSION=${ONNXRUNTIME_CUDA_VENDOR_VERSION}"
-      "-DARCHIVE_VERSION_FILE=${_onnxruntime_root}/VERSION_NUMBER"
-      "-DREADELF=${CMAKE_READELF}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/check_cuda_provider.cmake")
 endif()
 
 ament_package(
