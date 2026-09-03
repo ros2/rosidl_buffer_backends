@@ -19,17 +19,26 @@ conversion libraries that build on the same buffer infrastructure.
   distribution using the same platform and CUDA selection policy as
   `libtorch_vendor`.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **onnxruntime_gpu_vendor** -- Source-configurable vendor for the official
-  ONNX Runtime C++ SDK and native CPU, CUDA 12, or CUDA 13 runtime.
-- **python_onnxruntime_vendor** -- Coordinated vendor for the matching Python
-  ONNX Runtime wheel.
-- **onnxruntime_conversions** -- C++ ROS package under the shared
-  `onnxruntime_conversions/` source container, providing zero-copy views
-  between tensor messages and ONNX Runtime, with CUDA-buffer support when the
-  GPU vendor variant and CUDA dependencies are available.
-- **onnxruntime_conversions_py** -- Python ROS package under the shared
+- **onnxruntime_core_vendor** -- CUDA-neutral ONNX Runtime headers, core
+  runtime, and shared provider support extracted from an official GPU archive.
+- **onnxruntime_cuda_vendor** -- Optional CUDA execution-provider
+  library installed beside the canonical core runtime.
+- **python_onnxruntime_vendor** -- CPU-only Python ONNX Runtime wheel linked to
+  the canonical core vendor.
+- **python_onnxruntime_cuda_vendor** -- CUDA Python ONNX Runtime wheel linked
+  to the canonical core and CUDA provider vendors.
+- **onnxruntime_conversions** -- Compiled C++ conversion library and plugin
+  registry, including its required runtime-discovered CPU plugin.
+- **onnxruntime_conversions_cuda_plugin** -- Optional runtime-discovered CUDA
+  storage and execution-provider backend.
+- **onnxruntime_conversions_py_core** -- Vendor-neutral Python ROS package under the shared
   `onnxruntime_conversions/` source container, providing CPU and CUDA
   conversions using NumPy views or ONNX Runtime's public DLPack protocol.
+- **onnxruntime_conversions_py_cpu** -- User-facing CPU Python conversion
+  runtime metapackage and apt package
+  `ros-$ROS_DISTRO-onnxruntime-conversions-py-cpu`.
+- **onnxruntime_conversions_py_cuda** -- CUDA Python conversion runtime
+  metapackage.
 - **torch_conversions** -- Header-only helper library that converts between
   `tensor_msgs/ExperimentalTensor` and `at::Tensor` and exposes DLPack import /
   export. Replaces the older `torch_buffer_backend` plugin approach with a
@@ -71,27 +80,80 @@ conversion libraries that build on the same buffer infrastructure.
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
 - CUDA Toolkit on the host for CUDA packages.
 
-## ONNX Runtime variants
+## ONNX Runtime architecture
 
-`onnxruntime_gpu_vendor` selects a CPU archive when no CUDA toolkit is found
-and the matching CUDA 12 or CUDA 13 archive otherwise. Source builds can
-override this with `ONNXRUNTIME_GPU_VENDOR_VARIANT`. `python_onnxruntime_vendor`
-installs the matching `onnxruntime` or `onnxruntime-gpu` wheel and uses the
-native vendor libraries as the canonical runtime. A binary package contains
-the variant selected when it was built; it does not change after installation.
+`onnxruntime_core_vendor` always installs a CUDA-neutral SDK and runtime. Its
+CUDA 12 or CUDA 13 setting selects only the x86_64 GPU archive used as the
+source of those core files; it does not add a CUDA dependency or enable CUDA
+for consumers. On arm64, including JetPack hosts, it uses the official
+ONNX Runtime CPU archive. `onnxruntime_cuda_vendor` is the optional owner of
+`libonnxruntime_providers_cuda.so`. ONNX Runtime discovers that provider plugin
+beside the physical `libonnxruntime.so`, so the two vendors must be installed
+into one merged prefix.
+
+ARM64 supports the C++ CPU conversion path. The Python CPU path additionally
+requires Python 3.11 or newer for ONNX Runtime 1.28, so it does not support
+JetPack 6's default Python 3.10. JetPack GPU execution is not currently
+provided because Microsoft does not publish a matching arm64 GPU C++ archive;
+JetPack itself supplies CUDA and cuDNN but not the ONNX Runtime C++ SDK.
+
+`python_onnxruntime_vendor` installs only the CPU `onnxruntime` wheel.
+`python_onnxruntime_cuda_vendor` installs the matching `onnxruntime-gpu` wheel;
+it derives CUDA 12 or CUDA 13 directly from the provider vendor configuration.
+Both stage links to canonical core/shared libraries, and the CUDA vendor also
+links the canonical CUDA provider. The two Python vendors are mutually
+exclusive because they own the same `onnxruntime` import path. The CUDA wheel
+already contains the CPU execution provider.
 
 The vendored Python runtime is constrained to the Python ABI, operating system,
-and architecture of its wheel. The C++ and Python conversion packages depend
-on their corresponding coordinated vendor packages; no external ONNX Runtime
-installation is required.
+and architecture of its wheel. No external ONNX Runtime installation is
+required.
+
+Install `onnxruntime_conversions_py_cpu` for CPU Python use or
+`onnxruntime_conversions_py_cuda` for CUDA Python use; no package depends on
+both vendors. For CUDA, install the core and provider vendors into one merged
+prefix before the CUDA Python vendor. C++ conversion backends are discovered
+at runtime.
+
+```bash
+# CPU Python
+sudo apt update
+sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cpu
+
+# CUDA Python (install instead of the CPU metapackage)
+sudo apt update
+sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cuda
+
+# Source builds; use separate install prefixes for CPU and CUDA Python vendors
+colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cpu
+colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cuda
+```
+
+The default `auto` backend chooses CUDA only when its plugin/runtime is usable
+and the application supplies a non-null explicit stream. Otherwise it chooses
+CPU. Explicit `cpu` and `cuda` remain strict, and failures after selection are
+never retried on another backend. Message views dispatch from the message
+buffer backend. If multiple accelerator plugins report themselves usable,
+automatic selection reports ambiguity instead of depending on discovery
+order.
+
+Requesting a missing backend throws
+`ONNX Runtime conversion backend '<name>' is unavailable.` followed by loaded
+backend IDs, discoverable plugin classes, and exact plugin load failures. A
+missing required CPU plugin reports
+`Required onnxruntime_conversions CPU plugin is unavailable.` with the same
+details.
 
 Per-package build, test, and run details live in each package's README:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
 - [`onnxruntime_conversions/onnxruntime_conversions/README.md`](onnxruntime_conversions/onnxruntime_conversions/README.md)
-- [`onnxruntime_conversions/onnxruntime_conversions_py/README.md`](onnxruntime_conversions/onnxruntime_conversions_py/README.md)
-- [`onnxruntime_gpu_vendor/README.md`](onnxruntime_gpu_vendor/README.md)
-- [`python_onnxruntime_vendor/README.md`](python_onnxruntime_vendor/README.md)
+- [`onnxruntime_conversions/onnxruntime_conversions_cuda_plugin/README.md`](onnxruntime_conversions/onnxruntime_conversions_cuda_plugin/README.md)
+- [`onnxruntime_conversions/onnxruntime_conversions_py_core/README.md`](onnxruntime_conversions/onnxruntime_conversions_py_core/README.md)
+- [`onnxruntime_vendor/onnxruntime_core_vendor/README.md`](onnxruntime_vendor/onnxruntime_core_vendor/README.md)
+- [`onnxruntime_vendor/onnxruntime_cuda_vendor/README.md`](onnxruntime_vendor/onnxruntime_cuda_vendor/README.md)
+- [`onnxruntime_vendor/python_onnxruntime_cuda_vendor/README.md`](onnxruntime_vendor/python_onnxruntime_cuda_vendor/README.md)
+- [`onnxruntime_vendor/python_onnxruntime_vendor/README.md`](onnxruntime_vendor/python_onnxruntime_vendor/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## API overview
