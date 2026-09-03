@@ -11,6 +11,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_buffer REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(tensor_msgs REQUIRED)
 find_package(rmw REQUIRED)
 find_package(rcutils REQUIRED)
@@ -40,6 +41,7 @@ target_link_libraries(${PROJECT_NAME}
     rosidl_buffer::rosidl_buffer
     rmw::rmw
     rcutils::rcutils
+    ${sensor_msgs_TARGETS}
     ${tensor_msgs_TARGETS}
 )
 
@@ -66,7 +68,7 @@ install(
 
 ament_export_targets(${PROJECT_NAME})
 ament_export_dependencies(
-  libtorch_vendor rosidl_buffer tensor_msgs rmw rcutils)
+  libtorch_vendor rosidl_buffer sensor_msgs tensor_msgs rmw rcutils)
 if(_torch_has_cuda AND CUDAToolkit_FOUND)
   ament_export_dependencies(CUDAToolkit)
 endif()
@@ -92,6 +94,7 @@ if(BUILD_TESTING)
       ${PROJECT_NAME}
       ${TORCH_LIBRARIES}
       rosidl_buffer::rosidl_buffer
+      ${sensor_msgs_TARGETS}
       ${tensor_msgs_TARGETS}
     )
     if(_torch_has_cuda AND CUDAToolkit_FOUND)
