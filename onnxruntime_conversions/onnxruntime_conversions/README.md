@@ -1,52 +1,48 @@
 # onnxruntime_conversions
 
-`onnxruntime_conversions` creates zero-copy ONNX Runtime tensor views over
+`onnxruntime_conversions` provides the compiled C++ API, plugin registry, and
+required CPU backend plugin for zero-copy ONNX Runtime tensor views over
 `tensor_msgs/msg/ExperimentalTensor` storage.
 
-## Usage
+```cmake
+find_package(onnxruntime_conversions REQUIRED)
+target_link_libraries(my_target
+  onnxruntime_conversions::onnxruntime_conversions)
+```
 
 ```cpp
 auto memory_info =
   Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 auto msg = std::shared_ptr<onnxruntime_conversions::TensorMsg>(
   onnxruntime_conversions::allocate_tensor_msg(
-    {1, 3, 224, 224}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT));
-
+    {1, 3, 224, 224}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu"));
 auto output =
   onnxruntime_conversions::from_output_tensor_msg(msg, memory_info);
 io_binding.BindOutput("output", output.value());
 ```
 
-`OrtTensorView` keeps the message storage alive. Keep the view alive while its
-`Ort::Value` is bound or used by a session.
+Backends are discovered through pluginlib. The CPU backend is a shared plugin
+bundled in this ROS package and is mandatory. The optional
+`onnxruntime_conversions_cuda_plugin` package registers the `cuda` backend.
 
-`ExperimentalTensor` carries DLPack-compatible dtype, shape, stride, and
-offset metadata, but ONNX Runtime's public C++ API has no direct
-`from_dlpack`. This package validates that metadata and uses
-`Ort::Value::CreateTensor` to wrap the message's pointer without copying.
+`auto` selects an accelerator only when its capability probe accepts the
+configuration. Otherwise it selects CPU. Explicit `cpu` and `cuda` selection
+are strict and never fall back. Ambiguous automatic selection reports an
+error. Plugin libraries are pinned for the process lifetime so plugin-defined
+leases remain safe during static teardown.
 
-The package is a header-only interface library, and CPU conversion support is
-always available. When a downstream project calls
-`find_package(onnxruntime_conversions)`, CUDA-buffer support is enabled for that
-project only if `onnxruntime_gpu_vendor` provides CUDA and both `CUDAToolkit`
-and `cuda_buffer` can be found. Their targets and
-`ONNXRUNTIME_CONVERSIONS_HAS_CUDA` are then propagated through
-`onnxruntime_conversions::onnxruntime_conversions`. A missing optional CUDA
-dependency does not prevent CPU consumers from configuring or building.
+For CUDA, install `onnxruntime_core_vendor`, `onnxruntime_cuda_vendor`,
+`onnxruntime_conversions`, and `onnxruntime_conversions_cuda_plugin`. The two
+native ONNX Runtime vendors must share a merged install prefix.
 
-CUDA selection happens while each downstream application is configured and
-compiled. Installing CUDA or `cuda_buffer` later does not add CUDA support to
-an already-built application; reconfigure and rebuild that application.
-
-Pass `"cuda"` to `allocate_tensor_msg` and the execution stream to the view
-functions when using CUDA storage. The application creates, owns, and destroys
-that CUDA stream. Configure ONNX Runtime's CUDA execution provider with the
-same `cudaStream_t` pointer through `user_compute_stream`, and keep the stream
-alive until all views and queued inference work are complete.
+```bash
+colcon build --merge-install --packages-up-to onnxruntime_conversions
+colcon build --merge-install --packages-up-to onnxruntime_conversions_cuda_plugin
+```
 
 ## Limitations
 
 - Tensor layouts must be row-major contiguous.
 - String and sub-byte element types are unsupported.
 - Zero-copy output binding requires a known output shape.
-- `to_tensor_msg` currently copies CPU tensors only.
+- CUDA operations require the optional plugin and a non-null explicit stream.

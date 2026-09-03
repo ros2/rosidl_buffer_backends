@@ -15,8 +15,11 @@
 #include <gtest/gtest.h>
 #include <onnxruntime_cxx_api.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <thread>
 #include <vector>
 
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
@@ -28,6 +31,7 @@
 namespace
 {
 
+using onnxruntime_conversions::ConversionBackendRegistry;
 using onnxruntime_conversions::TensorMsg;
 using onnxruntime_conversions::allocate_tensor_msg;
 using onnxruntime_conversions::from_input_tensor_msg;
@@ -46,6 +50,60 @@ const uint8_t identity_model[] = {
   110, 112, 117, 116, 18, 14, 10, 12, 8, 1, 18, 8, 10, 2, 8, 2, 10,
   2, 8, 3, 98, 24, 10, 6, 111, 117, 116, 112, 117, 116, 18, 14, 10,
   12, 8, 1, 18, 8, 10, 2, 8, 2, 10, 2, 8, 3, 66, 4, 10, 0, 16, 18};
+
+TEST(OnnxRuntimeConversions, DiscoversRequiredCpuPlugin)
+{
+  const auto backends = onnxruntime_conversions::available_backends();
+  EXPECT_NE(std::find(backends.begin(), backends.end(), "cpu"), backends.end());
+  EXPECT_EQ(
+    ConversionBackendRegistry::instance().get_backend("cpu")->backend_name(),
+    "cpu");
+}
+
+TEST(OnnxRuntimeConversions, RegistryIsThreadSafe)
+{
+  std::vector<std::shared_ptr<onnxruntime_conversions::ConversionBackend>> results(16);
+  std::vector<std::thread> threads;
+  for (size_t index = 0; index < results.size(); ++index) {
+    threads.emplace_back([index, &results]() {
+        results[index] = ConversionBackendRegistry::instance().get_backend("cpu");
+      });
+  }
+  for (auto & thread : threads) {
+    thread.join();
+  }
+  for (const auto & result : results) {
+    EXPECT_EQ(result, results.front());
+  }
+}
+
+TEST(OnnxRuntimeConversions, ExplicitUnavailableCudaThrows)
+{
+  const auto backends = onnxruntime_conversions::available_backends();
+  if (std::find(backends.begin(), backends.end(), "cuda") != backends.end()) {
+    GTEST_SKIP() << "CUDA plugin is installed";
+  }
+  EXPECT_THROW(
+    allocate_tensor_msg({1}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda"),
+    std::invalid_argument);
+}
+
+TEST(OnnxRuntimeConversions, AutoSelectsCpuWithoutStream)
+{
+  onnxruntime_conversions::BackendConfiguration configuration;
+  auto msg = allocate_tensor_msg(
+    {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, configuration);
+  EXPECT_EQ(msg->data.get_backend_type(), "cpu");
+}
+
+TEST(OnnxRuntimeConversions, ExplicitCpuIsStrict)
+{
+  onnxruntime_conversions::BackendConfiguration configuration;
+  configuration.execution_stream = reinterpret_cast<void *>(1);
+  auto msg = allocate_tensor_msg(
+    {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu", configuration);
+  EXPECT_EQ(msg->data.get_backend_type(), "cpu");
+}
 
 TEST(OnnxRuntimeConversions, AllocatePopulatesMetadata)
 {

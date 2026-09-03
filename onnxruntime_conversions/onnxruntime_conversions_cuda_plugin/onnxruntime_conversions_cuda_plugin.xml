@@ -1,0 +1,8 @@
+<library path="onnxruntime_conversions_cuda_plugin">
+  <class
+    name="cuda"
+    type="onnxruntime_conversions::CudaConversionBackend"
+    base_class_type="onnxruntime_conversions::ConversionBackend">
+    <description>CUDA buffer and ONNX Runtime CUDA execution-provider backend.</description>
+  </class>
+</library>
