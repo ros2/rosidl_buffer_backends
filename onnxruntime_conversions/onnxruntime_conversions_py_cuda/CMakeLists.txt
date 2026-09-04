@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.20)
 project(onnxruntime_conversions_py_cuda)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+
+ament_python_install_package(onnxruntime_conversions_cuda)
+
+install(
+  FILES resource/${PROJECT_NAME}
+  DESTINATION share/ament_index/resource_index/onnxruntime_conversions__adapters
+)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)

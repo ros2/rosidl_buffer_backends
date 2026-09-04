@@ -129,12 +129,16 @@ colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cpu
 colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cuda
 ```
 
-For Python allocations, the installed conversion package determines the
-default: `onnxruntime_conversions_py_cpu` selects CPU and
-`onnxruntime_conversions_py_cuda` selects CUDA. Install exactly one of these
-packages. CUDA allocations require a non-null explicit stream. Explicit `cpu`
-and `cuda` overrides remain strict, and failures are never retried on another
-backend. Views of existing messages dispatch from the message buffer backend.
+Python conversion packages register storage adapters through the ament index.
+The CPU adapter is always available, while
+`onnxruntime_conversions_py_cuda` registers a higher-priority CUDA adapter and
+makes CUDA the allocation default. Additional platform packages can register
+other device and buffer backend IDs without changing the core package. CUDA
+allocations require a non-null explicit stream. Explicit device overrides
+remain strict, and existing messages dispatch from their buffer backend.
+Adapter packages install a resource named after the package under
+`onnxruntime_conversions__adapters`; its contents are a Python
+`module:register_function` entry point.
 
 For C++, requesting a missing backend throws
 `ONNX Runtime conversion backend '<name>' is unavailable.` followed by loaded

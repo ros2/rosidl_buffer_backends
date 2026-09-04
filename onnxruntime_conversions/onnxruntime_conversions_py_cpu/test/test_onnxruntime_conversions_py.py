@@ -28,6 +28,8 @@ from onnxruntime_conversions import from_input_tensor_msg
 from onnxruntime_conversions import from_output_tensor_msg
 from onnxruntime_conversions import OrtTensorView
 from onnxruntime_conversions import to_tensor_msg
+from onnxruntime_conversions._adapter import OrtConversionRegistry
+from onnxruntime_conversions._cpu_adapter import CpuOrtConversionAdapter
 import pytest
 from tensor_msgs.msg import ExperimentalTensor
 
@@ -200,60 +202,48 @@ def test_cpu_rejects_stream_and_unknown_device():
         allocate_tensor_msg((1,), np.float32, 'cpu', 1)
 
 
-def test_cpu_package_selects_cpu_by_default(monkeypatch):
-    monkeypatch.setattr(
-        _core,
-        'get_packages_with_prefixes',
-        lambda: {'onnxruntime_conversions_py_cpu': '/tmp/install'},
-    )
+def test_cpu_package_selects_cpu_by_default():
     msg = allocate_tensor_msg((1,), np.float32)
     assert _core._backend_type(msg.data) == 'cpu'
 
 
-@pytest.mark.parametrize('packages', [{}, {
-    'onnxruntime_conversions_py_cpu': '/tmp/cpu',
-    'onnxruntime_conversions_py_cuda': '/tmp/cuda',
-}])
-def test_default_requires_exactly_one_conversion_package(monkeypatch, packages):
-    monkeypatch.setattr(
-        _core, 'get_packages_with_prefixes', lambda: packages)
-    with pytest.raises(RuntimeError, match='Install exactly one'):
-        allocate_tensor_msg((1,), np.float32)
+def test_registry_rejects_ambiguous_default():
+    class OtherCpuAdapter(CpuOrtConversionAdapter):
+        device_type = 'other'
+        buffer_backend = 'other'
+
+    registry = OrtConversionRegistry()
+    registry.register(CpuOrtConversionAdapter())
+    registry.register(OtherCpuAdapter())
+    with pytest.raises(RuntimeError, match='Ambiguous default'):
+        registry.default()
 
 
 def test_explicit_cpu_overrides_platform_default(monkeypatch):
     monkeypatch.setattr(
-        _core,
-        'get_packages_with_prefixes',
-        lambda: {'onnxruntime_conversions_py_cuda': '/tmp/install'},
+        _core._registry,
+        'default',
+        lambda: pytest.fail('default adapter must not be selected'),
     )
     msg = allocate_tensor_msg(
         (1,), np.float32, device_type='cpu', stream=123)
     assert _core._backend_type(msg.data) == 'cpu'
 
 
-def test_explicit_unavailable_cuda_raises(monkeypatch):
-    monkeypatch.setattr(ort, 'get_available_providers', lambda: [
-        'CPUExecutionProvider'])
-    with pytest.raises(RuntimeError, match='CUDAExecutionProvider'):
+def test_unregistered_device_raises():
+    with pytest.raises(ValueError, match='Unsupported tensor device'):
         allocate_tensor_msg(
             (1,), np.float32, device_type='cuda', stream=123)
 
 
 def test_cuda_default_does_not_fallback_after_allocation_error(monkeypatch):
-    class FailingCudaBuffer:
+    class FailingAdapter:
 
-        @staticmethod
-        def allocate_buffer(size):
+        def allocate(self, metadata, device_id, stream):
             raise RuntimeError('injected CUDA allocation failure')
 
     monkeypatch.setattr(
-        _core,
-        'get_packages_with_prefixes',
-        lambda: {'onnxruntime_conversions_py_cuda': '/tmp/install'},
-    )
-    monkeypatch.setattr(
-        _core, '_load_cuda', lambda: (FailingCudaBuffer, object()))
+        _core._registry, 'default', lambda: FailingAdapter())
     with pytest.raises(RuntimeError, match='injected CUDA allocation failure'):
         allocate_tensor_msg((1,), np.float32, stream=123)
 
