@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#include "onnxruntime_conversions/conversion_backend.hpp"
+#include "onnxruntime_conversions/conversion_adapter.hpp"
 #include "onnxruntime_conversions/visibility_control.hpp"
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
@@ -70,20 +70,20 @@ ONNXRUNTIME_CONVERSIONS_PUBLIC
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const std::string & backend = "auto");
+  const std::string & adapter = "auto");
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const BackendConfiguration & configuration);
+  const ConversionConfiguration & configuration);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const std::string & backend,
-  const BackendConfiguration & configuration);
+  const std::string & adapter,
+  const ConversionConfiguration & configuration);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 OrtTensorView from_input_tensor_msg(
@@ -106,17 +106,17 @@ void to_tensor_msg(
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 std::unique_ptr<TensorMsg> to_tensor_msg(
   const Ort::Value & value,
-  const std::string & backend = "auto",
+  const std::string & adapter = "auto",
   void * execution_stream = nullptr);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
-std::vector<std::string> available_backends();
+std::vector<std::string> available_adapters();
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 void configure_session_options(
   Ort::SessionOptions & session_options,
-  const std::string & backend = "auto",
-  const BackendConfiguration & configuration = {});
+  const std::string & adapter = "auto",
+  const ConversionConfiguration & configuration = {});
 
 }  // namespace onnxruntime_conversions
 

@@ -3,7 +3,7 @@
 <package format="3">
   <name>onnxruntime_conversions</name>
   <version>0.1.2</version>
-  <description>C++ API, registry, and CPU plugin for ONNX Runtime tensor conversions.</description>
+  <description>C++ API, adapter registry, and CPU plugin for ONNX Runtime tensor conversions.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>

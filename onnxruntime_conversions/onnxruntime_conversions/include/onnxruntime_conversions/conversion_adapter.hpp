@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef ONNXRUNTIME_CONVERSIONS__CONVERSION_BACKEND_HPP_
-#define ONNXRUNTIME_CONVERSIONS__CONVERSION_BACKEND_HPP_
+#ifndef ONNXRUNTIME_CONVERSIONS__CONVERSION_ADAPTER_HPP_
+#define ONNXRUNTIME_CONVERSIONS__CONVERSION_ADAPTER_HPP_
 
 #include <onnxruntime_cxx_api.h>
 
@@ -46,18 +46,18 @@ public:
   virtual const StorageMetadata & metadata() const noexcept = 0;
 };
 
-struct BackendConfiguration
+struct ConversionConfiguration
 {
   int device_id{0};
   void * execution_stream{nullptr};
 };
 
-class ONNXRUNTIME_CONVERSIONS_PUBLIC ConversionBackend
+class ONNXRUNTIME_CONVERSIONS_PUBLIC ConversionAdapter
 {
 public:
-  virtual ~ConversionBackend();
+  virtual ~ConversionAdapter();
 
-  virtual std::string backend_name() const = 0;
+  virtual std::string adapter_name() const = 0;
   virtual void allocate_storage(TensorMsg & msg, size_t byte_count) = 0;
   virtual std::shared_ptr<StorageLease> acquire_input(
     std::shared_ptr<const TensorMsg> msg,
@@ -72,7 +72,7 @@ public:
     void * execution_stream) = 0;
   virtual void configure_session(
     Ort::SessionOptions & session_options,
-    const BackendConfiguration & configuration) = 0;
+    const ConversionConfiguration & configuration) = 0;
 };
 
 class ONNXRUNTIME_CONVERSIONS_PUBLIC AutomaticSelectionCapability
@@ -80,25 +80,25 @@ class ONNXRUNTIME_CONVERSIONS_PUBLIC AutomaticSelectionCapability
 public:
   virtual ~AutomaticSelectionCapability();
   virtual bool supports_automatic_selection(
-    const BackendConfiguration & configuration) const noexcept = 0;
+    const ConversionConfiguration & configuration) const noexcept = 0;
 };
 
-class ONNXRUNTIME_CONVERSIONS_PUBLIC ConversionBackendRegistry
+class ONNXRUNTIME_CONVERSIONS_PUBLIC ConversionAdapterRegistry
 {
 public:
-  static ConversionBackendRegistry & instance();
+  static ConversionAdapterRegistry & instance();
 
-  std::shared_ptr<ConversionBackend> get_backend(const std::string & backend);
-  std::shared_ptr<ConversionBackend> select_backend(
-    const BackendConfiguration & configuration);
-  std::vector<std::string> available_backends() const;
+  std::shared_ptr<ConversionAdapter> get_adapter(const std::string & adapter);
+  std::shared_ptr<ConversionAdapter> select_adapter(
+    const ConversionConfiguration & configuration);
+  std::vector<std::string> available_adapters() const;
 
-  ConversionBackendRegistry(const ConversionBackendRegistry &) = delete;
-  ConversionBackendRegistry & operator=(const ConversionBackendRegistry &) = delete;
+  ConversionAdapterRegistry(const ConversionAdapterRegistry &) = delete;
+  ConversionAdapterRegistry & operator=(const ConversionAdapterRegistry &) = delete;
 
 private:
-  ConversionBackendRegistry();
-  ~ConversionBackendRegistry();
+  ConversionAdapterRegistry();
+  ~ConversionAdapterRegistry();
 
   struct Impl;
   std::unique_ptr<Impl> impl_;
@@ -106,4 +106,4 @@ private:
 
 }  // namespace onnxruntime_conversions
 
-#endif  // ONNXRUNTIME_CONVERSIONS__CONVERSION_BACKEND_HPP_
+#endif  // ONNXRUNTIME_CONVERSIONS__CONVERSION_ADAPTER_HPP_

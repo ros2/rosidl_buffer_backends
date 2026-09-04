@@ -26,7 +26,7 @@
 #include "cuda_buffer/cuda_buffer_api.hpp"
 #include "cuda_buffer/cuda_buffer_impl.hpp"
 #include "cuda_buffer/cuda_error.hpp"
-#include "onnxruntime_conversions/conversion_backend.hpp"
+#include "onnxruntime_conversions/conversion_adapter.hpp"
 
 namespace onnxruntime_conversions
 {
@@ -38,12 +38,12 @@ cudaStream_t require_explicit_stream(void * execution_stream)
   const auto stream = reinterpret_cast<cudaStream_t>(execution_stream);
   if (stream == nullptr || stream == cudaStreamLegacy || stream == cudaStreamPerThread) {
     throw std::invalid_argument(
-            "CUDA backend requires a non-null application-owned CUDA stream");
+            "CUDA adapter requires a non-null application-owned CUDA stream");
   }
   const cudaError_t status = cudaStreamQuery(stream);
   if (status != cudaSuccess && status != cudaErrorNotReady) {
     (void)cudaGetLastError();
-    throw std::invalid_argument("CUDA backend received an invalid CUDA stream");
+    throw std::invalid_argument("CUDA adapter received an invalid CUDA stream");
   }
   return stream;
 }
@@ -62,7 +62,7 @@ T * require_cuda_impl(rosidl::Buffer<uint8_t> & buffer)
 {
   auto * impl = dynamic_cast<T *>(buffer.get_impl());
   if (!impl) {
-    throw std::invalid_argument("CUDA backend requires cuda_buffer-backed message storage");
+    throw std::invalid_argument("CUDA adapter requires cuda_buffer-backed message storage");
   }
   return impl;
 }
@@ -73,7 +73,7 @@ const cuda_buffer_backend::CudaBufferImpl<uint8_t> * require_cuda_impl(
   const auto * impl =
     dynamic_cast<const cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(buffer.get_impl());
   if (!impl) {
-    throw std::invalid_argument("CUDA backend requires cuda_buffer-backed message storage");
+    throw std::invalid_argument("CUDA adapter requires cuda_buffer-backed message storage");
   }
   return impl;
 }
@@ -162,17 +162,17 @@ private:
 
 }  // namespace
 
-class CudaConversionBackend final
-  : public ConversionBackend, public AutomaticSelectionCapability
+class CudaConversionAdapter final
+  : public ConversionAdapter, public AutomaticSelectionCapability
 {
 public:
-  std::string backend_name() const override
+  std::string adapter_name() const override
   {
     return "cuda";
   }
 
   bool supports_automatic_selection(
-    const BackendConfiguration & configuration) const noexcept override
+    const ConversionConfiguration & configuration) const noexcept override
   {
     const auto stream = reinterpret_cast<cudaStream_t>(configuration.execution_stream);
     if (stream == nullptr || stream == cudaStreamLegacy || stream == cudaStreamPerThread) {
@@ -204,7 +204,7 @@ public:
   {
     if (byte_count == 0) {
       throw std::invalid_argument(
-              "CUDA backend does not support zero-byte tensor storage");
+              "CUDA adapter does not support zero-byte tensor storage");
     }
     msg.data = cuda_buffer_backend::allocate_buffer(byte_count);
     if (msg.data.get_backend_type() != "cuda") {
@@ -247,7 +247,7 @@ public:
     if (memory_info.GetDeviceType() != OrtMemoryInfoDeviceType_GPU ||
       memory_info.GetAllocatorName() != std::string("Cuda"))
     {
-      throw std::invalid_argument("CUDA backend requires a CUDA Ort::Value");
+      throw std::invalid_argument("CUDA adapter requires a CUDA Ort::Value");
     }
     if (memory_info.GetDeviceId() != impl->get_device_id()) {
       throw std::invalid_argument("CUDA Ort::Value and message storage device IDs differ");
@@ -270,7 +270,7 @@ public:
 
   void configure_session(
     Ort::SessionOptions & session_options,
-    const BackendConfiguration & configuration) override
+    const ConversionConfiguration & configuration) override
   {
     validate_device_id(configuration.device_id);
     int current_device = -1;
@@ -290,5 +290,5 @@ public:
 }  // namespace onnxruntime_conversions
 
 PLUGINLIB_EXPORT_CLASS(
-  onnxruntime_conversions::CudaConversionBackend,
-  onnxruntime_conversions::ConversionBackend)
+  onnxruntime_conversions::CudaConversionAdapter,
+  onnxruntime_conversions::ConversionAdapter)

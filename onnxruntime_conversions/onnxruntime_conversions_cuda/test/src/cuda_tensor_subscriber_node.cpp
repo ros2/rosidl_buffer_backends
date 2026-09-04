@@ -52,7 +52,7 @@ public:
       throw std::runtime_error("Failed to create subscriber CUDA stream");
     }
     Ort::SessionOptions session_options;
-    onnxruntime_conversions::BackendConfiguration configuration;
+    onnxruntime_conversions::ConversionConfiguration configuration;
     configuration.device_id = 0;
     configuration.execution_stream = stream_;
     onnxruntime_conversions::configure_session_options(

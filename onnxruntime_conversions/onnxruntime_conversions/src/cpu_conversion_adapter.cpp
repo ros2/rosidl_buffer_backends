@@ -18,7 +18,7 @@
 #include <utility>
 
 #include <pluginlib/class_list_macros.hpp>
-#include "onnxruntime_conversions/conversion_backend.hpp"
+#include "onnxruntime_conversions/conversion_adapter.hpp"
 
 namespace onnxruntime_conversions
 {
@@ -54,10 +54,10 @@ private:
 
 }  // namespace
 
-class CpuConversionBackend final : public ConversionBackend
+class CpuConversionAdapter final : public ConversionAdapter
 {
 public:
-  std::string backend_name() const override
+  std::string adapter_name() const override
   {
     return "cpu";
   }
@@ -111,11 +111,11 @@ public:
 
   void configure_session(
     Ort::SessionOptions &,
-    const BackendConfiguration & configuration) override
+    const ConversionConfiguration & configuration) override
   {
     if (configuration.device_id != 0 || configuration.execution_stream != nullptr) {
       throw std::invalid_argument(
-              "CPU backend requires device_id 0 and a null execution stream");
+              "CPU adapter requires device_id 0 and a null execution stream");
     }
   }
 
@@ -126,7 +126,7 @@ private:
       throw std::invalid_argument("CPU plugin received non-CPU message storage");
     }
     if (execution_stream != nullptr) {
-      throw std::invalid_argument("CPU backend does not accept an execution stream");
+      throw std::invalid_argument("CPU adapter does not accept an execution stream");
     }
   }
 };
@@ -134,5 +134,5 @@ private:
 }  // namespace onnxruntime_conversions
 
 PLUGINLIB_EXPORT_CLASS(
-  onnxruntime_conversions::CpuConversionBackend,
-  onnxruntime_conversions::ConversionBackend)
+  onnxruntime_conversions::CpuConversionAdapter,
+  onnxruntime_conversions::ConversionAdapter)

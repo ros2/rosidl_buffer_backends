@@ -17,20 +17,20 @@
 #include <map>
 #include <string>
 
-#include "backend_catalog.hpp"
+#include "adapter_catalog.hpp"
 
-TEST(OnnxRuntimeConversionsCore, RejectsDuplicateBackendIds)
+TEST(OnnxRuntimeConversionsCore, RejectsDuplicateAdapterIds)
 {
-  std::map<std::string, std::string> backend_classes;
-  onnxruntime_conversions::detail::register_backend_id(
-    backend_classes, "duplicate", "plugins/First");
+  std::map<std::string, std::string> adapter_classes;
+  onnxruntime_conversions::detail::register_adapter_id(
+    adapter_classes, "duplicate", "plugins/First");
   try {
-    onnxruntime_conversions::detail::register_backend_id(
-      backend_classes, "duplicate", "plugins/Second");
-    FAIL() << "Duplicate backend ID did not throw";
+    onnxruntime_conversions::detail::register_adapter_id(
+      adapter_classes, "duplicate", "plugins/Second");
+    FAIL() << "Duplicate adapter ID did not throw";
   } catch (const std::runtime_error & error) {
     const std::string message = error.what();
-    EXPECT_NE(message.find("Duplicate ONNX Runtime conversion backend ID 'duplicate'"),
+    EXPECT_NE(message.find("Duplicate ONNX Runtime conversion adapter ID 'duplicate'"),
       std::string::npos);
     EXPECT_NE(message.find("'plugins/First'"), std::string::npos);
     EXPECT_NE(message.find("'plugins/Second'"), std::string::npos);
