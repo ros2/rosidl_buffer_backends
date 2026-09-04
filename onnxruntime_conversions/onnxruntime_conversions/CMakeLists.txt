@@ -37,7 +37,7 @@ target_link_libraries(onnxruntime_conversions
 )
 
 add_library(onnxruntime_conversions_cpu_plugin SHARED
-  src/cpu_conversion_backend.cpp
+  src/cpu_conversion_adapter.cpp
 )
 target_compile_features(onnxruntime_conversions_cpu_plugin PUBLIC cxx_std_20)
 target_link_libraries(onnxruntime_conversions_cpu_plugin
@@ -82,12 +82,12 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
   find_package(ament_cmake_gtest REQUIRED)
 
-  ament_add_gtest(test_backend_catalog
-    test/test_backend_catalog.cpp
+  ament_add_gtest(test_adapter_catalog
+    test/test_adapter_catalog.cpp
   )
-  if(TARGET test_backend_catalog)
-    target_include_directories(test_backend_catalog PRIVATE src)
-    target_link_libraries(test_backend_catalog
+  if(TARGET test_adapter_catalog)
+    target_include_directories(test_adapter_catalog PRIVATE src)
+    target_link_libraries(test_adapter_catalog
       onnxruntime_conversions
       onnxruntime::onnxruntime
       pluginlib::pluginlib

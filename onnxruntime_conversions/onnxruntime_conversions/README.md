@@ -45,7 +45,7 @@ automatically; no device type or device ID is required.
 
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
 
-onnxruntime_conversions::BackendConfiguration configuration;
+onnxruntime_conversions::ConversionConfiguration configuration;
 configuration.execution_stream = cuda_stream;
 
 auto allocated = onnxruntime_conversions::allocate_tensor_msg(
@@ -64,7 +64,7 @@ Keep `OrtTensorView` alive while ONNX Runtime accesses the tensor. The view
 protects the message storage. CUDA requires the non-null explicit stream shown
 above.
 
-Use `configure_session_options()` with the same backend configuration before
+Use `configure_session_options()` with the same conversion configuration before
 constructing an ONNX Runtime session.
 
 ## ONNX Runtime conversion (Python)
@@ -100,7 +100,7 @@ During a source build, the CUDA reference adapter detects CUDA 12 or CUDA 13
 from the local toolkit. Set `CUDAToolkit_ROOT` when multiple toolkits are
 installed.
 
-The installed Python variant selects the default allocation backend. An
+The installed Python variant selects the default conversion adapter. An
 accelerator variant uses its accelerator by default while keeping explicit CPU
 allocation available.
 

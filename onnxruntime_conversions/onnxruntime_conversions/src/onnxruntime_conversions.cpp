@@ -29,7 +29,7 @@
 
 #include <pluginlib/class_loader.hpp>
 
-#include "backend_catalog.hpp"
+#include "adapter_catalog.hpp"
 
 namespace onnxruntime_conversions
 {
@@ -235,7 +235,7 @@ void validate_storage(
   size_t required_size)
 {
   if (storage.size_bytes < required_size) {
-    throw std::out_of_range("Backend lease is smaller than the tensor backing buffer");
+    throw std::out_of_range("Storage lease is smaller than the tensor backing buffer");
   }
   if (storage.device_type != memory_info.GetDeviceType()) {
     throw std::invalid_argument("Buffer backend and Ort::MemoryInfo device types differ");
@@ -249,37 +249,37 @@ void validate_storage(
     throw std::invalid_argument("Buffer backend and Ort::MemoryInfo allocators differ");
   }
   if (!storage.data && required_size != 0) {
-    throw std::runtime_error("Backend returned a null storage pointer");
+    throw std::runtime_error("Conversion adapter returned a null storage pointer");
   }
 }
 
 }  // namespace
 
 StorageLease::~StorageLease() = default;
-ConversionBackend::~ConversionBackend() = default;
+ConversionAdapter::~ConversionAdapter() = default;
 AutomaticSelectionCapability::~AutomaticSelectionCapability() = default;
 
-struct ConversionBackendRegistry::Impl
+struct ConversionAdapterRegistry::Impl
 {
   Impl()
-  : loader("onnxruntime_conversions", "onnxruntime_conversions::ConversionBackend")
+  : loader("onnxruntime_conversions", "onnxruntime_conversions::ConversionAdapter")
   {
     declared_classes = loader.getDeclaredClasses();
     std::sort(declared_classes.begin(), declared_classes.end());
     for (const auto & class_name : declared_classes) {
-      std::shared_ptr<ConversionBackend> backend;
-      std::string backend_id;
+      std::shared_ptr<ConversionAdapter> adapter;
+      std::string adapter_id;
       try {
-        backend = loader.createSharedInstance(class_name);
-        backend_id = backend->backend_name();
-        if (backend_id.empty()) {
-          throw std::runtime_error("Plugin returned an empty backend ID");
+        adapter = loader.createSharedInstance(class_name);
+        adapter_id = adapter->adapter_name();
+        if (adapter_id.empty()) {
+          throw std::runtime_error("Plugin returned an empty adapter ID");
         }
       } catch (const std::exception & error) {
         load_failures.emplace(class_name, error.what());
         continue;
       }
-      detail::register_backend_id(backend_classes, backend_id, class_name);
+      detail::register_adapter_id(adapter_classes, adapter_id, class_name);
 #if defined(__linux__)
       const std::string library_path = loader.getClassLibraryPath(class_name);
       void * library_handle =
@@ -290,9 +290,9 @@ struct ConversionBackendRegistry::Impl
       }
       pinned_library_handles.push_back(library_handle);
 #endif
-      backends.emplace(backend_id, std::move(backend));
+      adapters.emplace(adapter_id, std::move(adapter));
     }
-    if (backends.find("cpu") == backends.end()) {
+    if (adapters.find("cpu") == adapters.end()) {
       throw std::runtime_error(diagnostic(
               "Required onnxruntime_conversions CPU plugin is unavailable."));
     }
@@ -301,9 +301,9 @@ struct ConversionBackendRegistry::Impl
   std::string diagnostic(const std::string & subject) const
   {
     std::ostringstream message;
-    message << subject << " Loaded backend IDs: [";
+    message << subject << " Loaded adapter IDs: [";
     bool first = true;
-    for (const auto & entry : backends) {
+    for (const auto & entry : adapters) {
       message << (first ? "" : ", ") << entry.first;
       first = false;
     }
@@ -327,45 +327,45 @@ struct ConversionBackendRegistry::Impl
   }
 
   mutable std::mutex mutex;
-  pluginlib::ClassLoader<ConversionBackend> loader;
+  pluginlib::ClassLoader<ConversionAdapter> loader;
   std::vector<std::string> declared_classes;
-  std::map<std::string, std::shared_ptr<ConversionBackend>> backends;
-  std::map<std::string, std::string> backend_classes;
+  std::map<std::string, std::shared_ptr<ConversionAdapter>> adapters;
+  std::map<std::string, std::string> adapter_classes;
   std::map<std::string, std::string> load_failures;
   std::vector<void *> pinned_library_handles;
 };
 
-ConversionBackendRegistry::ConversionBackendRegistry()
+ConversionAdapterRegistry::ConversionAdapterRegistry()
 : impl_(std::make_unique<Impl>()) {}
 
-ConversionBackendRegistry::~ConversionBackendRegistry() = default;
+ConversionAdapterRegistry::~ConversionAdapterRegistry() = default;
 
-ConversionBackendRegistry & ConversionBackendRegistry::instance()
+ConversionAdapterRegistry & ConversionAdapterRegistry::instance()
 {
   // Keep plugin DSOs loaded until process termination: static/global views may
   // destroy plugin-defined StorageLease objects after ordinary static teardown.
-  static ConversionBackendRegistry * registry = new ConversionBackendRegistry();
+  static ConversionAdapterRegistry * registry = new ConversionAdapterRegistry();
   return *registry;
 }
 
-std::shared_ptr<ConversionBackend> ConversionBackendRegistry::get_backend(
-  const std::string & backend)
+std::shared_ptr<ConversionAdapter> ConversionAdapterRegistry::get_adapter(
+  const std::string & adapter)
 {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  const auto found = impl_->backends.find(backend);
-  if (found == impl_->backends.end()) {
+  const auto found = impl_->adapters.find(adapter);
+  if (found == impl_->adapters.end()) {
     throw std::invalid_argument(impl_->diagnostic(
-            "ONNX Runtime conversion backend '" + backend + "' is unavailable."));
+            "ONNX Runtime conversion adapter '" + adapter + "' is unavailable."));
   }
   return found->second;
 }
 
-std::shared_ptr<ConversionBackend> ConversionBackendRegistry::select_backend(
-  const BackendConfiguration & configuration)
+std::shared_ptr<ConversionAdapter> ConversionAdapterRegistry::select_adapter(
+  const ConversionConfiguration & configuration)
 {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  std::shared_ptr<ConversionBackend> selected;
-  for (const auto & entry : impl_->backends) {
+  std::shared_ptr<ConversionAdapter> selected;
+  for (const auto & entry : impl_->adapters) {
     const auto * capability =
       dynamic_cast<const AutomaticSelectionCapability *>(entry.second.get());
     if (entry.first == "cpu" || !capability ||
@@ -375,23 +375,23 @@ std::shared_ptr<ConversionBackend> ConversionBackendRegistry::select_backend(
     }
     if (selected) {
       throw std::runtime_error(
-              "Automatic ONNX Runtime backend selection is ambiguous between '" +
-              selected->backend_name() + "' and '" + entry.first + "'");
+              "Automatic ONNX Runtime adapter selection is ambiguous between '" +
+              selected->adapter_name() + "' and '" + entry.first + "'");
     }
     selected = entry.second;
   }
   if (selected) {
     return selected;
   }
-  return impl_->backends.at("cpu");
+  return impl_->adapters.at("cpu");
 }
 
-std::vector<std::string> ConversionBackendRegistry::available_backends() const
+std::vector<std::string> ConversionAdapterRegistry::available_adapters() const
 {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   std::vector<std::string> names;
-  names.reserve(impl_->backends.size());
-  for (const auto & entry : impl_->backends) {
+  names.reserve(impl_->adapters.size());
+  for (const auto & entry : impl_->adapters) {
     names.push_back(entry.first);
   }
   return names;
@@ -433,15 +433,15 @@ const Ort::Value & OrtTensorView::value() const
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const std::string & backend)
+  const std::string & adapter)
 {
-  return allocate_tensor_msg(shape, dtype, backend, {});
+  return allocate_tensor_msg(shape, dtype, adapter, {});
 }
 
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const BackendConfiguration & configuration)
+  const ConversionConfiguration & configuration)
 {
   return allocate_tensor_msg(shape, dtype, "auto", configuration);
 }
@@ -449,8 +449,8 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const std::string & backend,
-  const BackendConfiguration & configuration)
+  const std::string & adapter,
+  const ConversionConfiguration & configuration)
 {
   size_t element_count = 1;
   for (const int64_t dimension : shape) {
@@ -471,14 +471,14 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const auto strides = contiguous_strides(shape);
   msg->strides.assign(strides.begin(), strides.end());
   msg->byte_offset = 0;
-  auto selected = backend == "auto" ?
-    ConversionBackendRegistry::instance().select_backend(configuration) :
-    ConversionBackendRegistry::instance().get_backend(backend);
-  const std::string selected_name = selected->backend_name();
+  auto selected = adapter == "auto" ?
+    ConversionAdapterRegistry::instance().select_adapter(configuration) :
+    ConversionAdapterRegistry::instance().get_adapter(adapter);
+  const std::string selected_name = selected->adapter_name();
   selected->allocate_storage(*msg, byte_count);
   if (msg->data.get_backend_type() != selected_name) {
     throw std::runtime_error(
-            "Conversion backend '" + selected_name + "' allocated '" +
+            "Conversion adapter '" + selected_name + "' allocated '" +
             msg->data.get_backend_type() + "' storage");
   }
   return msg;
@@ -493,12 +493,12 @@ OrtTensorView from_input_tensor_msg(
     throw std::invalid_argument("Input tensor message must not be null");
   }
   const auto metadata = validate_metadata(*msg);
-  auto backend =
-    ConversionBackendRegistry::instance().get_backend(msg->data.get_backend_type());
+  auto adapter =
+    ConversionAdapterRegistry::instance().get_adapter(msg->data.get_backend_type());
   auto impl = std::make_unique<OrtTensorView::Impl>(msg);
-  impl->lease = backend->acquire_input(msg, execution_stream);
+  impl->lease = adapter->acquire_input(msg, execution_stream);
   if (!impl->lease) {
-    throw std::runtime_error("Conversion backend returned a null input lease");
+    throw std::runtime_error("Conversion adapter returned a null input lease");
   }
   const auto & storage = impl->lease->metadata();
   validate_storage(storage, memory_info, msg->data.size());
@@ -518,12 +518,12 @@ OrtTensorView from_output_tensor_msg(
     throw std::invalid_argument("Output tensor message must not be null");
   }
   const auto metadata = validate_metadata(*msg);
-  auto backend =
-    ConversionBackendRegistry::instance().get_backend(msg->data.get_backend_type());
+  auto adapter =
+    ConversionAdapterRegistry::instance().get_adapter(msg->data.get_backend_type());
   auto impl = std::make_unique<OrtTensorView::Impl>(msg);
-  impl->lease = backend->acquire_output(msg, execution_stream);
+  impl->lease = adapter->acquire_output(msg, execution_stream);
   if (!impl->lease) {
-    throw std::runtime_error("Conversion backend returned a null output lease");
+    throw std::runtime_error("Conversion adapter returned a null output lease");
   }
   const auto & storage = impl->lease->metadata();
   validate_storage(storage, memory_info, msg->data.size());
@@ -550,9 +550,9 @@ void to_tensor_msg(
   if (byte_count > msg.data.size()) {
     throw std::out_of_range("Ort::Value tensor exceeds the destination buffer");
   }
-  auto backend =
-    ConversionBackendRegistry::instance().get_backend(msg.data.get_backend_type());
-  backend->copy_from_ort(msg, value, byte_count, execution_stream);
+  auto adapter =
+    ConversionAdapterRegistry::instance().get_adapter(msg.data.get_backend_type());
+  adapter->copy_from_ort(msg, value, byte_count, execution_stream);
   set_msg_dtype(msg, dtype);
   msg.shape.assign(shape.begin(), shape.end());
   const auto strides = contiguous_strides(shape);
@@ -562,35 +562,35 @@ void to_tensor_msg(
 
 std::unique_ptr<TensorMsg> to_tensor_msg(
   const Ort::Value & value,
-  const std::string & backend,
+  const std::string & adapter,
   void * execution_stream)
 {
   if (!value.IsTensor()) {
     throw std::invalid_argument("Ort::Value is not a tensor");
   }
   const auto type_info = value.GetTensorTypeAndShapeInfo();
-  BackendConfiguration configuration;
+  ConversionConfiguration configuration;
   configuration.device_id = value.GetTensorMemoryInfo().GetDeviceId();
   configuration.execution_stream = execution_stream;
   auto msg = allocate_tensor_msg(
-    type_info.GetShape(), type_info.GetElementType(), backend, configuration);
+    type_info.GetShape(), type_info.GetElementType(), adapter, configuration);
   to_tensor_msg(*msg, value, execution_stream);
   return msg;
 }
 
-std::vector<std::string> available_backends()
+std::vector<std::string> available_adapters()
 {
-  return ConversionBackendRegistry::instance().available_backends();
+  return ConversionAdapterRegistry::instance().available_adapters();
 }
 
 void configure_session_options(
   Ort::SessionOptions & session_options,
-  const std::string & backend,
-  const BackendConfiguration & configuration)
+  const std::string & adapter,
+  const ConversionConfiguration & configuration)
 {
-  auto selected = backend == "auto" ?
-    ConversionBackendRegistry::instance().select_backend(configuration) :
-    ConversionBackendRegistry::instance().get_backend(backend);
+  auto selected = adapter == "auto" ?
+    ConversionAdapterRegistry::instance().select_adapter(configuration) :
+    ConversionAdapterRegistry::instance().get_adapter(adapter);
   selected->configure_session(session_options, configuration);
 }
 

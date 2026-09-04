@@ -2,8 +2,8 @@
      Licensed under the Apache License, Version 2.0 -->
 <library path="onnxruntime_conversions_cpu_plugin">
   <class name="cpu"
-         type="onnxruntime_conversions::CpuConversionBackend"
-         base_class_type="onnxruntime_conversions::ConversionBackend">
+         type="onnxruntime_conversions::CpuConversionAdapter"
+         base_class_type="onnxruntime_conversions::ConversionAdapter">
     <description>CPU storage and copy support for ONNX Runtime tensor conversions</description>
   </class>
 </library>

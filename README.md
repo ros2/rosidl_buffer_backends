@@ -28,10 +28,10 @@ conversion libraries that build on the same buffer infrastructure.
 - **python_onnxruntime_cuda_vendor** -- Unmodified CUDA Python ONNX Runtime
   wheel packaged for ROS.
 - **[onnxruntime_conversions](onnxruntime_conversions/onnxruntime_conversions/README.md)**
-  -- Compiled C++ conversion library and plugin registry, including its
+  -- Compiled C++ conversion library and adapter registry, including its
   required runtime-discovered CPU plugin.
 - **onnxruntime_conversions_cuda** -- Optional runtime-discovered CUDA storage
-  and execution-provider backend.
+  and execution-provider adapter.
 - **onnxruntime_conversions_py_core** -- Vendor-neutral Python ROS package under the shared
   `onnxruntime_conversions/` source container, providing CPU and CUDA
   conversions using NumPy views or ONNX Runtime's public DLPack protocol.
