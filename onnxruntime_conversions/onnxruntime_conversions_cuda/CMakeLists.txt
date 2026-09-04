@@ -44,13 +44,8 @@ target_link_libraries(${PROJECT_NAME}
     onnxruntime::onnxruntime
     cuda_buffer::cuda_buffer
     CUDA::cudart
-    CUDA::cuda_driver
     pluginlib::pluginlib
 )
-set_target_properties(${PROJECT_NAME} PROPERTIES
-  INSTALL_RPATH_USE_LINK_PATH TRUE
-)
-
 pluginlib_export_plugin_description_file(
   onnxruntime_conversions
   onnxruntime_conversions_cuda.xml
@@ -77,7 +72,6 @@ if(BUILD_TESTING)
       onnxruntime::onnxruntime
       cuda_buffer::cuda_buffer
       CUDA::cudart
-      CUDA::cuda_driver
       pluginlib::pluginlib
     )
     add_dependencies(test_onnxruntime_conversions_cuda ${PROJECT_NAME})
@@ -102,7 +96,6 @@ if(BUILD_TESTING)
     rclcpp::rclcpp
     rclcpp_components::component
     CUDA::cudart
-    CUDA::cuda_driver
     ${std_msgs_TARGETS}
     ${tensor_msgs_TARGETS}
   )
@@ -121,7 +114,6 @@ if(BUILD_TESTING)
     rclcpp::rclcpp
     rclcpp_components::component
     CUDA::cudart
-    CUDA::cuda_driver
     ${std_msgs_TARGETS}
     ${tensor_msgs_TARGETS}
   )
