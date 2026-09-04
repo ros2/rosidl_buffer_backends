@@ -35,19 +35,39 @@ class CudaBuffer:
 
     @staticmethod
     def from_cpu(data: Union[bytes, bytearray, Iterable[int]]) -> Buffer:
-        """Copy CPU byte data into a new CUDA-backed buffer."""
-        if not isinstance(data, bytes):
+        """
+        Copy CPU byte data into a new CUDA-backed buffer.
+
+        The copy is synchronized before returning, and it consumes the
+        buffer's single write handle: the result is a finished payload, and a
+        later :meth:`from_output_buffer` on it raises. Use
+        :meth:`allocate_buffer` when you intend to fill the buffer yourself.
+        """
+        if not isinstance(data, (bytes, bytearray, memoryview)):
             data = bytes(data)
         return _from_cpu_data(data)
 
     @staticmethod
     def from_size(size: int) -> Buffer:
-        """Create a zero-initialized CUDA-backed buffer with ``size`` bytes."""
+        """
+        Create a zero-initialized CUDA-backed buffer with ``size`` bytes.
+
+        Like :meth:`from_cpu`, the zeroing is synchronized before returning
+        and consumes the buffer's single write handle, so a later
+        :meth:`from_output_buffer` on the result raises. Use
+        :meth:`allocate_buffer` when you intend to write to the buffer.
+        """
         return _from_size(size)
 
     @staticmethod
     def allocate_buffer(size: int) -> Buffer:
-        """Allocate an uninitialized CUDA-backed buffer without synchronizing."""
+        """
+        Allocate an uninitialized CUDA-backed buffer without synchronizing.
+
+        This is the factory to pair with :meth:`from_output_buffer`: it leaves
+        the write handle unclaimed so a producer can fill the buffer on its
+        own stream.
+        """
         return _allocate_buffer(size)
 
     @staticmethod
@@ -58,12 +78,13 @@ class CudaBuffer:
         """
         Acquire scoped write access to output data on a CUDA stream.
 
-        A non-CUDA input supplies the output size only and is replaced by the
-        CUDA-backed ``handle.buffer``. ``stream`` is a CUDA stream pointer
-        represented as an integer. When omitted, the backend's internal
-        stream is used.
+        A non-CUDA input supplies the output size only; its contents are not
+        copied. The CUDA-backed replacement is ``handle.buffer``, which must
+        be assigned back to the field being published. ``stream`` is a CUDA
+        stream pointer represented as an integer. When omitted, the backend's
+        internal stream is used.
         """
-        if not isinstance(buffer, Buffer) or buffer.backend_type != 'cuda':
+        if not isinstance(buffer, Buffer):
             if isinstance(buffer, Sized):
                 size = len(buffer)
             else:
@@ -79,13 +100,15 @@ class CudaBuffer:
         """
         Acquire scoped read access to input data on a CUDA stream.
 
-        Non-CUDA input is promoted to a CUDA buffer and retained by the
-        returned handle. ``stream`` is a CUDA stream pointer represented as
-        an integer. When omitted, the backend's internal stream is used.
+        Non-CUDA input is promoted to a CUDA buffer, copied host-to-device and
+        exposed as ``handle.buffer``, which stays valid after the handle is
+        closed so the promoted buffer can be forwarded on. ``stream`` is a
+        CUDA stream pointer represented as an integer. When omitted, the
+        backend's internal stream is used.
         """
         if isinstance(buffer, Buffer):
             return _from_input_buffer(buffer, stream)
-        if not isinstance(buffer, bytes):
+        if not isinstance(buffer, (bytes, bytearray, memoryview)):
             buffer = bytes(buffer)
         return _from_input_cpu_data(buffer, stream)
 
