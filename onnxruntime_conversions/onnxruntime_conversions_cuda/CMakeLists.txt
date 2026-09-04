@@ -35,7 +35,7 @@ if(NOT EXISTS "${_cuda_provider_library}")
 endif()
 
 add_library(${PROJECT_NAME} SHARED
-  src/cuda_conversion_backend.cpp
+  src/cuda_conversion_adapter.cpp
 )
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 target_link_libraries(${PROJECT_NAME}
@@ -69,7 +69,7 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
   ament_add_gtest(test_onnxruntime_conversions_cuda
-    test/test_cuda_conversion_backend.cpp
+    test/test_cuda_conversion_adapter.cpp
   )
   if(TARGET test_onnxruntime_conversions_cuda)
     target_link_libraries(test_onnxruntime_conversions_cuda
