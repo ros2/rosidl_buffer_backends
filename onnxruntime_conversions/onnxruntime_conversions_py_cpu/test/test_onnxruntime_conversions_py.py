@@ -200,14 +200,33 @@ def test_cpu_rejects_stream_and_unknown_device():
         allocate_tensor_msg((1,), np.float32, 'cpu', 1)
 
 
-def test_auto_cpu_without_stream_or_cuda(monkeypatch):
-    monkeypatch.setattr(_core, '_cuda_is_usable', lambda stream, device: False)
+def test_cpu_package_selects_cpu_by_default(monkeypatch):
+    monkeypatch.setattr(
+        _core,
+        'get_packages_with_prefixes',
+        lambda: {'onnxruntime_conversions_py_cpu': '/tmp/install'},
+    )
     msg = allocate_tensor_msg((1,), np.float32)
     assert _core._backend_type(msg.data) == 'cpu'
 
 
-def test_explicit_cpu_overrides_usable_cuda_stream(monkeypatch):
-    monkeypatch.setattr(_core, '_cuda_is_usable', lambda stream, device: True)
+@pytest.mark.parametrize('packages', [{}, {
+    'onnxruntime_conversions_py_cpu': '/tmp/cpu',
+    'onnxruntime_conversions_py_cuda': '/tmp/cuda',
+}])
+def test_default_requires_exactly_one_conversion_package(monkeypatch, packages):
+    monkeypatch.setattr(
+        _core, 'get_packages_with_prefixes', lambda: packages)
+    with pytest.raises(RuntimeError, match='Install exactly one'):
+        allocate_tensor_msg((1,), np.float32)
+
+
+def test_explicit_cpu_overrides_platform_default(monkeypatch):
+    monkeypatch.setattr(
+        _core,
+        'get_packages_with_prefixes',
+        lambda: {'onnxruntime_conversions_py_cuda': '/tmp/install'},
+    )
     msg = allocate_tensor_msg(
         (1,), np.float32, device_type='cpu', stream=123)
     assert _core._backend_type(msg.data) == 'cpu'
@@ -221,18 +240,18 @@ def test_explicit_unavailable_cuda_raises(monkeypatch):
             (1,), np.float32, device_type='cuda', stream=123)
 
 
-def test_auto_does_not_fallback_after_cuda_allocation_error(monkeypatch):
+def test_cuda_default_does_not_fallback_after_allocation_error(monkeypatch):
     class FailingCudaBuffer:
-
-        @staticmethod
-        def is_available(stream, device_id):
-            return True
 
         @staticmethod
         def allocate_buffer(size):
             raise RuntimeError('injected CUDA allocation failure')
 
-    monkeypatch.setattr(_core, '_cuda_is_usable', lambda stream, device: True)
+    monkeypatch.setattr(
+        _core,
+        'get_packages_with_prefixes',
+        lambda: {'onnxruntime_conversions_py_cuda': '/tmp/install'},
+    )
     monkeypatch.setattr(
         _core, '_load_cuda', lambda: (FailingCudaBuffer, object()))
     with pytest.raises(RuntimeError, match='injected CUDA allocation failure'):

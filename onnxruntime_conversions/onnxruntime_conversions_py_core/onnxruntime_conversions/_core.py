@@ -21,6 +21,7 @@ from typing import Optional
 from typing import Type
 from typing import Union
 
+from ament_index_python.packages import get_packages_with_prefixes
 import numpy as np
 import onnxruntime as ort
 from tensor_msgs.msg import ExperimentalTensor
@@ -257,24 +258,16 @@ def _load_cuda() -> tuple[object, object]:
     return CudaBuffer, _dlpack_bridge
 
 
-def _valid_stream_value(stream: Optional[int]) -> bool:
-    return (
-        isinstance(stream, int) and
-        not isinstance(stream, bool) and
-        stream > 0
-    )
-
-
-def _cuda_is_usable(stream: Optional[int], device_id: int) -> bool:
-    if not _valid_stream_value(stream):
-        return False
-    if 'CUDAExecutionProvider' not in ort.get_available_providers():
-        return False
-    try:
-        from cuda_buffer import CudaBuffer
-    except ImportError:
-        return False
-    return bool(CudaBuffer.is_available(stream, device_id))
+def _default_device_type() -> str:
+    packages = get_packages_with_prefixes()
+    has_cpu = 'onnxruntime_conversions_py_cpu' in packages
+    has_cuda = 'onnxruntime_conversions_py_cuda' in packages
+    if has_cpu == has_cuda:
+        raise RuntimeError(
+            'Install exactly one Python ONNX Runtime conversion package: '
+            'onnxruntime_conversions_py_cpu or '
+            'onnxruntime_conversions_py_cuda')
+    return 'cuda' if has_cuda else 'cpu'
 
 
 def _require_cuda(
@@ -288,11 +281,7 @@ def _require_cuda(
         raise ValueError(
             'CUDA tensor conversion requires a positive nonzero explicit '
             'integer stream')
-    cuda_buffer, bridge = _load_cuda()
-    if not cuda_buffer.is_available(stream, device_id):
-        raise RuntimeError(
-            'CUDA tensor conversion runtime, device, or stream is unusable')
-    return cuda_buffer, bridge
+    return _load_cuda()
 
 
 def allocate_tensor_msg(
@@ -307,8 +296,7 @@ def allocate_tensor_msg(
     _set_metadata(msg, metadata)
     normalized_device = device_type.lower()
     if normalized_device == 'auto':
-        normalized_device = (
-            'cuda' if _cuda_is_usable(stream, device_id) else 'cpu')
+        normalized_device = _default_device_type()
     if normalized_device == 'cpu':
         if device_id != 0:
             raise ValueError('CPU tensors require device_id 0')
