@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(onnxruntime_conversions_py_cpu)
+project(onnxruntime_conversions_py)
 
 find_package(ament_cmake REQUIRED)
 
