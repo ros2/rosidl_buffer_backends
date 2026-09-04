@@ -99,9 +99,12 @@ JetPack itself supplies CUDA and cuDNN but not the ONNX Runtime C++ SDK.
 
 `python_onnxruntime_vendor` installs only the CPU `onnxruntime` wheel.
 `python_onnxruntime_cuda_vendor` installs the matching `onnxruntime-gpu` wheel;
-`PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT` selects its CUDA 12 or CUDA 13
-distribution. Both wheels are installed unchanged and retain their bundled
-native libraries. They are independent of the C++ ONNX Runtime vendors.
+source builds detect the local CUDA toolkit and select its CUDA 12 or CUDA 13
+distribution. Set `CUDAToolkit_ROOT` when multiple toolkits are installed, or
+set `PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT` explicitly when producing a
+platform-specific binary package. Both wheels are installed unchanged and
+retain their bundled native libraries. They are independent of the C++ ONNX
+Runtime vendors.
 The two Python vendors declare a package conflict because they own the same
 `onnxruntime` import path. The CUDA wheel already contains the CPU execution
 provider.
