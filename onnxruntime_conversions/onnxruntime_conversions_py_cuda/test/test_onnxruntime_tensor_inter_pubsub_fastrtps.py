@@ -149,7 +149,7 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
                 return
 
             output_msg = allocate_tensor_msg(
-                (2, 3), np.float32, device_type='cuda')
+                (2, 3), np.float32, stream=stream)
             input_view = from_input_tensor_msg(msg, stream=stream)
             output_view = from_output_tensor_msg(output_msg, stream=stream)
             binding = session.io_binding()
@@ -213,7 +213,7 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
 
         for message_index in range(5):
             msg = allocate_tensor_msg(
-                (2, 3), np.float32, device_type='cuda')
+                (2, 3), np.float32, stream=stream)
             values = np.arange(6, dtype=np.float32).reshape(2, 3)
             values += message_index * 10
             output_view = from_output_tensor_msg(msg, stream=stream)

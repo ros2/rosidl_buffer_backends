@@ -69,7 +69,7 @@ def test_cuda_allocation_and_dlpack_pointer(cuda_stream):
     assert view.closed
 
 
-def test_auto_selects_cuda_with_usable_explicit_stream(cuda_stream):
+def test_cuda_package_selects_cuda_by_default(cuda_stream):
     msg = allocate_tensor_msg((2, 3), np.float32, stream=cuda_stream)
     assert msg.data.backend_type == 'cuda'
 
@@ -116,10 +116,9 @@ def test_cuda_to_tensor_msg_rejects_omitted_or_zero_stream(cuda_stream):
     source_view = from_output_tensor_msg(source_msg, cuda_stream)
     try:
         with pytest.raises(TypeError, match='explicit.*stream'):
-            to_tensor_msg(source_view.value, device_type='cuda')
+            to_tensor_msg(source_view.value)
         with pytest.raises(ValueError, match='nonzero.*stream'):
-            to_tensor_msg(
-                source_view.value, stream=0, device_type='cuda')
+            to_tensor_msg(source_view.value, stream=0)
     finally:
         source_view.close()
 

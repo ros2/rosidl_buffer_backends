@@ -129,15 +129,14 @@ colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cpu
 colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cuda
 ```
 
-The default `auto` backend chooses CUDA only when its plugin/runtime is usable
-and the application supplies a non-null explicit stream. Otherwise it chooses
-CPU. Explicit `cpu` and `cuda` remain strict, and failures after selection are
-never retried on another backend. Message views dispatch from the message
-buffer backend. If multiple accelerator plugins report themselves usable,
-automatic selection reports ambiguity instead of depending on discovery
-order.
+For Python allocations, the installed conversion package determines the
+default: `onnxruntime_conversions_py_cpu` selects CPU and
+`onnxruntime_conversions_py_cuda` selects CUDA. Install exactly one of these
+packages. CUDA allocations require a non-null explicit stream. Explicit `cpu`
+and `cuda` overrides remain strict, and failures are never retried on another
+backend. Views of existing messages dispatch from the message buffer backend.
 
-Requesting a missing backend throws
+For C++, requesting a missing backend throws
 `ONNX Runtime conversion backend '<name>' is unavailable.` followed by loaded
 backend IDs, discoverable plugin classes, and exact plugin load failures. A
 missing required CPU plugin reports
