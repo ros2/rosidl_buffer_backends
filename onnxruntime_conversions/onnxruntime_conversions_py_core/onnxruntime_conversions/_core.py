@@ -14,16 +14,18 @@
 
 from array import array
 from collections.abc import Sequence
-from dataclasses import dataclass
 import sys
-from types import TracebackType
 from typing import Optional
-from typing import Type
 from typing import Union
 
-from ament_index_python.packages import get_packages_with_prefixes
 import numpy as np
 import onnxruntime as ort
+
+from onnxruntime_conversions._adapter import load_external_adapters
+from onnxruntime_conversions._adapter import OrtConversionRegistry
+from onnxruntime_conversions._adapter import OrtTensorView
+from onnxruntime_conversions._adapter import TensorMetadata
+from onnxruntime_conversions._cpu_adapter import CpuOrtConversionAdapter
 from tensor_msgs.msg import ExperimentalTensor
 
 
@@ -32,8 +34,6 @@ _DL_UINT = 1
 _DL_FLOAT = 2
 _DL_BFLOAT = 4
 _DL_BOOL = 6
-_DL_CPU = 1
-_DL_CUDA = 2
 
 _TYPE_INFO = {
     1: (_DL_FLOAT, 32, np.dtype(np.float32)),
@@ -59,91 +59,6 @@ _DLPACK_TYPES = {
     (dtype_code, dtype_bits): element_type
     for element_type, (dtype_code, dtype_bits, _) in _TYPE_INFO.items()
 }
-
-
-@dataclass(frozen=True)
-class _TensorMetadata:
-    shape: tuple[int, ...]
-    strides: tuple[int, ...]
-    element_type: int
-    dtype_code: int
-    dtype_bits: int
-    dtype_lanes: int
-    element_count: int
-    byte_count: int
-    byte_offset: int
-
-
-class OrtTensorView:
-    """Own an OrtValue and every object backing its external storage."""
-
-    def __init__(
-        self,
-        value: ort.OrtValue,
-        message: ExperimentalTensor,
-        storage_view: object,
-        backend_handle: object = None,
-    ) -> None:
-        self._value: Optional[ort.OrtValue] = value
-        self._message: Optional[ExperimentalTensor] = message
-        self._storage_view = storage_view
-        self._backend_handle = backend_handle
-
-    @property
-    def value(self) -> ort.OrtValue:
-        if self._value is None:
-            raise RuntimeError('OrtTensorView is closed')
-        return self._value
-
-    @property
-    def closed(self) -> bool:
-        return self._value is None
-
-    def close(self) -> None:
-        if self.closed:
-            return
-        self._value = None
-        self._storage_view = None
-        handle = self._backend_handle
-        self._backend_handle = None
-        if handle is not None:
-            handle.close()
-        self._message = None
-
-    def __enter__(self) -> ort.OrtValue:
-        return self.value
-
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[TracebackType],
-    ) -> bool:
-        self.close()
-        return False
-
-
-class _DLPackProducer:
-    def __init__(
-        self,
-        capsule: object,
-        device_id: int,
-        is_bool: bool,
-    ) -> None:
-        self._capsule = capsule
-        self._device_id = device_id
-        if is_bool:
-            self.dtype = np.dtype(np.bool_)
-
-    def __dlpack__(self, stream: Optional[int] = None) -> object:
-        capsule = self._capsule
-        if capsule is None:
-            raise RuntimeError('DLPack tensor has already been consumed')
-        self._capsule = None
-        return capsule
-
-    def __dlpack_device__(self) -> tuple[int, int]:
-        return (_DL_CUDA, self._device_id)
 
 
 def _checked_product(values: Sequence[int], context: str) -> int:
@@ -187,7 +102,7 @@ def _metadata_for(
     shape: Sequence[int],
     element_type: object,
     byte_offset: int = 0,
-) -> _TensorMetadata:
+) -> TensorMetadata:
     normalized_shape = tuple(int(dimension) for dimension in shape)
     normalized_type = _normalize_element_type(element_type)
     dtype_code, dtype_bits, _ = _TYPE_INFO[normalized_type]
@@ -200,7 +115,7 @@ def _metadata_for(
         raise ValueError('Tensor byte_offset must be nonnegative')
     if byte_offset % element_size:
         raise ValueError('Tensor byte_offset is not element-aligned')
-    return _TensorMetadata(
+    return TensorMetadata(
         normalized_shape,
         _contiguous_strides(normalized_shape),
         normalized_type,
@@ -210,10 +125,11 @@ def _metadata_for(
         element_count,
         element_count * element_size,
         byte_offset,
+        _TYPE_INFO[normalized_type][2],
     )
 
 
-def _validate_message(msg: ExperimentalTensor) -> _TensorMetadata:
+def _validate_message(msg: ExperimentalTensor) -> TensorMetadata:
     if int(msg.dtype_lanes) != 1:
         raise ValueError('ONNX Runtime tensors require dtype_lanes == 1')
     element_type = _DLPACK_TYPES.get(
@@ -235,7 +151,7 @@ def _validate_message(msg: ExperimentalTensor) -> _TensorMetadata:
 
 def _set_metadata(
     msg: ExperimentalTensor,
-    metadata: _TensorMetadata,
+    metadata: TensorMetadata,
 ) -> None:
     msg.dtype_code = metadata.dtype_code
     msg.dtype_bits = metadata.dtype_bits
@@ -249,39 +165,9 @@ def _backend_type(data: object) -> str:
     return str(getattr(data, 'backend_type', 'cpu')).lower()
 
 
-def _load_cuda() -> tuple[object, object]:
-    if 'CUDAExecutionProvider' not in ort.get_available_providers():
-        raise RuntimeError(
-            'CUDA tensor conversion requires CUDAExecutionProvider')
-    from cuda_buffer import CudaBuffer
-    from onnxruntime_conversions import _dlpack_bridge
-    return CudaBuffer, _dlpack_bridge
-
-
-def _default_device_type() -> str:
-    packages = get_packages_with_prefixes()
-    has_cpu = 'onnxruntime_conversions_py_cpu' in packages
-    has_cuda = 'onnxruntime_conversions_py_cuda' in packages
-    if has_cpu == has_cuda:
-        raise RuntimeError(
-            'Install exactly one Python ONNX Runtime conversion package: '
-            'onnxruntime_conversions_py_cpu or '
-            'onnxruntime_conversions_py_cuda')
-    return 'cuda' if has_cuda else 'cpu'
-
-
-def _require_cuda(
-    stream: Optional[int],
-    device_id: int,
-) -> tuple[object, object]:
-    if not isinstance(stream, int) or isinstance(stream, bool):
-        raise TypeError(
-            'CUDA tensor conversion requires an explicit integer stream')
-    if stream <= 0:
-        raise ValueError(
-            'CUDA tensor conversion requires a positive nonzero explicit '
-            'integer stream')
-    return _load_cuda()
+_registry = OrtConversionRegistry()
+_registry.register(CpuOrtConversionAdapter())
+load_external_adapters(_registry)
 
 
 def allocate_tensor_msg(
@@ -295,73 +181,13 @@ def allocate_tensor_msg(
     msg = ExperimentalTensor()
     _set_metadata(msg, metadata)
     normalized_device = device_type.lower()
-    if normalized_device == 'auto':
-        normalized_device = _default_device_type()
-    if normalized_device == 'cpu':
-        if device_id != 0:
-            raise ValueError('CPU tensors require device_id 0')
-        msg.data = array('B', bytes(metadata.byte_count))
-    elif normalized_device == 'cuda':
-        if device_id != 0:
-            raise ValueError(
-                'cuda_buffer currently supports allocation on device 0 only')
-        if metadata.byte_count == 0:
-            raise ValueError('CUDA zero-sized tensors are not supported')
-        cuda_buffer, _ = _require_cuda(stream, device_id)
-        msg.data = cuda_buffer.allocate_buffer(metadata.byte_count)
-    else:
-        raise ValueError(f'Unsupported tensor device type: {device_type}')
+    adapter = (
+        _registry.default()
+        if normalized_device == 'auto'
+        else _registry.for_device(normalized_device)
+    )
+    msg.data = adapter.allocate(metadata, device_id, stream)
     return msg
-
-
-def _cpu_view(
-    msg: ExperimentalTensor,
-    metadata: _TensorMetadata,
-) -> OrtTensorView:
-    dtype = _TYPE_INFO[metadata.element_type][2]
-    storage = np.ndarray(
-        metadata.shape,
-        dtype=dtype,
-        buffer=msg.data,
-        offset=metadata.byte_offset,
-        order='C',
-    )
-    if metadata.element_type == 16:
-        value = ort.OrtValue.ortvalue_from_numpy_with_onnx_type(
-            storage, metadata.element_type)
-    else:
-        value = ort.OrtValue.ortvalue_from_numpy(storage)
-    return OrtTensorView(value, msg, storage)
-
-
-def _cuda_view(
-    msg: ExperimentalTensor,
-    metadata: _TensorMetadata,
-    stream: Optional[int],
-    output: bool,
-) -> OrtTensorView:
-    cuda_buffer, bridge = _require_cuda(stream, 0)
-    factory = (
-        cuda_buffer.from_output_buffer if output
-        else cuda_buffer.from_input_buffer)
-    handle = factory(msg.data, stream)
-    capsule_code = (
-        _DL_UINT if metadata.element_type == 9 else metadata.dtype_code)
-    capsule = bridge.make_dlpack_capsule(
-        handle.device_ptr,
-        _DL_CUDA,
-        handle.device_id,
-        capsule_code,
-        metadata.dtype_bits,
-        metadata.dtype_lanes,
-        metadata.shape,
-        metadata.byte_offset,
-        handle,
-    )
-    producer = _DLPackProducer(
-        capsule, handle.device_id, metadata.element_type == 9)
-    value = ort.OrtValue.from_dlpack(producer)
-    return OrtTensorView(value, msg, producer, handle)
 
 
 def _from_tensor_msg(
@@ -372,14 +198,8 @@ def _from_tensor_msg(
     if not isinstance(msg, ExperimentalTensor):
         raise TypeError('msg must be an ExperimentalTensor')
     metadata = _validate_message(msg)
-    backend = _backend_type(msg.data)
-    if backend == 'cpu':
-        if stream is not None:
-            raise ValueError('CPU tensor conversion does not accept a stream')
-        return _cpu_view(msg, metadata)
-    if backend == 'cuda':
-        return _cuda_view(msg, metadata, stream, output)
-    raise ValueError(f'Unsupported tensor buffer backend: {backend}')
+    adapter = _registry.for_data(msg.data)
+    return adapter.view(msg, metadata, stream, output)
 
 
 def from_input_tensor_msg(
@@ -396,7 +216,7 @@ def from_output_tensor_msg(
     return _from_tensor_msg(msg, stream, True)
 
 
-def _value_metadata(value: ort.OrtValue) -> _TensorMetadata:
+def _value_metadata(value: ort.OrtValue) -> TensorMetadata:
     if not isinstance(value, ort.OrtValue) or not value.is_tensor():
         raise TypeError('value must be an ONNX Runtime tensor OrtValue')
     return _metadata_for(value.shape(), value.element_type())
@@ -414,7 +234,7 @@ def to_tensor_msg(
         source_device = value.device_name().lower()
         device_id = (
             int(value.__dlpack_device__()[1])
-            if source_device == 'cuda' else 0)
+            if source_device != 'cpu' else 0)
         destination = allocate_tensor_msg(
             metadata.shape,
             metadata.element_type,
@@ -436,7 +256,7 @@ def to_tensor_msg(
         _set_metadata(destination, metadata)
 
     conversion_stream = (
-        stream if _backend_type(destination.data) == 'cuda' else None)
+        stream if _backend_type(destination.data) != 'cpu' else None)
     view = from_output_tensor_msg(destination, conversion_stream)
     view.value.update_inplace(value)
     view.close()
