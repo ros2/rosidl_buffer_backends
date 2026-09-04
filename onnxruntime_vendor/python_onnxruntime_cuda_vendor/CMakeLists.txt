@@ -7,19 +7,46 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION "1.28.0" CACHE STRING
   "ONNX Runtime CUDA Python wheel version")
-set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT "cuda12" CACHE STRING
-  "ONNX Runtime CUDA Python wheel variant: cuda12 or cuda13")
+set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT "auto" CACHE STRING
+  "ONNX Runtime CUDA Python wheel variant: auto, cuda12, or cuda13")
 set_property(
   CACHE PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT
-  PROPERTY STRINGS cuda12 cuda13)
-if(NOT PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT MATCHES "^cuda(12|13)$")
+  PROPERTY STRINGS auto cuda12 cuda13)
+if(NOT PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT MATCHES "^(auto|cuda12|cuda13)$")
   message(FATAL_ERROR
     "${PROJECT_NAME}: PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT must be "
-    "cuda12 or cuda13")
+    "auto, cuda12, or cuda13")
+endif()
+
+set(_resolved_variant "${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT}")
+if(_resolved_variant STREQUAL "auto")
+  find_package(CUDAToolkit QUIET)
+  if(NOT CUDAToolkit_FOUND)
+    message(FATAL_ERROR
+      "${PROJECT_NAME}: could not detect a local CUDA toolkit. Set "
+      "CUDAToolkit_ROOT or explicitly select "
+      "PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT=cuda12|cuda13")
+  endif()
+  if(CUDAToolkit_VERSION_MAJOR EQUAL 12)
+    set(_resolved_variant "cuda12")
+  elseif(CUDAToolkit_VERSION_MAJOR EQUAL 13)
+    set(_resolved_variant "cuda13")
+  else()
+    message(FATAL_ERROR
+      "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} is unsupported; "
+      "ONNX Runtime ${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION} requires "
+      "CUDA 12 or CUDA 13")
+  endif()
+  message(STATUS
+    "${PROJECT_NAME}: detected CUDA ${CUDAToolkit_VERSION}; "
+    "using ${_resolved_variant}")
+else()
+  message(STATUS
+    "${PROJECT_NAME}: using explicit ${_resolved_variant} variant")
 endif()
 
 set(_python_package "onnxruntime-gpu")
-if(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT STREQUAL "cuda12")
+if(_resolved_variant STREQUAL "cuda12")
   string(CONCAT _index_url
     "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/"
     "onnxruntime-cuda-12/pypi/simple/")
@@ -35,7 +62,7 @@ string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 string(CONCAT _stage_marker
   "${_stage_root}/.${_python_package}-"
   "${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION}-"
-  "${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT}-bundled-"
+  "${_resolved_variant}-bundled-"
   "py${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}-${_system_arch}")
 
 if(NOT EXISTS "${_stage_marker}")
