@@ -57,6 +57,10 @@ install(
   DESTINATION include/onnxruntime_conversions
 )
 install(
+  FILES README.md
+  DESTINATION share/${PROJECT_NAME}
+)
+install(
   TARGETS onnxruntime_conversions onnxruntime_conversions_cpu_plugin
   EXPORT onnxruntime_conversions
   INCLUDES DESTINATION include/onnxruntime_conversions
