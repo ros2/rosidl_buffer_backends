@@ -121,13 +121,51 @@ def test_from_input_cuda_buffer():
 
 
 def test_from_input_cpu_data_promotes_to_cuda():
-    handle = CudaBuffer.from_input_buffer(bytes(range(32)))
+    data = bytes(range(32))
+
+    handle = CudaBuffer.from_input_buffer(data)
 
     assert isinstance(handle, CudaReadHandle)
     assert handle.device_ptr != 0
+    assert handle.buffer.backend_type == 'cuda'
+    assert handle.buffer.to_bytes() == data
     handle.close()
     handle.close()
     assert handle.closed
+    # The promoted buffer outlives the handle so it can be forwarded on.
+    assert handle.buffer.to_bytes() == data
+
+
+def test_from_input_cuda_buffer_exposes_source_buffer():
+    buffer = CudaBuffer.from_cpu(bytes(range(32)))
+
+    with CudaBuffer.from_input_buffer(buffer) as handle:
+        assert handle.buffer is buffer
+
+    assert handle.buffer is buffer
+
+
+def test_from_cpu_accepts_bytearray_and_memoryview():
+    data = bytes(range(32))
+
+    assert CudaBuffer.from_cpu(bytearray(data)).to_bytes() == data
+    assert CudaBuffer.from_cpu(memoryview(data)).to_bytes() == data
+
+
+def test_from_input_accepts_bytearray_and_memoryview():
+    data = bytes(range(32))
+
+    with CudaBuffer.from_input_buffer(bytearray(data)) as handle:
+        assert handle.buffer.to_bytes() == data
+    with CudaBuffer.from_input_buffer(memoryview(data)) as handle:
+        assert handle.buffer.to_bytes() == data
+
+
+def test_write_handle_is_not_available_after_initializing_factories():
+    # from_cpu()/from_size() consume the buffer's single write handle.
+    for buffer in (CudaBuffer.from_cpu(bytes(32)), CudaBuffer.from_size(32)):
+        with pytest.raises(RuntimeError, match='write.*finalized'):
+            CudaBuffer.from_output_buffer(buffer)
 
 
 def test_from_input_empty_buffer_raises():

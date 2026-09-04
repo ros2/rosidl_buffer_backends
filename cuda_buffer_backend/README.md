@@ -170,7 +170,9 @@ publisher.publish(msg)
 
 Leaving the context records the producer event on `stream_ptr`; it does not
 synchronize the stream. `write_handle.buffer` holds the CUDA buffer and is
-useful when `from_output_buffer()` promotes a non-CUDA value based on its size:
+useful when `from_output_buffer()` promotes a non-CUDA value based on its size
+— a promoted value supplies the output size only, its contents are not copied,
+and the CUDA-backed replacement must be assigned back to the message:
 
 ```python
 with CudaBuffer.from_output_buffer(msg.data, stream_ptr) as write_handle:
@@ -178,9 +180,18 @@ with CudaBuffer.from_output_buffer(msg.data, stream_ptr) as write_handle:
     produce_device_data(write_handle.device_ptr, len(msg.data), stream_ptr)
 ```
 
+`write_handle.buffer` stays valid after the handle is closed, so the assignment
+above can equally happen after the `with` block.
+
+`allocate_buffer()` is the factory to pair with `from_output_buffer()`: it
+leaves the write handle unclaimed. A buffer has exactly one write handle for
+its lifetime, so the initializing factories below cannot be filled afterwards.
+
 For CPU-originated data, `from_cpu()` copies bytes to device memory, while
 `from_size()` creates a zero-initialized device buffer. These convenience
-factories synchronize their initialization before returning:
+factories synchronize their initialization before returning, and they consume
+the buffer's single write handle — a later `from_output_buffer()` on their
+result raises `write already finalized`:
 
 ```python
 from cuda_buffer import CudaBuffer
@@ -218,8 +229,21 @@ promoted CUDA buffer alive, and leaving the context records a read event so the
 backend does not recycle the allocation before queued work completes. There is
 no CPU conversion or stream synchronization in this CUDA-to-CUDA path. If no
 stream is supplied, the backend's process-lifetime internal stream is used.
-CPU fallback input is promoted with an asynchronous host-to-device copy on the
-selected stream.
+CPU fallback input is promoted with a host-to-device copy on the selected
+stream.
+
+`read_handle.buffer` exposes the buffer the handle is reading — the source for
+CUDA-backed input, the promoted CUDA buffer for CPU input — and, like
+`write_handle.buffer`, stays valid after the handle is closed. That is how a
+subscriber republishes CPU fallback data without a second copy:
+
+```python
+def callback(msg):
+    with CudaBuffer.from_input_buffer(msg.data, stream_ptr) as read_handle:
+        consume_device_data(read_handle.device_ptr, len(msg.data), stream_ptr)
+    out = Image()
+    out.data = read_handle.buffer
+```
 
 Subscribers opt in to delivery through the CUDA backend with rclpy's
 `acceptable_buffer_backends` argument. CPU remains an implicit fallback when
