@@ -48,12 +48,12 @@ def generate_test_description():
         return LaunchDescription([launch_testing.actions.ReadyToTest()])
 
     subscriber = Node(
-        package='onnxruntime_conversions_cuda_plugin',
+        package='onnxruntime_conversions_cuda',
         executable='onnxruntime_cuda_tensor_subscriber_node',
         output='screen',
     )
     publisher = Node(
-        package='onnxruntime_conversions_cuda_plugin',
+        package='onnxruntime_conversions_cuda',
         executable='onnxruntime_cuda_tensor_publisher_node',
         output='screen',
     )

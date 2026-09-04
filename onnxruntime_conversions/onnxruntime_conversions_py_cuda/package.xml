@@ -17,7 +17,7 @@
   <exec_depend>onnxruntime_conversions_py_core</exec_depend>
   <exec_depend>python_onnxruntime_cuda_vendor</exec_depend>
 
-  <conflict>onnxruntime_conversions_py_cpu</conflict>
+  <conflict>onnxruntime_conversions_py</conflict>
 
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>

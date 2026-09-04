@@ -30,14 +30,13 @@ conversion libraries that build on the same buffer infrastructure.
 - **[onnxruntime_conversions](onnxruntime_conversions/onnxruntime_conversions/README.md)**
   -- Compiled C++ conversion library and plugin registry, including its
   required runtime-discovered CPU plugin.
-- **onnxruntime_conversions_cuda_plugin** -- Optional runtime-discovered CUDA
-  storage and execution-provider backend.
+- **onnxruntime_conversions_cuda** -- Optional runtime-discovered CUDA storage
+  and execution-provider backend.
 - **onnxruntime_conversions_py_core** -- Vendor-neutral Python ROS package under the shared
   `onnxruntime_conversions/` source container, providing CPU and CUDA
   conversions using NumPy views or ONNX Runtime's public DLPack protocol.
-- **onnxruntime_conversions_py_cpu** -- User-facing CPU Python conversion
-  runtime metapackage and apt package
-  `ros-$ROS_DISTRO-onnxruntime-conversions-py-cpu`.
+- **onnxruntime_conversions_py** -- User-facing CPU Python conversion runtime
+  metapackage.
 - **onnxruntime_conversions_py_cuda** -- CUDA Python conversion runtime
   metapackage.
 - **torch_conversions** -- Header-only helper library that converts between
@@ -80,76 +79,6 @@ conversion libraries that build on the same buffer infrastructure.
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
 - CUDA Toolkit on the host for CUDA packages.
-
-## ONNX Runtime architecture
-
-`onnxruntime_core_vendor` always installs a CUDA-neutral SDK and runtime. Its
-CUDA 12 or CUDA 13 setting selects only the x86_64 GPU archive used as the
-source of those core files; it does not add a CUDA dependency or enable CUDA
-for consumers. On arm64, including JetPack hosts, it uses the official
-ONNX Runtime CPU archive. `onnxruntime_cuda_vendor` is the optional owner of
-`libonnxruntime_providers_cuda.so`. ONNX Runtime discovers that provider plugin
-beside the physical `libonnxruntime.so`, so the two vendors must be installed
-into one merged prefix.
-
-ARM64 supports the C++ CPU conversion path. The Python CPU path additionally
-requires Python 3.11 or newer for ONNX Runtime 1.28, so it does not support
-JetPack 6's default Python 3.10. JetPack GPU execution is not currently
-provided because Microsoft does not publish a matching arm64 GPU C++ archive;
-JetPack itself supplies CUDA and cuDNN but not the ONNX Runtime C++ SDK.
-
-`python_onnxruntime_vendor` installs only the CPU `onnxruntime` wheel.
-`python_onnxruntime_cuda_vendor` installs the matching `onnxruntime-gpu` wheel;
-source builds detect the local CUDA toolkit and select its CUDA 12 or CUDA 13
-distribution. Set `CUDAToolkit_ROOT` when multiple toolkits are installed, or
-set `PYTHON_ONNXRUNTIME_CUDA_VENDOR_VARIANT` explicitly when producing a
-platform-specific binary package. Both wheels are installed unchanged and
-retain their bundled native libraries. They are independent of the C++ ONNX
-Runtime vendors.
-The two Python vendors declare a package conflict because they own the same
-`onnxruntime` import path. The CUDA wheel already contains the CPU execution
-provider.
-
-The vendored Python runtime is constrained to the Python ABI, operating system,
-and architecture of its wheel. No external ONNX Runtime installation is
-required.
-
-Install `onnxruntime_conversions_py_cpu` for CPU Python use or
-`onnxruntime_conversions_py_cuda` for CUDA Python use; no package depends on
-both vendors. C++ conversion backends are discovered at runtime and remain
-separate from the Python wheel runtime.
-
-```bash
-# CPU Python
-sudo apt update
-sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cpu
-
-# CUDA Python (install instead of the CPU metapackage)
-sudo apt update
-sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cuda
-
-# Source builds; use separate install prefixes for CPU and CUDA Python vendors
-colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cpu
-colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cuda
-```
-
-Python conversion packages register storage adapters through the ament index.
-The CPU adapter is always available, while
-`onnxruntime_conversions_py_cuda` registers a higher-priority CUDA adapter and
-makes CUDA the allocation default. Additional platform packages can register
-other device and buffer backend IDs without changing the core package. CUDA
-allocations require a non-null explicit stream. Explicit device overrides
-remain strict, and existing messages dispatch from their buffer backend.
-Adapter packages install a resource named after the package under
-`onnxruntime_conversions__adapters`; its contents are a Python
-`module:register_function` entry point.
-
-For C++, requesting a missing backend throws
-`ONNX Runtime conversion backend '<name>' is unavailable.` followed by loaded
-backend IDs, discoverable plugin classes, and exact plugin load failures. A
-missing required CPU plugin reports
-`Required onnxruntime_conversions CPU plugin is unavailable.` with the same
-details.
 
 ## API overview
 

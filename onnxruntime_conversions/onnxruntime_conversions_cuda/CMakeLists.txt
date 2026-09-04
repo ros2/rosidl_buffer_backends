@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(onnxruntime_conversions_cuda_plugin)
+project(onnxruntime_conversions_cuda)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 20)
@@ -53,7 +53,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 
 pluginlib_export_plugin_description_file(
   onnxruntime_conversions
-  onnxruntime_conversions_cuda_plugin.xml
+  onnxruntime_conversions_cuda.xml
 )
 
 install(
@@ -68,11 +68,11 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
   find_package(ament_cmake_gtest REQUIRED)
 
-  ament_add_gtest(test_onnxruntime_conversions_cuda_plugin
+  ament_add_gtest(test_onnxruntime_conversions_cuda
     test/test_cuda_conversion_backend.cpp
   )
-  if(TARGET test_onnxruntime_conversions_cuda_plugin)
-    target_link_libraries(test_onnxruntime_conversions_cuda_plugin
+  if(TARGET test_onnxruntime_conversions_cuda)
+    target_link_libraries(test_onnxruntime_conversions_cuda
       onnxruntime_conversions::onnxruntime_conversions
       onnxruntime::onnxruntime
       cuda_buffer::cuda_buffer
@@ -80,8 +80,8 @@ if(BUILD_TESTING)
       CUDA::cuda_driver
       pluginlib::pluginlib
     )
-    add_dependencies(test_onnxruntime_conversions_cuda_plugin ${PROJECT_NAME})
-    set_target_properties(test_onnxruntime_conversions_cuda_plugin PROPERTIES
+    add_dependencies(test_onnxruntime_conversions_cuda ${PROJECT_NAME})
+    set_target_properties(test_onnxruntime_conversions_cuda PROPERTIES
       BUILD_RPATH
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>;$<TARGET_FILE_DIR:onnxruntime::onnxruntime>"
     )

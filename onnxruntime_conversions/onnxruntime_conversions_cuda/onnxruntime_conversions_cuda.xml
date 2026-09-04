@@ -1,4 +1,4 @@
-<library path="onnxruntime_conversions_cuda_plugin">
+<library path="onnxruntime_conversions_cuda">
   <class
     name="cuda"
     type="onnxruntime_conversions::CudaConversionBackend"

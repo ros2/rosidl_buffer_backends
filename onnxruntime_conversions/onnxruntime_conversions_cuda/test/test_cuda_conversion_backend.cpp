@@ -276,7 +276,7 @@ TEST_F(CudaPluginTest, CopyFromOrtReturnsBeforeStreamCompletes)
 
 TEST_F(CudaPluginTest, ConfiguresProviderAndRunsCudaInference)
 {
-  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_conversions_cuda_plugin_test");
+  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_conversions_cuda_test");
   Ort::SessionOptions options;
   BackendConfiguration configuration;
   configuration.device_id = 0;
