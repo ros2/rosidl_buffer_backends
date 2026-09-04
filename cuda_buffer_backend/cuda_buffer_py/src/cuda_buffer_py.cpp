@@ -175,35 +175,6 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
 {
   module.doc() = "Python bindings for creating CUDA-backed rosidl buffers";
 
-  module.def(
-    "_is_available",
-    [](uintptr_t stream, int device_id) {
-      if (stream == 0) {
-        return false;
-      }
-      int device_count = 0;
-      if (cudaGetDeviceCount(&device_count) != cudaSuccess ||
-        device_id < 0 || device_id >= device_count)
-      {
-        (void)cudaGetLastError();
-        return false;
-      }
-      int current_device = -1;
-      if (cudaGetDevice(&current_device) != cudaSuccess || current_device != device_id) {
-        (void)cudaGetLastError();
-        return false;
-      }
-      const cudaError_t status =
-        cudaStreamQuery(reinterpret_cast<cudaStream_t>(stream));
-      if (status != cudaSuccess && status != cudaErrorNotReady) {
-        (void)cudaGetLastError();
-        return false;
-      }
-      return true;
-    },
-    py::arg("stream"),
-    py::arg("device_id") = 0);
-
   py::class_<CudaReadHandleWrapper>(module, "CudaReadHandle")
   .def_property_readonly("device_ptr", &CudaReadHandleWrapper::get_ptr)
   .def_property_readonly("device_id", &CudaReadHandleWrapper::get_device_id)
