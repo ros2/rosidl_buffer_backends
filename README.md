@@ -1,8 +1,8 @@
 # rosidl_buffer_backends
 
 CUDA buffer backend implementation for `rosidl::Buffer`, enabling zero-copy
-GPU memory sharing between ROS 2 publishers and subscribers, plus a
-PyTorch-side helper library that builds on the same buffer infrastructure.
+GPU memory sharing between ROS 2 publishers and subscribers, plus tensor
+conversion libraries that build on the same buffer infrastructure.
 
 ## Packages
 
@@ -19,6 +19,26 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
   distribution using the same platform and CUDA selection policy as
   `libtorch_vendor`.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
+- **onnxruntime_core_vendor** -- CUDA-neutral ONNX Runtime headers, core
+  runtime, and shared provider support extracted from an official GPU archive.
+- **onnxruntime_cuda_vendor** -- Optional CUDA execution-provider
+  library installed beside the canonical core runtime.
+- **python_onnxruntime_vendor** -- Unmodified CPU-only Python ONNX Runtime
+  wheel packaged for ROS.
+- **python_onnxruntime_cuda_vendor** -- Unmodified CUDA Python ONNX Runtime
+  wheel packaged for ROS.
+- **[onnxruntime_conversions](onnxruntime_conversions/onnxruntime_conversions/README.md)**
+  -- Compiled C++ conversion library and adapter registry, including its
+  required runtime-discovered CPU plugin.
+- **onnxruntime_conversions_cuda** -- Optional runtime-discovered CUDA storage
+  and execution-provider adapter.
+- **onnxruntime_conversions_py_core** -- Vendor-neutral Python ROS package under the shared
+  `onnxruntime_conversions/` source container, providing CPU and CUDA
+  conversions using NumPy views or ONNX Runtime's public DLPack protocol.
+- **onnxruntime_conversions_py** -- User-facing CPU Python conversion runtime
+  metapackage.
+- **onnxruntime_conversions_py_cuda** -- CUDA Python conversion runtime
+  metapackage.
 - **torch_conversions** -- Header-only helper library that converts between
   `tensor_msgs/ExperimentalTensor` and `at::Tensor` and exposes DLPack import /
   export. Replaces the older `torch_buffer_backend` plugin approach with a
@@ -58,12 +78,7 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- CUDA Toolkit (>= 11.8) on the host.
-
-Per-package build, test, and run details live in each package's README:
-
-- [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
-- [`torch_conversions/README.md`](torch_conversions/README.md)
+- CUDA Toolkit on the host for CUDA packages.
 
 ## API overview
 
@@ -112,11 +127,12 @@ auto guard = torch_conversions::set_stream();
 at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
 ```
 
-The message schema carries DLPack's dtype / shape / stride / offset
+The message schema carries DLPack-compatible dtype, shape, stride, and offset
 metadata, while device placement is derived from the underlying
-`rosidl::Buffer` backend. Any DLPack-compatible framework (PyTorch,
-TensorFlow, JAX, CuPy, ONNX Runtime, ...) can interoperate over the wire by
-converting to / from its own DLPack representation.
+`rosidl::Buffer` backend. ONNX Runtime's public C++ API has no direct
+`from_dlpack` operation. The ONNX Runtime conversion packages validate the
+message metadata and wrap its CPU or CUDA pointer without copying by calling
+`Ort::Value::CreateTensor`.
 
 ## License
 
