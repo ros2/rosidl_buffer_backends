@@ -25,15 +25,31 @@ conversion libraries that build on the same buffer infrastructure.
   CUDA 12 and cuDNN 9.
 - **python_onnxruntime_cuda_vendor** -- Unmodified CUDA Python ONNX Runtime
   wheel packaged for ROS.
-- **[onnxruntime_conversions](onnxruntime_conversions/README.md)** -- C++
-  conversions. Install `onnxruntime_conversions_cpu` or
-  `onnxruntime_conversions_cuda`.
-- **onnxruntime_conversions_py** -- Python conversions. Install
-  `onnxruntime_conversions_py_cpu` or `onnxruntime_conversions_py_cuda`.
-- **[torch_conversions](torch_conversions/README.md)** -- C++ conversions.
-  Install `torch_conversions_cpu` or `torch_conversions_cuda`.
-- **torch_conversions_py** -- Python conversions. Install
-  `torch_conversions_py_cpu` or `torch_conversions_py_cuda`.
+- **[dlpack_conversions](dlpack_conversions/README.md)** -- Framework-free C++
+  core. Allocates message storage, hands out DLPack tensors over it, and loads
+  storage plugins.
+- **dlpack_conversions_cpu** -- Host memory storage plugin.
+- **dlpack_conversions_cuda** -- CUDA device memory storage plugin, backed by
+  `cuda_buffer`.
+- **dlpack_conversions_py** -- Framework-free Python core and plugin registry.
+- **dlpack_conversions_py_cpu** -- Host memory storage plugin for Python.
+- **dlpack_conversions_py_cuda** -- CUDA storage plugin for Python.
+- **[onnxruntime_conversions](onnxruntime_conversions/README.md)** --
+  Header-only C++ adapter between ONNX Runtime `Ort::Value` tensors and the
+  DLPack core.
+- **onnxruntime_conversions_py** -- Python adapter between ONNX Runtime
+  `OrtValue` tensors and the DLPack core.
+- **[torch_conversions](torch_conversions/README.md)** -- Header-only C++
+  adapter between PyTorch tensors and the DLPack core.
+- **torch_conversions_py** -- Python adapter between PyTorch tensors and the
+  DLPack core.
+
+Storage lives behind a plugin interface that speaks only DLPack, so the
+adapters carry no device code and no framework pins a device. Install an
+adapter with whichever storage plugins the machine should support; adding
+`dlpack_conversions_cuda` later moves existing code onto the GPU without
+rebuilding it. Name a backend per call, or set `ROSIDL_TENSOR_BACKEND` to
+choose one for the whole process.
 
 ## Deb build status
 
@@ -126,35 +142,31 @@ at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
-Ort::MemoryInfo memory_info("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault);
-
 // Publisher: allocate a Tensor message and write through an Ort::Value view.
-std::shared_ptr<onnxruntime_conversions::TensorMsg> msg(
-  onnxruntime_conversions::allocate_tensor_msg(
-    {1080, 1920, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8, "cuda"));
+// The storage plugin decides where the memory lives, so no Ort::MemoryInfo
+// is needed here.
+auto msg = onnxruntime_conversions::allocate_tensor_msg(
+  {1080, 1920, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8, "cuda");
 {
-  auto t_out = onnxruntime_conversions::from_output_tensor_msg(
-    msg, memory_info, stream);
+  auto t_out = onnxruntime_conversions::from_output_tensor_msg(*msg, stream);
   my_pipeline(t_out.value());
-}  // t_out destructor releases the write view
+}  // t_out releases the storage lease
 publisher->publish(std::move(*msg));
 
 // Subscriber: wrap the received message as Ort::Value.
 auto t_in = onnxruntime_conversions::from_input_tensor_msg(
-  received_msg, memory_info, stream);
+  received_msg, stream);
 use_tensor(t_in.value());
 
 // CUDA session: bind the application stream before creating the session.
-onnxruntime_conversions::ConversionConfiguration config;
-config.execution_stream = stream;
 onnxruntime_conversions::configure_session_options(
-  options, "cuda", config);
+  options, "cuda", /*device_id=*/0, stream);
 ```
 
 The message schema carries DLPack-compatible dtype, shape, stride, and offset
-metadata, while device placement is derived from the underlying
-`rosidl::Buffer` backend. ONNX Runtime has no public `from_dlpack` C++ API;
-the conversion wraps the message pointer with `Ort::Value::CreateTensor`.
+metadata, while device placement follows the storage plugin that allocated the
+message. ONNX Runtime has no public `from_dlpack` C++ API; the conversion
+wraps the message pointer with `Ort::Value::CreateTensor`.
 
 ## License
 
