@@ -136,15 +136,28 @@ size_t storage_size(
   return elements * ((static_cast<size_t>(dtype.bits) * dtype.lanes + 7) / 8);
 }
 
-DeviceKind device_kind(c10::DeviceType type)
+std::string backend_list(const ConversionPlugin & plugin)
 {
-  if (type == c10::kCPU) {
-    return DeviceKind::cpu;
+  std::string names;
+  for (const auto & backend : plugin.backends()) {
+    names += names.empty() ? backend : ", " + backend;
   }
-  if (type == c10::kCUDA) {
-    return DeviceKind::cuda;
+  return names;
+}
+
+// at::torchDeviceToDLDevice resolves the accelerator flavour of the LibTorch
+// build, so a ROCm build reports kDLROCM even though its tensors are kCUDA.
+std::string backend_for(c10::Device device, const ConversionPlugin & plugin)
+{
+  const auto dl_device = at::torchDeviceToDLDevice(device);
+  const std::string backend =
+    plugin.backend_for_device(static_cast<int32_t>(dl_device.device_type));
+  if (backend.empty()) {
+    throw std::runtime_error(
+            "torch_conversions: no backend for device '" + device.str() +
+            "'; the installed plugin provides " + backend_list(plugin));
   }
-  throw std::runtime_error("torch_conversions: unsupported device type");
+  return backend;
 }
 
 void dlpack_deleter(DLManagedTensor * tensor)
@@ -198,7 +211,7 @@ void set_metadata(TensorMsg & msg, const at::Tensor & tensor)
 
 uintptr_t stream_for(const TensorMsg & msg)
 {
-  return msg.data.get_backend_type() == "cuda" ? detail::current_stream() : 0;
+  return msg.data.get_backend_type() == "cpu" ? 0 : detail::current_stream();
 }
 
 }  // namespace
@@ -214,11 +227,12 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
   std::optional<c10::DeviceType> device)
 {
   auto plugin = conversion_plugin();
-  const DeviceKind selected =
-    device ? device_kind(*device) : plugin->default_device();
-  if (!plugin->device_available(selected)) {
+  const std::string selected = device ?
+    backend_for(c10::Device(*device, 0), *plugin) :
+    plugin->default_backend();
+  if (!plugin->backend_available(selected)) {
     throw std::runtime_error(
-            "torch_conversions: requested device is unavailable");
+            "torch_conversions: backend '" + selected + "' is unavailable");
   }
 
   auto msg = std::make_unique<TensorMsg>();
@@ -264,14 +278,16 @@ void to_tensor_msg(TensorMsg & msg, const at::Tensor & tensor)
     throw std::runtime_error(
             "torch_conversions: tensor exceeds allocated message storage");
   }
-  const bool needs_cuda_stream =
-    contiguous.is_cuda() || msg.data.get_backend_type() == "cuda";
-  conversion_plugin()->copy_to(
+  auto plugin = conversion_plugin();
+  const std::string source_backend = backend_for(contiguous.device(), *plugin);
+  const bool needs_stream =
+    source_backend != "cpu" || msg.data.get_backend_type() != "cpu";
+  plugin->copy_to(
     msg,
     contiguous.data_ptr(),
     byte_count,
-    device_kind(contiguous.device().type()),
-    needs_cuda_stream ? detail::current_stream() : 0);
+    source_backend,
+    needs_stream ? detail::current_stream() : 0);
   set_metadata(msg, contiguous);
 }
 

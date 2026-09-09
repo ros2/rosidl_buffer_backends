@@ -16,6 +16,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <pluginlib/class_list_macros.hpp>
 
@@ -27,22 +28,32 @@ namespace torch_conversions_cpu
 class CpuConversionPlugin final : public torch_conversions::ConversionPlugin
 {
 public:
-  torch_conversions::DeviceKind default_device() const override
+  std::vector<std::string> backends() const override
   {
-    return torch_conversions::DeviceKind::cpu;
+    return {"cpu"};
   }
 
-  bool device_available(torch_conversions::DeviceKind device) const override
+  std::string backend_for_device(int32_t dl_device_type) const override
   {
-    return device == torch_conversions::DeviceKind::cpu;
+    return dl_device_type == torch_conversions::dl_device::cpu ? "cpu" : "";
+  }
+
+  std::string default_backend() const override
+  {
+    return "cpu";
+  }
+
+  bool backend_available(const std::string & backend) const override
+  {
+    return backend == "cpu";
   }
 
   void allocate(
     TensorMsg & msg,
     size_t byte_count,
-    torch_conversions::DeviceKind device) override
+    const std::string & backend) override
   {
-    require_cpu(device);
+    require_cpu(backend);
     msg.data.resize(byte_count);
   }
 
@@ -52,7 +63,7 @@ public:
     require_cpu_backend(msg);
     return {
       const_cast<uint8_t *>(msg.data.data()),
-      1,
+      torch_conversions::dl_device::cpu,
       0,
       {},
     };
@@ -62,27 +73,27 @@ public:
     TensorMsg & msg, uintptr_t) override
   {
     require_cpu_backend(msg);
-    return {msg.data.data(), 1, 0, {}};
+    return {msg.data.data(), torch_conversions::dl_device::cpu, 0, {}};
   }
 
   void copy_to(
     TensorMsg & msg,
     const void * source,
     size_t byte_count,
-    torch_conversions::DeviceKind source_device,
+    const std::string & source_backend,
     uintptr_t) override
   {
-    require_cpu(source_device);
+    require_cpu(source_backend);
     require_cpu_backend(msg);
     std::memcpy(msg.data.data(), source, byte_count);
   }
 
 private:
-  static void require_cpu(torch_conversions::DeviceKind device)
+  static void require_cpu(const std::string & backend)
   {
-    if (device != torch_conversions::DeviceKind::cpu) {
+    if (backend != "cpu") {
       throw std::runtime_error(
-              "torch_conversions_cpu does not support CUDA tensors");
+              "torch_conversions_cpu does not support backend '" + backend + "'");
     }
   }
 

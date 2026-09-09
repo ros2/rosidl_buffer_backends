@@ -18,6 +18,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <pluginlib/class_list_macros.hpp>
 
@@ -31,27 +32,41 @@ namespace torch_conversions_cuda
 class CudaConversionPlugin final : public torch_conversions::ConversionPlugin
 {
 public:
-  torch_conversions::DeviceKind default_device() const override
+  std::vector<std::string> backends() const override
   {
-    return cuda_available() ?
-           torch_conversions::DeviceKind::cuda :
-           torch_conversions::DeviceKind::cpu;
+    return {"cpu", "cuda"};
   }
 
-  bool device_available(torch_conversions::DeviceKind device) const override
+  std::string backend_for_device(int32_t dl_device_type) const override
   {
-    return device == torch_conversions::DeviceKind::cpu ||
-           (device == torch_conversions::DeviceKind::cuda && cuda_available());
+    if (dl_device_type == torch_conversions::dl_device::cpu) {
+      return "cpu";
+    }
+    return dl_device_type == torch_conversions::dl_device::cuda ? "cuda" : "";
+  }
+
+  std::string default_backend() const override
+  {
+    return cuda_available() ? "cuda" : "cpu";
+  }
+
+  bool backend_available(const std::string & backend) const override
+  {
+    return backend == "cpu" || (backend == "cuda" && cuda_available());
   }
 
   void allocate(
     TensorMsg & msg,
     size_t byte_count,
-    torch_conversions::DeviceKind device) override
+    const std::string & backend) override
   {
-    if (device == torch_conversions::DeviceKind::cpu) {
+    if (backend == "cpu") {
       msg.data.resize(byte_count);
       return;
+    }
+    if (backend != "cuda") {
+      throw std::runtime_error(
+              "torch_conversions_cuda does not support backend '" + backend + "'");
     }
     require_cuda();
     auto implementation =
@@ -63,14 +78,19 @@ public:
     const TensorMsg & msg, uintptr_t stream_value) override
   {
     if (msg.data.get_backend_type() == "cpu") {
-      return {const_cast<uint8_t *>(msg.data.data()), 1, 0, {}};
+      return {
+        const_cast<uint8_t *>(msg.data.data()),
+        torch_conversions::dl_device::cpu,
+        0,
+        {},
+      };
     }
     const auto * implementation = cuda_implementation(msg);
     auto lease = std::make_shared<cuda_buffer_backend::ReadHandle>(
       implementation->get_cuda_buffer().get_read_handle(stream(stream_value)));
     return {
       const_cast<uint8_t *>(lease->get_ptr()),
-      2,
+      torch_conversions::dl_device::cuda,
       implementation->get_device_id(),
       lease,
     };
@@ -80,7 +100,7 @@ public:
     TensorMsg & msg, uintptr_t stream_value) override
   {
     if (msg.data.get_backend_type() == "cpu") {
-      return {msg.data.data(), 1, 0, {}};
+      return {msg.data.data(), torch_conversions::dl_device::cpu, 0, {}};
     }
     auto * implementation = cuda_implementation(msg);
     implementation->set_stream(stream(stream_value));
@@ -88,7 +108,7 @@ public:
       implementation->get_cuda_buffer().get_write_handle(stream(stream_value)));
     return {
       lease->get_ptr(),
-      2,
+      torch_conversions::dl_device::cuda,
       implementation->get_device_id(),
       lease,
     };
@@ -98,12 +118,12 @@ public:
     TensorMsg & msg,
     const void * source,
     size_t byte_count,
-    torch_conversions::DeviceKind source_device,
+    const std::string & source_backend,
     uintptr_t stream_value) override
   {
     const auto cuda_stream = stream(stream_value);
     if (msg.data.get_backend_type() == "cpu") {
-      if (source_device == torch_conversions::DeviceKind::cpu) {
+      if (source_backend == "cpu") {
         std::memcpy(msg.data.data(), source, byte_count);
         return;
       }
@@ -120,8 +140,8 @@ public:
       byte_count,
       write_handle,
       cuda_stream,
-      source_device == torch_conversions::DeviceKind::cuda ?
-      cudaMemcpyDeviceToDevice : cudaMemcpyHostToDevice);
+      source_backend == "cpu" ?
+      cudaMemcpyHostToDevice : cudaMemcpyDeviceToDevice);
   }
 
 private:

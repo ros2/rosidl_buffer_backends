@@ -19,17 +19,19 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
 namespace torch_conversions
 {
 
-enum class DeviceKind
+// DLPack device type codes, as reported by StorageView::dl_device_type.
+namespace dl_device
 {
-  cpu,
-  cuda,
-};
+constexpr int32_t cpu = 1;
+constexpr int32_t cuda = 2;
+}  // namespace dl_device
 
 struct StorageView
 {
@@ -45,16 +47,25 @@ public:
   using TensorMsg = tensor_msgs::msg::ExperimentalTensor;
 
   virtual ~ConversionPlugin() = default;
-  virtual DeviceKind default_device() const = 0;
-  virtual bool device_available(DeviceKind device) const = 0;
-  virtual void allocate(TensorMsg & msg, size_t byte_count, DeviceKind device) = 0;
+
+  // Buffer backend names this plugin allocates, for diagnostics.
+  virtual std::vector<std::string> backends() const = 0;
+  // Backend storing tensors for the given DLPack device type, or an empty
+  // string when this plugin does not serve that device.
+  virtual std::string backend_for_device(int32_t dl_device_type) const = 0;
+  virtual std::string default_backend() const = 0;
+  virtual bool backend_available(const std::string & backend) const = 0;
+  virtual void allocate(
+    TensorMsg & msg,
+    size_t byte_count,
+    const std::string & backend) = 0;
   virtual StorageView acquire_input(const TensorMsg & msg, uintptr_t stream) = 0;
   virtual StorageView acquire_output(TensorMsg & msg, uintptr_t stream) = 0;
   virtual void copy_to(
     TensorMsg & msg,
     const void * source,
     size_t byte_count,
-    DeviceKind source_device,
+    const std::string & source_backend,
     uintptr_t stream) = 0;
 };
 
