@@ -151,7 +151,7 @@ TEST_F(CudaConversions, LeaseOutlivesTheAcquiringScope)
 
   // The view holds the storage lease, so the mapping stays valid even after
   // another lease on the same message has been taken and dropped.
-  { from_input_tensor_msg(*msg, stream()); }
+  {from_input_tensor_msg(*msg, stream());}
 
   cudaPointerAttributes attributes{};
   EXPECT_EQ(

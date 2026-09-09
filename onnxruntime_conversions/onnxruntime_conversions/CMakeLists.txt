@@ -65,9 +65,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_onnxruntime_conversions test_fixture)
   endif()
 
-  # The pub/sub nodes exchange device storage, so they and the CUDA test only
-  # build where the toolkit is present.
-  if(CUDAToolkit_FOUND)
+  # The pub/sub nodes exchange device storage and ask ONNX Runtime for the CUDA
+  # execution provider, so they and the CUDA test need the toolkit and an ONNX
+  # Runtime that actually carries that provider. A CPU-only ONNX Runtime on a
+  # CUDA machine satisfies the toolkit check alone and then fails at runtime.
+  if(CUDAToolkit_FOUND AND onnxruntime_cuda_vendor_FOUND)
     ament_add_gtest(test_onnxruntime_conversions_cuda
       test/test_onnxruntime_conversions_cuda.cpp)
     if(TARGET test_onnxruntime_conversions_cuda)

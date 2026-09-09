@@ -104,7 +104,8 @@ class _Producer:
 
 
 class OrtTensorView:
-    """An OrtValue over tensor message storage.
+    """
+    Wrap an OrtValue over tensor message storage.
 
     ONNX Runtime takes over the DLPack deleter, so the value itself holds the
     storage lease. Keep the view alive while ONNX Runtime reads or writes it.
@@ -207,7 +208,8 @@ def to_tensor_msg(
     stream: Optional[int] = None,
     backend: Optional[str] = None,
 ) -> ExperimentalTensor:
-    """Copy an OrtValue into message storage and stamp its metadata.
+    """
+    Copy an OrtValue into message storage and stamp its metadata.
 
     Called with one argument, allocates a message on the backend that owns the
     value. Called with two, copies into the message given first. The copy runs
@@ -242,7 +244,8 @@ def session_providers(
     device_id: int = 0,
     stream: Optional[int] = None,
 ) -> list:
-    """Provider list that runs a session where the given backend allocates.
+    """
+    List the providers that run a session where the given backend allocates.
 
     Only the backends ONNX Runtime ships a provider for are handled. For any
     other backend, build the provider list yourself.
