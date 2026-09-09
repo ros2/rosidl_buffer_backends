@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>torch_conversions_cpu</name>
+  <version>0.1.2</version>
+  <description>CPU runtime plugin for PyTorch tensor message conversions.</description>
+
+  <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
+  <license>Apache-2.0</license>
+  <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend version_gte="2.9.1" version_lt="2.10">libtorch-dev</depend>
+  <depend>pluginlib</depend>
+  <depend>torch_conversions</depend>
+
+  <conflict>libtorch_vendor</conflict>
+  <conflict>torch_conversions_cuda</conflict>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>rclcpp</test_depend>
+  <test_depend>rclcpp_components</test_depend>
+  <test_depend>rmw_fastrtps_cpp</test_depend>
+  <test_depend>rosidl_runtime_cpp</test_depend>
+  <test_depend>std_msgs</test_depend>
+  <test_depend>tensor_msgs</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

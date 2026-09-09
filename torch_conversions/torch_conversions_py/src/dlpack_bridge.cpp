@@ -74,12 +74,11 @@ struct ManagedContext
 
 void delete_managed_tensor(DLManagedTensor * tensor)
 {
-  if (!tensor) {
-    return;
+  if (tensor != nullptr) {
+    auto * context = static_cast<ManagedContext *>(tensor->manager_ctx);
+    py::gil_scoped_acquire gil;
+    delete context;
   }
-  auto * context = static_cast<ManagedContext *>(tensor->manager_ctx);
-  py::gil_scoped_acquire gil;
-  delete context;
 }
 
 py::capsule make_dlpack_capsule(
@@ -102,8 +101,8 @@ py::capsule make_dlpack_capsule(
   tensor.dl_tensor.ndim = static_cast<int32_t>(context->shape.size());
   tensor.dl_tensor.dtype = {dtype_code, dtype_bits, dtype_lanes};
   tensor.dl_tensor.shape = context->shape.data();
-  tensor.dl_tensor.strides = context->strides.empty() ?
-    nullptr : context->strides.data();
+  tensor.dl_tensor.strides =
+    context->strides.empty() ? nullptr : context->strides.data();
   tensor.dl_tensor.byte_offset = byte_offset;
   tensor.manager_ctx = context.get();
   tensor.deleter = delete_managed_tensor;

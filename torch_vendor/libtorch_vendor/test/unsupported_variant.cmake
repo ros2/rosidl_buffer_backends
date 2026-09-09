@@ -12,22 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Convert ExperimentalTensor messages to and from PyTorch tensors."""
-
-from torch_conversions import _core
-from torch_conversions._core import allocate_tensor_msg
-from torch_conversions._core import from_input_tensor_msg
-from torch_conversions._core import from_output_tensor_msg
-from torch_conversions._core import set_stream
-from torch_conversions._core import to_tensor_msg
-
-
-_plugin_available = _core._plugin_available
-
-__all__ = [
-    'allocate_tensor_msg',
-    'from_input_tensor_msg',
-    'from_output_tensor_msg',
-    'set_stream',
-    'to_tensor_msg',
-]
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/libtorch_vendor_policy.cmake")
+libtorch_vendor_validate_variant("cu132")

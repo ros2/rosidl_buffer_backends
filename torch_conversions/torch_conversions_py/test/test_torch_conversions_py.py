@@ -27,30 +27,23 @@ from torch_conversions import allocate_tensor_msg
 from torch_conversions import from_input_tensor_msg
 from torch_conversions import from_output_tensor_msg
 from torch_conversions import to_tensor_msg
-from torch_conversions._adapter import TorchConversionRegistry
-from torch_conversions._cpu_adapter import CpuTorchConversionAdapter
+from torch_conversions._plugin import TorchConversionRegistry
+from torch_conversions_cpu._plugin import CpuTorchConversionPlugin
 
 
-CUDA_AVAILABLE = torch_conversions._adapter_available('cuda')
+CUDA_AVAILABLE = torch_conversions._plugin_available('cuda')
 
 
-def test_cpu_import_does_not_require_cuda_buffer():
+def test_cpu_conversion_works_with_optional_cuda_plugin():
     subprocess.run(
         [
             sys.executable,
             '-c',
             (
-                "import sys; sys.modules['cuda_buffer'] = None; "
                 'import torch, torch_conversions; '
                 'msg = torch_conversions.allocate_tensor_msg('
                 "(1,), torch.uint8, 'cpu'); "
-                'assert len(msg.data) == 1; '
-                '\ntry: torch_conversions.allocate_tensor_msg('
-                "(1,), torch.uint8, 'cuda')"
-                '\nexcept RuntimeError as error: '
-                " assert 'cuda_buffer_py' in str(error)"
-                '\nelse: raise AssertionError("'
-                'CUDA request unexpectedly succeeded")'
+                'assert len(msg.data) == 1'
             ),
         ],
         check=True,
@@ -59,16 +52,16 @@ def test_cpu_import_does_not_require_cuda_buffer():
 
 def test_conversion_registry_rejects_duplicate_device():
     registry = TorchConversionRegistry()
-    adapter = CpuTorchConversionAdapter()
-    registry.register(adapter)
+    plugin = CpuTorchConversionPlugin()
+    registry.register(plugin)
 
     with pytest.raises(ValueError, match='already registered'):
-        registry.register(adapter)
+        registry.register(plugin)
 
 
 def test_conversion_registry_rejects_unknown_device_and_storage():
     registry = TorchConversionRegistry()
-    registry.register(CpuTorchConversionAdapter())
+    registry.register(CpuTorchConversionPlugin())
 
     with pytest.raises(ValueError, match='Unsupported tensor device'):
         registry.for_device(torch.device('meta'))
@@ -78,11 +71,11 @@ def test_conversion_registry_rejects_unknown_device_and_storage():
 
 def test_conversion_registry_dispatches_cpu_storage():
     registry = TorchConversionRegistry()
-    adapter = CpuTorchConversionAdapter()
-    registry.register(adapter)
+    plugin = CpuTorchConversionPlugin()
+    registry.register(plugin)
 
-    assert registry.for_device(torch.device('cpu')) is adapter
-    assert registry.for_data(array('B')) is adapter
+    assert registry.for_device(torch.device('cpu')) is plugin
+    assert registry.for_data(array('B')) is plugin
     assert registry.default_device() == torch.device('cpu')
 
 
@@ -180,7 +173,7 @@ def test_empty_buffer_returns_none():
 def test_oversized_tensor_is_rejected():
     msg = allocate_tensor_msg((4,), torch.uint8, 'cpu')
 
-    with pytest.raises(ValueError, match='buffer has 4'):
+    with pytest.raises(ValueError, match='exceeds allocated message storage'):
         to_tensor_msg(msg, torch.zeros(128, dtype=torch.uint8))
 
 
@@ -203,7 +196,7 @@ def test_invalid_shape_and_strides_are_rejected():
 
     msg = allocate_tensor_msg((2, 2), torch.float32, 'cpu')
     msg.strides = [1]
-    with pytest.raises(ValueError, match='match the shape rank'):
+    with pytest.raises(ValueError, match='match rank and be nonnegative'):
         from_input_tensor_msg(msg)
 
 
@@ -217,5 +210,5 @@ def test_cpu_only_configuration_defaults_to_cpu_and_rejects_cuda():
     msg = allocate_tensor_msg((4,), torch.float32)
 
     assert isinstance(msg.data, array)
-    with pytest.raises(RuntimeError, match='cuda_buffer_py|not available'):
+    with pytest.raises(ValueError, match='Unsupported tensor device'):
         allocate_tensor_msg((4,), torch.float32, 'cuda')

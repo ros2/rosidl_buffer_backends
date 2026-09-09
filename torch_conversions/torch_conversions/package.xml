@@ -3,8 +3,7 @@
 <package format="3">
   <name>torch_conversions</name>
   <version>0.1.2</version>
-  <description>Header-only helper library that converts between a
-  tensor_msgs/ExperimentalTensor message and an at::Tensor backed by rosidl::Buffer storage.</description>
+  <description>Stable C++ interface for PyTorch tensor message conversions.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -12,19 +11,15 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>libtorch_vendor</depend>
+  <depend>ament_cmake_core</depend>
+  <depend>pluginlib</depend>
   <depend>rcutils</depend>
   <depend>rmw</depend>
   <depend>rosidl_buffer</depend>
   <depend>tensor_msgs</depend>
 
-  <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
-  <test_depend>launch_testing_ament_cmake</test_depend>
-  <test_depend>rclcpp</test_depend>
-  <test_depend>rclcpp_components</test_depend>
-  <test_depend>std_msgs</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
