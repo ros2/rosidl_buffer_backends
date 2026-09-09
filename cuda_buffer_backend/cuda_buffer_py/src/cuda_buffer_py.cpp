@@ -38,6 +38,9 @@ public:
     py::object owner)
   : owner_(std::move(owner)), handle_(std::move(handle))
   {
+    cudaPointerAttributes attributes;
+    CUDA_CHECK(cudaPointerGetAttributes(&attributes, handle_->get_ptr()));
+    device_id_ = attributes.device;
   }
 
   CudaReadHandleWrapper(const CudaReadHandleWrapper &) = delete;
@@ -54,6 +57,7 @@ public:
   }
 
   bool is_closed() const {return !handle_.has_value();}
+  int get_device_id() const {return device_id_;}
 
   void close()
   {
@@ -65,6 +69,7 @@ private:
   // Keep the Python Buffer alive until after ReadHandle records its read event.
   py::object owner_;
   std::optional<cuda_buffer_backend::ReadHandle> handle_;
+  int device_id_{0};
 };
 
 class CudaWriteHandleWrapper
@@ -75,6 +80,9 @@ public:
     py::object buffer)
   : buffer_(std::move(buffer)), handle_(std::move(handle))
   {
+    cudaPointerAttributes attributes;
+    CUDA_CHECK(cudaPointerGetAttributes(&attributes, handle_->get_ptr()));
+    device_id_ = attributes.device;
   }
 
   CudaWriteHandleWrapper(const CudaWriteHandleWrapper &) = delete;
@@ -91,6 +99,7 @@ public:
   }
 
   bool is_closed() const {return !handle_.has_value();}
+  int get_device_id() const {return device_id_;}
 
   py::object get_buffer() const {return buffer_;}
 
@@ -106,6 +115,7 @@ private:
   // record its event while the underlying CUDA allocation is still alive.
   py::object buffer_;
   std::optional<cuda_buffer_backend::WriteHandle> handle_;
+  int device_id_{0};
 };
 
 cudaStream_t stream_from_python(const py::object & stream)
@@ -167,6 +177,7 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
 
   py::class_<CudaReadHandleWrapper>(module, "CudaReadHandle")
   .def_property_readonly("device_ptr", &CudaReadHandleWrapper::get_ptr)
+  .def_property_readonly("device_id", &CudaReadHandleWrapper::get_device_id)
   .def_property_readonly("closed", &CudaReadHandleWrapper::is_closed)
   .def("get_ptr", &CudaReadHandleWrapper::get_ptr)
   .def("close", &CudaReadHandleWrapper::close)
@@ -186,6 +197,7 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
 
   py::class_<CudaWriteHandleWrapper>(module, "CudaWriteHandle")
   .def_property_readonly("device_ptr", &CudaWriteHandleWrapper::get_ptr)
+  .def_property_readonly("device_id", &CudaWriteHandleWrapper::get_device_id)
   .def_property_readonly("buffer", &CudaWriteHandleWrapper::get_buffer)
   .def_property_readonly("closed", &CudaWriteHandleWrapper::is_closed)
   .def("get_ptr", &CudaWriteHandleWrapper::get_ptr)

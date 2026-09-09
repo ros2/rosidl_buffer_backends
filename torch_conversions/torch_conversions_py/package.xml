@@ -1,22 +1,23 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>torch_conversions</name>
+  <name>torch_conversions_py</name>
   <version>0.1.2</version>
-  <description>Stable C++ interface for PyTorch tensor message conversions.</description>
+  <description>Stable Python API and plugin registry for PyTorch tensor conversions.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
   <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <depend>ament_cmake_core</depend>
-  <depend>pluginlib</depend>
-  <depend>rcutils</depend>
-  <depend>rmw</depend>
-  <depend>rosidl_buffer</depend>
-  <depend>tensor_msgs</depend>
+  <build_depend>pybind11-dev</build_depend>
+  <build_depend>python3-dev</build_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rosidl_buffer_py</exec_depend>
+  <exec_depend>tensor_msgs</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

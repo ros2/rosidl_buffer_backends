@@ -68,6 +68,7 @@ def test_from_output_cuda_buffer():
         assert isinstance(handle, CudaWriteHandle)
         assert handle.buffer is buffer
         assert handle.device_ptr != 0
+        assert handle.device_id >= 0
         assert handle.get_ptr() == handle.device_ptr
         assert not handle.closed
 
@@ -112,6 +113,7 @@ def test_from_input_cuda_buffer():
     with CudaBuffer.from_input_buffer(buffer) as handle:
         assert isinstance(handle, CudaReadHandle)
         assert handle.device_ptr != 0
+        assert handle.device_id >= 0
         assert handle.get_ptr() == handle.device_ptr
         assert not handle.closed
 

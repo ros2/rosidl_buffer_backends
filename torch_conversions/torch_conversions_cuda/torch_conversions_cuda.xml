@@ -1,0 +1,8 @@
+<library path="torch_conversions_cuda_plugin">
+  <class
+    name="torch_conversions_cuda/CudaConversionPlugin"
+    type="torch_conversions_cuda::CudaConversionPlugin"
+    base_class_type="torch_conversions::ConversionPlugin">
+    <description>CPU and CUDA storage plugin for PyTorch conversions.</description>
+  </class>
+</library>

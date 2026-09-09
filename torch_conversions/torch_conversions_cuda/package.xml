@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>torch_conversions</name>
+  <name>torch_conversions_cuda</name>
   <version>0.1.2</version>
-  <description>Stable C++ interface for PyTorch tensor message conversions.</description>
+  <description>CPU and CUDA runtime plugin for PyTorch tensor message conversions.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -11,13 +11,16 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>ament_cmake_core</depend>
+  <depend>cuda_buffer</depend>
+  <depend>libtorch_vendor</depend>
+  <depend version_gte="12.6" version_lt="13.1">nvidia-cuda</depend>
   <depend>pluginlib</depend>
-  <depend>rcutils</depend>
-  <depend>rmw</depend>
-  <depend>rosidl_buffer</depend>
-  <depend>tensor_msgs</depend>
+  <depend>torch_conversions</depend>
 
+  <conflict>libtorch-dev</conflict>
+  <conflict>torch_conversions_cpu</conflict>
+
+  <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
