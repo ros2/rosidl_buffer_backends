@@ -239,6 +239,45 @@ DLManagedTensor * make_dlpack(const TensorMsg & msg, StorageView view)
   return tensor.release();
 }
 
+/// Rejects a message whose view reaches outside its own storage, before a
+/// framework is handed a pointer into it.
+void validate_view(const TensorMsg & msg)
+{
+  const std::vector<int64_t> shape(msg.shape.begin(), msg.shape.end());
+  std::vector<int64_t> strides(msg.strides.begin(), msg.strides.end());
+  if (strides.empty()) {
+    strides = contiguous_strides(shape);
+  } else if (strides.size() != shape.size()) {
+    throw std::runtime_error(
+            "dlpack_conversions: tensor strides must match the shape rank");
+  }
+
+  size_t span = 1;
+  for (size_t index = 0; index < shape.size(); ++index) {
+    if (shape[index] < 0) {
+      throw std::runtime_error("dlpack_conversions: negative shape dimension");
+    }
+    if (strides[index] < 0) {
+      throw std::runtime_error("dlpack_conversions: negative tensor stride");
+    }
+    if (shape[index] == 0) {
+      span = 0;
+      break;
+    }
+    span += static_cast<size_t>(shape[index] - 1) *
+      static_cast<size_t>(strides[index]);
+  }
+
+  const size_t item_size =
+    (static_cast<size_t>(msg.dtype_bits) * msg.dtype_lanes + 7) / 8;
+  const size_t required = msg.byte_offset + span * item_size;
+  if (required > msg.data.size()) {
+    throw std::runtime_error(
+            "dlpack_conversions: tensor view needs " + std::to_string(required) +
+            " bytes; buffer has " + std::to_string(msg.data.size()));
+  }
+}
+
 void set_metadata(
   TensorMsg & msg,
   const DLTensor & source,
@@ -344,6 +383,7 @@ ManagedTensor from_input_tensor_msg(const TensorMsg & msg, uintptr_t stream)
   if (msg.data.empty()) {
     return {};
   }
+  validate_view(msg);
   auto plugin = Registry::instance().for_backend(msg.data.get_backend_type());
   return ManagedTensor(make_dlpack(msg, plugin->acquire_input(msg, stream)));
 }
@@ -353,6 +393,7 @@ ManagedTensor from_output_tensor_msg(TensorMsg & msg, uintptr_t stream)
   if (msg.data.empty()) {
     return {};
   }
+  validate_view(msg);
   auto plugin = Registry::instance().for_backend(msg.data.get_backend_type());
   return ManagedTensor(make_dlpack(msg, plugin->acquire_output(msg, stream)));
 }
