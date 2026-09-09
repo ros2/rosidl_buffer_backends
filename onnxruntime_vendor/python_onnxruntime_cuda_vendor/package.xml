@@ -3,7 +3,7 @@
 <package format="3">
   <name>python_onnxruntime_cuda_vendor</name>
   <version>0.1.2</version>
-  <description>Vendor package for the CUDA Python ONNX Runtime distribution.</description>
+  <description>ONNX Runtime 1.23.2 Python wheel for CUDA 12 and cuDNN 9.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -15,10 +15,11 @@
 
   <build_depend>python3-pip</build_depend>
 
-  <conflict>python_onnxruntime_vendor</conflict>
+  <conflict>python3-onnxruntime</conflict>
+  <conflict>onnxruntime_conversions_py_cpu</conflict>
 
-  <exec_depend>nvidia-cuda</exec_depend>
-  <exec_depend>nvidia-cudnn</exec_depend>
+  <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
+  <exec_depend version_gte="9" version_lt="10">nvidia-cudnn</exec_depend>
   <exec_depend>python3-flatbuffers</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-packaging</exec_depend>

@@ -17,20 +17,20 @@
 #include <map>
 #include <string>
 
-#include "adapter_catalog.hpp"
+#include "onnxruntime_conversions/detail/plugin_catalog.hpp"
 
-TEST(OnnxRuntimeConversionsCore, RejectsDuplicateAdapterIds)
+TEST(OnnxRuntimeConversionsCore, RejectsDuplicatePluginIds)
 {
-  std::map<std::string, std::string> adapter_classes;
-  onnxruntime_conversions::detail::register_adapter_id(
-    adapter_classes, "duplicate", "plugins/First");
+  std::map<std::string, std::string> plugin_classes;
+  onnxruntime_conversions::detail::register_plugin_id(
+    plugin_classes, "duplicate", "plugins/First");
   try {
-    onnxruntime_conversions::detail::register_adapter_id(
-      adapter_classes, "duplicate", "plugins/Second");
-    FAIL() << "Duplicate adapter ID did not throw";
+    onnxruntime_conversions::detail::register_plugin_id(
+      plugin_classes, "duplicate", "plugins/Second");
+    FAIL() << "Duplicate plugin ID did not throw";
   } catch (const std::runtime_error & error) {
     const std::string message = error.what();
-    EXPECT_NE(message.find("Duplicate ONNX Runtime conversion adapter ID 'duplicate'"),
+    EXPECT_NE(message.find("Duplicate ONNX Runtime conversion plugin ID 'duplicate'"),
       std::string::npos);
     EXPECT_NE(message.find("'plugins/First'"), std::string::npos);
     EXPECT_NE(message.find("'plugins/Second'"), std::string::npos);

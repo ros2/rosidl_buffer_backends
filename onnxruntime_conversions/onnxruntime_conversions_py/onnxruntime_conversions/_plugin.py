@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ONNX Runtime conversion adapter contract and dispatch."""
+"""ONNX Runtime conversion plugin contract and dispatch."""
 
 from dataclasses import dataclass
 from importlib import import_module
@@ -27,12 +27,12 @@ import onnxruntime as ort
 from tensor_msgs.msg import ExperimentalTensor
 
 
-_ADAPTER_RESOURCE_TYPE = 'onnxruntime_conversions__adapters'
+_PLUGIN_RESOURCE_TYPE = 'onnxruntime_conversions__python_plugins'
 
 
 @dataclass(frozen=True)
 class TensorMetadata:
-    """Validated tensor metadata shared with conversion adapters."""
+    """Validated tensor metadata shared with conversion plugins."""
 
     shape: tuple[int, ...]
     strides: tuple[int, ...]
@@ -95,18 +95,18 @@ class OrtTensorView:
         return False
 
 
-class OrtConversionAdapter(Protocol):
-    """Operations provided by an ONNX Runtime storage adapter."""
+class OrtConversionPlugin(Protocol):
+    """Operations provided by an ONNX Runtime conversion plugin."""
 
     device_type: str
     buffer_backend: str
     priority: int
 
     def is_available(self) -> bool:
-        """Return whether the adapter runtime can be used."""
+        """Return whether the plugin runtime can be used."""
 
     def unavailable_error(self) -> RuntimeError:
-        """Describe why the adapter runtime cannot be used."""
+        """Describe why the plugin runtime cannot be used."""
 
     def allocate(
         self,
@@ -127,67 +127,71 @@ class OrtConversionAdapter(Protocol):
 
 
 class OrtConversionRegistry:
-    """Resolve adapters by requested device or message storage."""
+    """Resolve plugins by requested device or message storage."""
 
     def __init__(self) -> None:
-        self._by_device: dict[str, OrtConversionAdapter] = {}
-        self._by_buffer_backend: dict[str, OrtConversionAdapter] = {}
+        self._by_device: dict[str, OrtConversionPlugin] = {}
+        self._by_buffer_backend: dict[str, OrtConversionPlugin] = {}
 
-    def register(self, adapter: OrtConversionAdapter) -> None:
-        if adapter.device_type in self._by_device:
+    def register(self, plugin: OrtConversionPlugin) -> None:
+        if plugin.device_type in self._by_device:
             raise ValueError(
-                f'Adapter for device {adapter.device_type!r} is registered')
-        if adapter.buffer_backend in self._by_buffer_backend:
+                f'Plugin for device {plugin.device_type!r} is registered')
+        if plugin.buffer_backend in self._by_buffer_backend:
             raise ValueError(
-                'Adapter for buffer backend '
-                f'{adapter.buffer_backend!r} is registered')
-        self._by_device[adapter.device_type] = adapter
-        self._by_buffer_backend[adapter.buffer_backend] = adapter
+                'Plugin for buffer backend '
+                f'{plugin.buffer_backend!r} is registered')
+        self._by_device[plugin.device_type] = plugin
+        self._by_buffer_backend[plugin.buffer_backend] = plugin
 
-    def for_device(self, device_type: str) -> OrtConversionAdapter:
-        adapter = self._by_device.get(device_type)
-        if adapter is None:
+    def for_device(self, device_type: str) -> OrtConversionPlugin:
+        plugin = self._by_device.get(device_type)
+        if plugin is None:
             raise ValueError(f'Unsupported tensor device type: {device_type}')
-        return self._require_available(adapter)
+        return self._require_available(plugin)
 
-    def for_data(self, data: object) -> OrtConversionAdapter:
+    def for_data(self, data: object) -> OrtConversionPlugin:
         backend = str(getattr(data, 'backend_type', 'cpu')).lower()
-        adapter = self._by_buffer_backend.get(backend)
-        if adapter is None:
+        plugin = self._by_buffer_backend.get(backend)
+        if plugin is None:
             raise ValueError(f'Unsupported tensor buffer backend: {backend}')
-        return self._require_available(adapter)
+        return self._require_available(plugin)
 
-    def default(self) -> OrtConversionAdapter:
+    def default(self) -> OrtConversionPlugin:
         priority = max(
-            adapter.priority for adapter in self._by_device.values())
+            plugin.priority for plugin in self._by_device.values())
         candidates = [
-            adapter for adapter in self._by_device.values()
-            if adapter.priority == priority
+            plugin for plugin in self._by_device.values()
+            if plugin.priority == priority
         ]
         if len(candidates) != 1:
             devices = ', '.join(
-                sorted(adapter.device_type for adapter in candidates))
+                sorted(plugin.device_type for plugin in candidates))
             raise RuntimeError(
-                f'Ambiguous default ONNX Runtime adapters: {devices}')
+                f'Ambiguous default ONNX Runtime plugins: {devices}')
         return self._require_available(candidates[0])
 
     @staticmethod
     def _require_available(
-        adapter: OrtConversionAdapter,
-    ) -> OrtConversionAdapter:
-        if not adapter.is_available():
-            raise adapter.unavailable_error()
-        return adapter
+        plugin: OrtConversionPlugin,
+    ) -> OrtConversionPlugin:
+        if not plugin.is_available():
+            raise plugin.unavailable_error()
+        return plugin
 
 
-def load_external_adapters(registry: OrtConversionRegistry) -> None:
-    """Load adapters advertised through the ament resource index."""
-    resources = get_resources(_ADAPTER_RESOURCE_TYPE)
-    for package_name in sorted(resources):
-        content, _ = get_resource(_ADAPTER_RESOURCE_TYPE, package_name)
-        module_name, separator, function_name = content.strip().partition(':')
-        if not separator or not module_name or not function_name:
-            raise RuntimeError(
-                f'Invalid ONNX Runtime adapter resource from {package_name}')
-        register = getattr(import_module(module_name), function_name)
-        register(registry)
+def load_external_plugins(registry: OrtConversionRegistry) -> None:
+    """Load the selected plugin advertised through the ament resource index."""
+    resources = get_resources(_PLUGIN_RESOURCE_TYPE)
+    if len(resources) != 1:
+        raise RuntimeError(
+            'onnxruntime_conversions requires exactly one Python runtime '
+            f'plugin; found {len(resources)}: {sorted(resources)}')
+    package_name = next(iter(resources))
+    content, _ = get_resource(_PLUGIN_RESOURCE_TYPE, package_name)
+    module_name, separator, function_name = content.strip().partition(':')
+    if not separator or not module_name or not function_name:
+        raise RuntimeError(
+            f'Invalid ONNX Runtime plugin resource from {package_name}')
+    register = getattr(import_module(module_name), function_name)
+    register(registry)

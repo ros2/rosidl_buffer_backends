@@ -12,22 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CPU adapter for Python ONNX Runtime conversions."""
-
 from array import array
 from typing import Optional
 
 import numpy as np
 import onnxruntime as ort
 
-from onnxruntime_conversions._adapter import OrtTensorView
-from onnxruntime_conversions._adapter import TensorMetadata
+from onnxruntime_conversions._plugin import OrtConversionRegistry
+from onnxruntime_conversions._plugin import OrtTensorView
+from onnxruntime_conversions._plugin import TensorMetadata
 from tensor_msgs.msg import ExperimentalTensor
 
 
-class CpuOrtConversionAdapter:
-    """Create ONNX Runtime views over CPU message storage."""
+def require_onnxruntime_version() -> None:
+    version = ort.__version__.split('+', 1)[0]
+    if version != '1.23.2':
+        raise RuntimeError(
+            'onnxruntime_conversions requires ONNX Runtime 1.23.2, '
+            f'but imported {ort.__version__} from {ort.__file__}')
 
+
+class CpuOrtConversionPlugin:
     device_type = 'cpu'
     buffer_backend = 'cpu'
     priority = 0
@@ -73,3 +78,8 @@ class CpuOrtConversionAdapter:
         else:
             value = ort.OrtValue.ortvalue_from_numpy(storage)
         return OrtTensorView(value, message, storage)
+
+
+def register(registry: OrtConversionRegistry) -> None:
+    require_onnxruntime_version()
+    registry.register(CpuOrtConversionPlugin())

@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Registered CUDA adapter for Python ONNX Runtime conversions."""
-
 from importlib.util import find_spec
 from typing import Optional
 
@@ -21,9 +19,11 @@ import numpy as np
 import onnxruntime as ort
 
 from onnxruntime_conversions import _dlpack_bridge
-from onnxruntime_conversions._adapter import OrtConversionRegistry
-from onnxruntime_conversions._adapter import OrtTensorView
-from onnxruntime_conversions._adapter import TensorMetadata
+from onnxruntime_conversions._cpu_plugin import CpuOrtConversionPlugin
+from onnxruntime_conversions._cpu_plugin import require_onnxruntime_version
+from onnxruntime_conversions._plugin import OrtConversionRegistry
+from onnxruntime_conversions._plugin import OrtTensorView
+from onnxruntime_conversions._plugin import TensorMetadata
 from tensor_msgs.msg import ExperimentalTensor
 
 
@@ -75,9 +75,19 @@ class _DLPackProducer:
         return (_DL_CUDA, self._device_id)
 
 
-class CudaOrtConversionAdapter:
-    """Create ONNX Runtime views over CUDA message storage."""
+def _ortvalue_from_dlpack(
+    producer: _DLPackProducer,
+    is_bool: bool,
+) -> ort.OrtValue:
+    from_dlpack = getattr(ort.OrtValue, 'from_dlpack', None)
+    if from_dlpack is not None:
+        return from_dlpack(producer, is_bool)
+    native_value = ort.capi._pybind_state.OrtValue.from_dlpack(
+        producer.__dlpack__(), is_bool)
+    return ort.OrtValue(native_value)
 
+
+class CudaOrtConversionPlugin:
     device_type = 'cuda'
     buffer_backend = 'cuda'
     priority = 100
@@ -138,10 +148,12 @@ class CudaOrtConversionAdapter:
         )
         producer = _DLPackProducer(
             capsule, handle.device_id, metadata.element_type == 9)
-        value = ort.OrtValue.from_dlpack(producer)
+        value = _ortvalue_from_dlpack(
+            producer, metadata.element_type == 9)
         return OrtTensorView(value, message, producer, handle)
 
 
 def register(registry: OrtConversionRegistry) -> None:
-    """Register the CUDA conversion adapter."""
-    registry.register(CudaOrtConversionAdapter())
+    require_onnxruntime_version()
+    registry.register(CpuOrtConversionPlugin())
+    registry.register(CudaOrtConversionPlugin())

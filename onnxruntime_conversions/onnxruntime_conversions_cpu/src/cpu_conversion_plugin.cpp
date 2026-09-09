@@ -15,10 +15,12 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <pluginlib/class_list_macros.hpp>
-#include "onnxruntime_conversions/conversion_adapter.hpp"
+#include "onnxruntime_conversions/conversion_plugin.hpp"
 
 namespace onnxruntime_conversions
 {
@@ -54,17 +56,18 @@ private:
 
 }  // namespace
 
-class CpuConversionAdapter final : public ConversionAdapter
+class CpuConversionPlugin final : public ConversionPlugin
 {
 public:
-  std::string adapter_name() const override
+  std::vector<std::string> backends() const override
   {
-    return "cpu";
+    return {"cpu"};
   }
 
-  void allocate_storage(TensorMsg & msg, size_t byte_count) override
+  void allocate_storage(
+    TensorMsg & msg, size_t byte_count, const std::string & backend) override
   {
-    if (msg.data.get_backend_type() != "cpu") {
+    if (backend != "cpu" || msg.data.get_backend_type() != "cpu") {
       throw std::invalid_argument("CPU plugin requires CPU message storage");
     }
     msg.data.resize(byte_count);
@@ -111,11 +114,15 @@ public:
 
   void configure_session(
     Ort::SessionOptions &,
+    const std::string & backend,
     const ConversionConfiguration & configuration) override
   {
+    if (backend != "cpu") {
+      throw std::invalid_argument("CPU plugin cannot configure a '" + backend + "' session");
+    }
     if (configuration.device_id != 0 || configuration.execution_stream != nullptr) {
       throw std::invalid_argument(
-              "CPU adapter requires device_id 0 and a null execution stream");
+              "CPU plugin requires device_id 0 and a null execution stream");
     }
   }
 
@@ -126,7 +133,7 @@ private:
       throw std::invalid_argument("CPU plugin received non-CPU message storage");
     }
     if (execution_stream != nullptr) {
-      throw std::invalid_argument("CPU adapter does not accept an execution stream");
+      throw std::invalid_argument("CPU plugin does not accept an execution stream");
     }
   }
 };
@@ -134,5 +141,5 @@ private:
 }  // namespace onnxruntime_conversions
 
 PLUGINLIB_EXPORT_CLASS(
-  onnxruntime_conversions::CpuConversionAdapter,
-  onnxruntime_conversions::ConversionAdapter)
+  onnxruntime_conversions::CpuConversionPlugin,
+  onnxruntime_conversions::ConversionPlugin)

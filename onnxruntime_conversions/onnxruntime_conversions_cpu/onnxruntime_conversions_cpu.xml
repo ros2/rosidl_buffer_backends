@@ -1,0 +1,8 @@
+<library path="onnxruntime_conversions_cpu_plugin">
+  <class
+    name="cpu"
+    type="onnxruntime_conversions::CpuConversionPlugin"
+    base_class_type="onnxruntime_conversions::ConversionPlugin">
+    <description>CPU ONNX Runtime conversion plugin.</description>
+  </class>
+</library>

@@ -30,11 +30,11 @@
 namespace
 {
 
-using onnxruntime_conversions::ConversionAdapterRegistry;
+using onnxruntime_conversions::ConversionPluginRegistry;
 using onnxruntime_conversions::ConversionConfiguration;
 using onnxruntime_conversions::TensorMsg;
 using onnxruntime_conversions::allocate_tensor_msg;
-using onnxruntime_conversions::available_adapters;
+using onnxruntime_conversions::available_plugins;
 using onnxruntime_conversions::configure_session_options;
 using onnxruntime_conversions::from_input_tensor_msg;
 using onnxruntime_conversions::from_output_tensor_msg;
@@ -48,7 +48,7 @@ const uint8_t identity_model[] = {
   2, 8, 3, 98, 24, 10, 6, 111, 117, 116, 112, 117, 116, 18, 14, 10,
   12, 8, 1, 18, 8, 10, 2, 8, 2, 10, 2, 8, 3, 66, 4, 10, 0, 16, 18};
 
-class CudaConversionAdapterTest : public ::testing::Test
+class CudaConversionPluginTest : public ::testing::Test
 {
 protected:
   void SetUp() override
@@ -74,17 +74,18 @@ protected:
   cudaStream_t stream_{nullptr};
 };
 
-TEST_F(CudaConversionAdapterTest, DiscoversAndAllocatesCudaStorage)
+TEST_F(CudaConversionPluginTest, DiscoversAndAllocatesCudaStorage)
 {
-  const auto adapters = available_adapters();
-  EXPECT_NE(std::find(adapters.begin(), adapters.end(), "cuda"), adapters.end());
+  const auto plugins = available_plugins();
+  EXPECT_NE(std::find(plugins.begin(), plugins.end(), "cpu"), plugins.end());
+  EXPECT_NE(std::find(plugins.begin(), plugins.end(), "cuda"), plugins.end());
   auto msg = allocate_tensor_msg(
     {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
   EXPECT_EQ(msg->data.get_backend_type(), "cuda");
   EXPECT_EQ(msg->data.size(), 6u * sizeof(float));
 
   std::shared_ptr<TensorMsg> owner(std::move(msg));
-  auto lease = ConversionAdapterRegistry::instance().get_adapter("cuda")->acquire_output(
+  auto lease = ConversionPluginRegistry::instance().get_plugin("cuda")->acquire_output(
     owner, stream_);
   EXPECT_NE(lease->metadata().data, nullptr);
   EXPECT_EQ(lease->metadata().size_bytes, 6u * sizeof(float));
@@ -93,7 +94,7 @@ TEST_F(CudaConversionAdapterTest, DiscoversAndAllocatesCudaStorage)
   EXPECT_EQ(lease->metadata().allocator_name, "Cuda");
 }
 
-TEST_F(CudaConversionAdapterTest, AutoSelectsCudaOnlyWithExplicitUsableStream)
+TEST_F(CudaConversionPluginTest, AutoSelectsCudaOnlyWithExplicitUsableStream)
 {
   ConversionConfiguration configuration;
   configuration.device_id = 0;
@@ -108,7 +109,7 @@ TEST_F(CudaConversionAdapterTest, AutoSelectsCudaOnlyWithExplicitUsableStream)
   EXPECT_EQ(cpu_msg->data.get_backend_type(), "cpu");
 }
 
-TEST_F(CudaConversionAdapterTest, ExplicitCpuOverridesStreamAndAutoDoesNotFallback)
+TEST_F(CudaConversionPluginTest, ExplicitCpuOverridesStreamAndAutoDoesNotFallback)
 {
   ConversionConfiguration configuration;
   configuration.execution_stream = stream_;
@@ -122,7 +123,7 @@ TEST_F(CudaConversionAdapterTest, ExplicitCpuOverridesStreamAndAutoDoesNotFallba
     std::invalid_argument);
 }
 
-TEST_F(CudaConversionAdapterTest, RejectsMissingOrImplicitStream)
+TEST_F(CudaConversionPluginTest, RejectsMissingOrImplicitStream)
 {
   std::shared_ptr<TensorMsg> msg(
     allocate_tensor_msg({4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda"));
@@ -138,7 +139,7 @@ TEST_F(CudaConversionAdapterTest, RejectsMissingOrImplicitStream)
   EXPECT_THROW(configure_session_options(options, "cuda"), std::invalid_argument);
 }
 
-TEST_F(CudaConversionAdapterTest, InputAndOutputViewsAliasCudaStorage)
+TEST_F(CudaConversionPluginTest, InputAndOutputViewsAliasCudaStorage)
 {
   std::shared_ptr<TensorMsg> msg(
     allocate_tensor_msg({4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda"));
@@ -152,7 +153,7 @@ TEST_F(CudaConversionAdapterTest, InputAndOutputViewsAliasCudaStorage)
   EXPECT_EQ(view.value().GetTensorRawData(), pointer);
 }
 
-TEST_F(CudaConversionAdapterTest, RejectsZeroByteCudaTensors)
+TEST_F(CudaConversionPluginTest, RejectsZeroByteCudaTensors)
 {
   EXPECT_THROW(
     allocate_tensor_msg(
@@ -160,7 +161,7 @@ TEST_F(CudaConversionAdapterTest, RejectsZeroByteCudaTensors)
     std::invalid_argument);
 }
 
-TEST_F(CudaConversionAdapterTest, LeasePreservesOwnerAndOrdersAcrossStreams)
+TEST_F(CudaConversionPluginTest, LeasePreservesOwnerAndOrdersAcrossStreams)
 {
   cudaStream_t consumer_stream = nullptr;
   ASSERT_EQ(
@@ -204,7 +205,7 @@ TEST_F(CudaConversionAdapterTest, LeasePreservesOwnerAndOrdersAcrossStreams)
   EXPECT_EQ(cudaStreamDestroy(consumer_stream), cudaSuccess);
 }
 
-TEST_F(CudaConversionAdapterTest, CopiesCudaOrtValueWithoutHostStaging)
+TEST_F(CudaConversionPluginTest, CopiesCudaOrtValueWithoutHostStaging)
 {
   const std::vector<int64_t> shape{4};
   float * source = nullptr;
@@ -234,7 +235,7 @@ TEST_F(CudaConversionAdapterTest, CopiesCudaOrtValueWithoutHostStaging)
   EXPECT_EQ(actual, expected);
 }
 
-TEST_F(CudaConversionAdapterTest, CopyFromOrtReturnsBeforeStreamCompletes)
+TEST_F(CudaConversionPluginTest, CopyFromOrtReturnsBeforeStreamCompletes)
 {
   struct CallbackState
   {
@@ -274,7 +275,7 @@ TEST_F(CudaConversionAdapterTest, CopyFromOrtReturnsBeforeStreamCompletes)
   ASSERT_EQ(cudaFree(source), cudaSuccess);
 }
 
-TEST_F(CudaConversionAdapterTest, ConfiguresProviderAndRunsCudaInference)
+TEST_F(CudaConversionPluginTest, ConfiguresProviderAndRunsCudaInference)
 {
   Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_conversions_cuda_test");
   Ort::SessionOptions options;

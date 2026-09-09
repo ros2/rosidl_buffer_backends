@@ -21,11 +21,10 @@ from typing import Union
 import numpy as np
 import onnxruntime as ort
 
-from onnxruntime_conversions._adapter import load_external_adapters
-from onnxruntime_conversions._adapter import OrtConversionRegistry
-from onnxruntime_conversions._adapter import OrtTensorView
-from onnxruntime_conversions._adapter import TensorMetadata
-from onnxruntime_conversions._cpu_adapter import CpuOrtConversionAdapter
+from onnxruntime_conversions._plugin import load_external_plugins
+from onnxruntime_conversions._plugin import OrtConversionRegistry
+from onnxruntime_conversions._plugin import OrtTensorView
+from onnxruntime_conversions._plugin import TensorMetadata
 from tensor_msgs.msg import ExperimentalTensor
 
 
@@ -166,8 +165,7 @@ def _backend_type(data: object) -> str:
 
 
 _registry = OrtConversionRegistry()
-_registry.register(CpuOrtConversionAdapter())
-load_external_adapters(_registry)
+load_external_plugins(_registry)
 
 
 def allocate_tensor_msg(
@@ -181,12 +179,12 @@ def allocate_tensor_msg(
     msg = ExperimentalTensor()
     _set_metadata(msg, metadata)
     normalized_device = device_type.lower()
-    adapter = (
+    plugin = (
         _registry.default()
         if normalized_device == 'auto'
         else _registry.for_device(normalized_device)
     )
-    msg.data = adapter.allocate(metadata, device_id, stream)
+    msg.data = plugin.allocate(metadata, device_id, stream)
     return msg
 
 
@@ -198,8 +196,8 @@ def _from_tensor_msg(
     if not isinstance(msg, ExperimentalTensor):
         raise TypeError('msg must be an ExperimentalTensor')
     metadata = _validate_message(msg)
-    adapter = _registry.for_data(msg.data)
-    return adapter.view(msg, metadata, stream, output)
+    plugin = _registry.for_data(msg.data)
+    return plugin.view(msg, metadata, stream, output)
 
 
 def from_input_tensor_msg(
@@ -222,6 +220,13 @@ def _value_metadata(value: ort.OrtValue) -> TensorMetadata:
     return _metadata_for(value.shape(), value.element_type())
 
 
+def _value_device_id(value: ort.OrtValue) -> int:
+    dlpack_device = getattr(value, '__dlpack_device__', None)
+    if dlpack_device is None:
+        dlpack_device = value._ortvalue.__dlpack_device__
+    return int(dlpack_device()[1])
+
+
 def to_tensor_msg(
     destination_or_value: Union[ExperimentalTensor, ort.OrtValue],
     value: Optional[ort.OrtValue] = None,
@@ -233,7 +238,7 @@ def to_tensor_msg(
         metadata = _value_metadata(value)
         source_device = value.device_name().lower()
         device_id = (
-            int(value.__dlpack_device__()[1])
+            _value_device_id(value)
             if source_device != 'cpu' else 0)
         destination = allocate_tensor_msg(
             metadata.shape,
@@ -255,9 +260,9 @@ def to_tensor_msg(
             raise ValueError('OrtValue tensor exceeds the destination view')
         _set_metadata(destination, metadata)
 
-    conversion_stream = (
-        stream if _backend_type(destination.data) != 'cpu' else None)
+    destination_backend = _backend_type(destination.data)
+    conversion_stream = stream if destination_backend != 'cpu' else None
     view = from_output_tensor_msg(destination, conversion_stream)
-    view.value.update_inplace(value)
+    view.value.update_inplace(value.numpy())
     view.close()
     return destination

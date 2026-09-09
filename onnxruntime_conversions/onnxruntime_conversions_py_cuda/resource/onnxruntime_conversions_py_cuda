@@ -1,1 +1,1 @@
-onnxruntime_conversions_cuda._adapter:register
+onnxruntime_conversions_cuda._plugin:register

@@ -3,7 +3,7 @@
 <package format="3">
   <name>onnxruntime_cuda_vendor</name>
   <version>0.1.2</version>
-  <description>Optional CUDA execution provider for onnxruntime_core_vendor.</description>
+  <description>ONNX Runtime GPU 1.23.2 C++ distribution for CUDA 12 and cuDNN 9.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -13,9 +13,11 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
 
-  <depend>nvidia-cuda</depend>
-  <depend>onnxruntime_core_vendor</depend>
-  <exec_depend>nvidia-cudnn</exec_depend>
+  <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
+  <exec_depend version_gte="9" version_lt="10">nvidia-cudnn</exec_depend>
+
+  <conflict>libonnxruntime-dev</conflict>
+  <conflict>onnxruntime_conversions_cpu</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>
   <test_depend>ament_lint_auto</test_depend>

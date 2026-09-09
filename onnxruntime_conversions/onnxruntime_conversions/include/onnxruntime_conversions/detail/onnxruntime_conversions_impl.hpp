@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef ONNXRUNTIME_CONVERSIONS__DETAIL__ONNXRUNTIME_CONVERSIONS_IMPL_HPP_
+#define ONNXRUNTIME_CONVERSIONS__DETAIL__ONNXRUNTIME_CONVERSIONS_IMPL_HPP_
+
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
 
 #if defined(__linux__)
@@ -21,15 +24,17 @@
 #include <algorithm>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include <pluginlib/class_loader.hpp>
 
-#include "adapter_catalog.hpp"
+#include "onnxruntime_conversions/detail/plugin_catalog.hpp"
 
 namespace onnxruntime_conversions
 {
@@ -249,37 +254,43 @@ void validate_storage(
     throw std::invalid_argument("Buffer backend and Ort::MemoryInfo allocators differ");
   }
   if (!storage.data && required_size != 0) {
-    throw std::runtime_error("Conversion adapter returned a null storage pointer");
+    throw std::runtime_error("Conversion plugin returned a null storage pointer");
   }
 }
 
 }  // namespace
 
 StorageLease::~StorageLease() = default;
-ConversionAdapter::~ConversionAdapter() = default;
+ConversionPlugin::~ConversionPlugin() = default;
 AutomaticSelectionCapability::~AutomaticSelectionCapability() = default;
 
-struct ConversionAdapterRegistry::Impl
+struct ConversionPluginRegistry::Impl
 {
   Impl()
-  : loader("onnxruntime_conversions", "onnxruntime_conversions::ConversionAdapter")
+  : loader("onnxruntime_conversions", "onnxruntime_conversions::ConversionPlugin")
   {
     declared_classes = loader.getDeclaredClasses();
     std::sort(declared_classes.begin(), declared_classes.end());
     for (const auto & class_name : declared_classes) {
-      std::shared_ptr<ConversionAdapter> adapter;
-      std::string adapter_id;
+      std::shared_ptr<ConversionPlugin> plugin;
+      std::vector<std::string> plugin_ids;
       try {
-        adapter = loader.createSharedInstance(class_name);
-        adapter_id = adapter->adapter_name();
-        if (adapter_id.empty()) {
-          throw std::runtime_error("Plugin returned an empty adapter ID");
+        plugin = loader.createSharedInstance(class_name);
+        plugin_ids = plugin->backends();
+        if (plugin_ids.empty()) {
+          throw std::runtime_error("Plugin declared no backends");
+        }
+        if (std::find(plugin_ids.begin(), plugin_ids.end(), "") != plugin_ids.end()) {
+          throw std::runtime_error("Plugin declared an empty backend name");
         }
       } catch (const std::exception & error) {
         load_failures.emplace(class_name, error.what());
         continue;
       }
-      detail::register_adapter_id(adapter_classes, adapter_id, class_name);
+      for (const auto & plugin_id : plugin_ids) {
+        detail::register_plugin_id(plugin_classes, plugin_id, class_name);
+        plugins.emplace(plugin_id, plugin);
+      }
 #if defined(__linux__)
       const std::string library_path = loader.getClassLibraryPath(class_name);
       void * library_handle =
@@ -290,20 +301,46 @@ struct ConversionAdapterRegistry::Impl
       }
       pinned_library_handles.push_back(library_handle);
 #endif
-      adapters.emplace(adapter_id, std::move(adapter));
     }
-    if (adapters.find("cpu") == adapters.end()) {
+    if (plugins.find("cpu") == plugins.end()) {
       throw std::runtime_error(diagnostic(
               "Required onnxruntime_conversions CPU plugin is unavailable."));
     }
   }
 
+  std::string select_backend(const ConversionConfiguration & configuration) const
+  {
+    std::string selected;
+    for (const auto & entry : plugins) {
+      if (entry.first == "cpu") {
+        continue;
+      }
+      const auto * capability =
+        dynamic_cast<const AutomaticSelectionCapability *>(entry.second.get());
+      if (!capability ||
+        !capability->supports_automatic_selection(configuration))
+      {
+        continue;
+      }
+      if (!selected.empty()) {
+        throw std::runtime_error(
+                "Automatic ONNX Runtime plugin selection is ambiguous between '" +
+                selected + "' and '" + entry.first + "'");
+      }
+      selected = entry.first;
+    }
+    if (selected.empty()) {
+      return "cpu";
+    }
+    return selected;
+  }
+
   std::string diagnostic(const std::string & subject) const
   {
     std::ostringstream message;
-    message << subject << " Loaded adapter IDs: [";
+    message << subject << " Loaded plugin IDs: [";
     bool first = true;
-    for (const auto & entry : adapters) {
+    for (const auto & entry : plugins) {
       message << (first ? "" : ", ") << entry.first;
       first = false;
     }
@@ -327,71 +364,50 @@ struct ConversionAdapterRegistry::Impl
   }
 
   mutable std::mutex mutex;
-  pluginlib::ClassLoader<ConversionAdapter> loader;
+  pluginlib::ClassLoader<ConversionPlugin> loader;
   std::vector<std::string> declared_classes;
-  std::map<std::string, std::shared_ptr<ConversionAdapter>> adapters;
-  std::map<std::string, std::string> adapter_classes;
+  std::map<std::string, std::shared_ptr<ConversionPlugin>> plugins;
+  std::map<std::string, std::string> plugin_classes;
   std::map<std::string, std::string> load_failures;
   std::vector<void *> pinned_library_handles;
 };
 
-ConversionAdapterRegistry::ConversionAdapterRegistry()
+ConversionPluginRegistry::ConversionPluginRegistry()
 : impl_(std::make_unique<Impl>()) {}
 
-ConversionAdapterRegistry::~ConversionAdapterRegistry() = default;
+ConversionPluginRegistry::~ConversionPluginRegistry() = default;
 
-ConversionAdapterRegistry & ConversionAdapterRegistry::instance()
+ConversionPluginRegistry & ConversionPluginRegistry::instance()
 {
-  // Keep plugin DSOs loaded until process termination: static/global views may
-  // destroy plugin-defined StorageLease objects after ordinary static teardown.
-  static ConversionAdapterRegistry * registry = new ConversionAdapterRegistry();
-  return *registry;
+  static ConversionPluginRegistry registry;
+  return registry;
 }
 
-std::shared_ptr<ConversionAdapter> ConversionAdapterRegistry::get_adapter(
-  const std::string & adapter)
+std::shared_ptr<ConversionPlugin> ConversionPluginRegistry::get_plugin(
+  const std::string & plugin)
 {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  const auto found = impl_->adapters.find(adapter);
-  if (found == impl_->adapters.end()) {
+  const auto found = impl_->plugins.find(plugin);
+  if (found == impl_->plugins.end()) {
     throw std::invalid_argument(impl_->diagnostic(
-            "ONNX Runtime conversion adapter '" + adapter + "' is unavailable."));
+            "ONNX Runtime conversion plugin '" + plugin + "' is unavailable."));
   }
   return found->second;
 }
 
-std::shared_ptr<ConversionAdapter> ConversionAdapterRegistry::select_adapter(
+std::string ConversionPluginRegistry::select_backend(
   const ConversionConfiguration & configuration)
 {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  std::shared_ptr<ConversionAdapter> selected;
-  for (const auto & entry : impl_->adapters) {
-    const auto * capability =
-      dynamic_cast<const AutomaticSelectionCapability *>(entry.second.get());
-    if (entry.first == "cpu" || !capability ||
-      !capability->supports_automatic_selection(configuration))
-    {
-      continue;
-    }
-    if (selected) {
-      throw std::runtime_error(
-              "Automatic ONNX Runtime adapter selection is ambiguous between '" +
-              selected->adapter_name() + "' and '" + entry.first + "'");
-    }
-    selected = entry.second;
-  }
-  if (selected) {
-    return selected;
-  }
-  return impl_->adapters.at("cpu");
+  return impl_->select_backend(configuration);
 }
 
-std::vector<std::string> ConversionAdapterRegistry::available_adapters() const
+std::vector<std::string> ConversionPluginRegistry::available_plugins() const
 {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   std::vector<std::string> names;
-  names.reserve(impl_->adapters.size());
-  for (const auto & entry : impl_->adapters) {
+  names.reserve(impl_->plugins.size());
+  for (const auto & entry : impl_->plugins) {
     names.push_back(entry.first);
   }
   return names;
@@ -433,9 +449,9 @@ const Ort::Value & OrtTensorView::value() const
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const std::string & adapter)
+  const std::string & plugin)
 {
-  return allocate_tensor_msg(shape, dtype, adapter, {});
+  return allocate_tensor_msg(shape, dtype, plugin, {});
 }
 
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
@@ -449,7 +465,7 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const std::string & adapter,
+  const std::string & plugin,
   const ConversionConfiguration & configuration)
 {
   size_t element_count = 1;
@@ -471,14 +487,14 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const auto strides = contiguous_strides(shape);
   msg->strides.assign(strides.begin(), strides.end());
   msg->byte_offset = 0;
-  auto selected = adapter == "auto" ?
-    ConversionAdapterRegistry::instance().select_adapter(configuration) :
-    ConversionAdapterRegistry::instance().get_adapter(adapter);
-  const std::string selected_name = selected->adapter_name();
-  selected->allocate_storage(*msg, byte_count);
-  if (msg->data.get_backend_type() != selected_name) {
+  const auto selected_backend = plugin == "auto" ?
+    ConversionPluginRegistry::instance().select_backend(configuration) :
+    plugin;
+  ConversionPluginRegistry::instance().get_plugin(selected_backend)->allocate_storage(
+    *msg, byte_count, selected_backend);
+  if (msg->data.get_backend_type() != selected_backend) {
     throw std::runtime_error(
-            "Conversion adapter '" + selected_name + "' allocated '" +
+            "Conversion plugin for backend '" + selected_backend + "' allocated '" +
             msg->data.get_backend_type() + "' storage");
   }
   return msg;
@@ -493,12 +509,12 @@ OrtTensorView from_input_tensor_msg(
     throw std::invalid_argument("Input tensor message must not be null");
   }
   const auto metadata = validate_metadata(*msg);
-  auto adapter =
-    ConversionAdapterRegistry::instance().get_adapter(msg->data.get_backend_type());
+  auto plugin =
+    ConversionPluginRegistry::instance().get_plugin(msg->data.get_backend_type());
   auto impl = std::make_unique<OrtTensorView::Impl>(msg);
-  impl->lease = adapter->acquire_input(msg, execution_stream);
+  impl->lease = plugin->acquire_input(msg, execution_stream);
   if (!impl->lease) {
-    throw std::runtime_error("Conversion adapter returned a null input lease");
+    throw std::runtime_error("Conversion plugin returned a null input lease");
   }
   const auto & storage = impl->lease->metadata();
   validate_storage(storage, memory_info, msg->data.size());
@@ -518,12 +534,12 @@ OrtTensorView from_output_tensor_msg(
     throw std::invalid_argument("Output tensor message must not be null");
   }
   const auto metadata = validate_metadata(*msg);
-  auto adapter =
-    ConversionAdapterRegistry::instance().get_adapter(msg->data.get_backend_type());
+  auto plugin =
+    ConversionPluginRegistry::instance().get_plugin(msg->data.get_backend_type());
   auto impl = std::make_unique<OrtTensorView::Impl>(msg);
-  impl->lease = adapter->acquire_output(msg, execution_stream);
+  impl->lease = plugin->acquire_output(msg, execution_stream);
   if (!impl->lease) {
-    throw std::runtime_error("Conversion adapter returned a null output lease");
+    throw std::runtime_error("Conversion plugin returned a null output lease");
   }
   const auto & storage = impl->lease->metadata();
   validate_storage(storage, memory_info, msg->data.size());
@@ -550,9 +566,9 @@ void to_tensor_msg(
   if (byte_count > msg.data.size()) {
     throw std::out_of_range("Ort::Value tensor exceeds the destination buffer");
   }
-  auto adapter =
-    ConversionAdapterRegistry::instance().get_adapter(msg.data.get_backend_type());
-  adapter->copy_from_ort(msg, value, byte_count, execution_stream);
+  auto plugin =
+    ConversionPluginRegistry::instance().get_plugin(msg.data.get_backend_type());
+  plugin->copy_from_ort(msg, value, byte_count, execution_stream);
   set_msg_dtype(msg, dtype);
   msg.shape.assign(shape.begin(), shape.end());
   const auto strides = contiguous_strides(shape);
@@ -562,7 +578,7 @@ void to_tensor_msg(
 
 std::unique_ptr<TensorMsg> to_tensor_msg(
   const Ort::Value & value,
-  const std::string & adapter,
+  const std::string & plugin,
   void * execution_stream)
 {
   if (!value.IsTensor()) {
@@ -573,25 +589,28 @@ std::unique_ptr<TensorMsg> to_tensor_msg(
   configuration.device_id = value.GetTensorMemoryInfo().GetDeviceId();
   configuration.execution_stream = execution_stream;
   auto msg = allocate_tensor_msg(
-    type_info.GetShape(), type_info.GetElementType(), adapter, configuration);
+    type_info.GetShape(), type_info.GetElementType(), plugin, configuration);
   to_tensor_msg(*msg, value, execution_stream);
   return msg;
 }
 
-std::vector<std::string> available_adapters()
+std::vector<std::string> available_plugins()
 {
-  return ConversionAdapterRegistry::instance().available_adapters();
+  return ConversionPluginRegistry::instance().available_plugins();
 }
 
 void configure_session_options(
   Ort::SessionOptions & session_options,
-  const std::string & adapter,
+  const std::string & plugin,
   const ConversionConfiguration & configuration)
 {
-  auto selected = adapter == "auto" ?
-    ConversionAdapterRegistry::instance().select_adapter(configuration) :
-    ConversionAdapterRegistry::instance().get_adapter(adapter);
-  selected->configure_session(session_options, configuration);
+  const auto selected_backend = plugin == "auto" ?
+    ConversionPluginRegistry::instance().select_backend(configuration) :
+    plugin;
+  ConversionPluginRegistry::instance().get_plugin(selected_backend)->configure_session(
+    session_options, selected_backend, configuration);
 }
 
 }  // namespace onnxruntime_conversions
+
+#endif  // ONNXRUNTIME_CONVERSIONS__DETAIL__ONNXRUNTIME_CONVERSIONS_IMPL_HPP_
