@@ -2,22 +2,36 @@
 
 Conversions between `tensor_msgs/ExperimentalTensor` and PyTorch.
 
-A runtime plugin provides the implementation. Examples below use
-`torch_conversions_cuda` and `torch_conversions_py_cuda`. The CPU-only plugins
-are `torch_conversions_cpu` and `torch_conversions_py_cpu`.
+`torch_conversions` translates between PyTorch tensors and DLPack, and
+[`dlpack_conversions`](../dlpack_conversions/README.md) owns the message
+storage behind it. Which memory a tensor lands in is decided by the storage
+plugin installed alongside the adapter, not by the adapter itself, so adding
+`dlpack_conversions_cuda` to an existing install is enough to move the same
+code onto the GPU. Pass a backend name to choose among several, or set
+`ROSIDL_TENSOR_BACKEND` to pick one for the whole process.
+
+| Device | C++ plugin | Python plugin |
+| --- | --- | --- |
+| Host | `dlpack_conversions_cpu` | `dlpack_conversions_py_cpu` |
+| CUDA | `dlpack_conversions_cuda` | `dlpack_conversions_py_cuda` |
 
 ## C++
+
+`torch_conversions` is header-only and compiles against whichever libtorch the
+consumer already resolved, so it does not pin a PyTorch version.
 
 Debian:
 
 ```bash
-sudo apt install ros-$ROS_DISTRO-torch-conversions-cuda
+sudo apt install ros-$ROS_DISTRO-torch-conversions \
+  ros-$ROS_DISTRO-dlpack-conversions-cuda
 ```
 
 Source:
 
 ```bash
-colcon build --merge-install --packages-up-to torch_conversions_cuda
+colcon build --merge-install --packages-up-to torch_conversions \
+  dlpack_conversions_cuda
 ```
 
 ### Publisher
@@ -57,13 +71,15 @@ publisher->publish(std::move(msg));
 Debian:
 
 ```bash
-sudo apt install ros-$ROS_DISTRO-torch-conversions-py-cuda
+sudo apt install ros-$ROS_DISTRO-torch-conversions-py \
+  ros-$ROS_DISTRO-dlpack-conversions-py-cuda
 ```
 
 Source:
 
 ```bash
-colcon build --merge-install --packages-up-to torch_conversions_py_cuda
+colcon build --merge-install --packages-up-to torch_conversions_py \
+  dlpack_conversions_py_cuda
 ```
 
 ### Publisher

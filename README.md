@@ -20,17 +20,25 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
   `cu130` wheel from the detected CUDA Toolkit; JetPack provides the
   required installation on Tegra.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **torch_conversions** -- Stable C++ API and CMake target.
-- **torch_conversions_cpu** -- CPU C++ runtime using `libtorch-dev`.
-- **torch_conversions_cuda** -- CPU/CUDA C++ runtime using
-  `libtorch_vendor`.
-- **torch_conversions_py** -- Stable Python API and plugin registry.
-- **torch_conversions_py_cpu** -- CPU Python runtime using `python3-torch`.
-- **torch_conversions_py_cuda** -- CPU/CUDA Python runtime using
-  `python3_torch_cuda_vendor`.
+- **dlpack_conversions** -- Framework-free C++ core. Allocates message
+  storage, hands out DLPack tensors over it, and loads storage plugins.
+- **dlpack_conversions_cpu** -- Host memory storage plugin.
+- **dlpack_conversions_cuda** -- CUDA device memory storage plugin, backed by
+  `cuda_buffer`.
+- **dlpack_conversions_py** -- Framework-free Python core and plugin registry.
+- **dlpack_conversions_py_cpu** -- Host memory storage plugin for Python.
+- **dlpack_conversions_py_cuda** -- CUDA storage plugin for Python.
+- **torch_conversions** -- Header-only C++ adapter between PyTorch tensors and
+  the DLPack core.
+- **torch_conversions_py** -- Python adapter between PyTorch tensors and the
+  DLPack core.
 
-Install `torch_conversions_cpu` or `torch_conversions_cuda`, and
-`torch_conversions_py_cpu` or `torch_conversions_py_cuda`.
+Storage lives behind a plugin interface that speaks only DLPack, so the
+adapters carry no device code and no framework pins a device. Install
+`torch_conversions` with whichever storage plugins the machine should support;
+adding `dlpack_conversions_cuda` later moves existing code onto the GPU
+without rebuilding it. Name a backend per call, or set
+`ROSIDL_TENSOR_BACKEND` to choose one for the whole process.
 
 ## Deb build status
 
@@ -67,6 +75,7 @@ Install `torch_conversions_cpu` or `torch_conversions_cuda`, and
 Per-package build, test, and run details live in each package's README:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
+- [`dlpack_conversions/README.md`](dlpack_conversions/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## API overview
