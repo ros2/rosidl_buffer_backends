@@ -12,19 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ONNX Runtime views over DLPack-compatible tensor messages."""
+"""ONNX Runtime views over DLPack tensor messages."""
 
 from onnxruntime_conversions._core import allocate_tensor_msg
+from onnxruntime_conversions._core import available_backends
+from onnxruntime_conversions._core import default_backend
 from onnxruntime_conversions._core import from_input_tensor_msg
 from onnxruntime_conversions._core import from_output_tensor_msg
 from onnxruntime_conversions._core import OrtTensorView
+from onnxruntime_conversions._core import session_providers
 from onnxruntime_conversions._core import to_tensor_msg
-
 
 __all__ = [
     'OrtTensorView',
     'allocate_tensor_msg',
+    'available_backends',
+    'default_backend',
     'from_input_tensor_msg',
     'from_output_tensor_msg',
+    'session_providers',
     'to_tensor_msg',
 ]

@@ -2,8 +2,8 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>onnxruntime_conversions</name>
-  <version>0.1.2</version>
-  <description>Stable C++ interface for ONNX Runtime tensor conversion plugins.</description>
+  <version>0.2.0</version>
+  <description>Header-only adapter between Ort::Value and DLPack tensor messages.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -11,13 +11,23 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>ament_cmake_core</depend>
-  <depend>pluginlib</depend>
-  <depend>rosidl_buffer</depend>
+  <depend>dlpack_conversions</depend>
   <depend>tensor_msgs</depend>
 
+  <build_depend>onnxruntime_cuda_vendor</build_depend>
+  <build_export_depend>onnxruntime_cuda_vendor</build_export_depend>
+
+  <exec_depend>dlpack_conversions_cpu</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>dlpack_conversions_cuda</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>rclcpp</test_depend>
+  <test_depend>rclcpp_components</test_depend>
+  <test_depend>rosidl_runtime_cpp</test_depend>
+  <test_depend>std_msgs</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

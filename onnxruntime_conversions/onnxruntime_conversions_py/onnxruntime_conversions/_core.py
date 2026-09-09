@@ -12,257 +12,276 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from array import array
-from collections.abc import Sequence
-import sys
+from types import TracebackType
 from typing import Optional
+from typing import Sequence
+from typing import Type
 from typing import Union
 
-import numpy as np
+import dlpack_conversions
+from dlpack_conversions._dlpack_bridge import capsule_device
+
+import numpy
+
 import onnxruntime as ort
 
-from onnxruntime_conversions._plugin import load_external_plugins
-from onnxruntime_conversions._plugin import OrtConversionRegistry
-from onnxruntime_conversions._plugin import OrtTensorView
-from onnxruntime_conversions._plugin import TensorMetadata
 from tensor_msgs.msg import ExperimentalTensor
 
 
-_DL_INT = 0
-_DL_UINT = 1
-_DL_FLOAT = 2
-_DL_BFLOAT = 4
-_DL_BOOL = 6
-
-_TYPE_INFO = {
-    1: (_DL_FLOAT, 32, np.dtype(np.float32)),
-    2: (_DL_UINT, 8, np.dtype(np.uint8)),
-    3: (_DL_INT, 8, np.dtype(np.int8)),
-    4: (_DL_UINT, 16, np.dtype(np.uint16)),
-    5: (_DL_INT, 16, np.dtype(np.int16)),
-    6: (_DL_INT, 32, np.dtype(np.int32)),
-    7: (_DL_INT, 64, np.dtype(np.int64)),
-    9: (_DL_BOOL, 8, np.dtype(np.bool_)),
-    10: (_DL_FLOAT, 16, np.dtype(np.float16)),
-    11: (_DL_FLOAT, 64, np.dtype(np.float64)),
-    12: (_DL_UINT, 32, np.dtype(np.uint32)),
-    13: (_DL_UINT, 64, np.dtype(np.uint64)),
-    16: (_DL_BFLOAT, 16, np.dtype(np.uint16)),
+# ONNX tensor element type -> (DLPack dtype code, bits, numpy dtype).
+_ELEMENT_TYPES = {
+    1: (2, 32, numpy.dtype(numpy.float32)),
+    2: (1, 8, numpy.dtype(numpy.uint8)),
+    3: (0, 8, numpy.dtype(numpy.int8)),
+    4: (1, 16, numpy.dtype(numpy.uint16)),
+    5: (0, 16, numpy.dtype(numpy.int16)),
+    6: (0, 32, numpy.dtype(numpy.int32)),
+    7: (0, 64, numpy.dtype(numpy.int64)),
+    9: (6, 8, numpy.dtype(numpy.bool_)),
+    10: (2, 16, numpy.dtype(numpy.float16)),
+    11: (2, 64, numpy.dtype(numpy.float64)),
+    12: (1, 32, numpy.dtype(numpy.uint32)),
+    13: (1, 64, numpy.dtype(numpy.uint64)),
+    16: (4, 16, numpy.dtype(numpy.uint16)),
 }
-_NUMPY_TYPES = {
+_BOOL = 9
+# bfloat16 shares numpy's uint16, so it cannot be reached from a numpy dtype.
+_FROM_NUMPY = {
     info[2]: element_type
-    for element_type, info in _TYPE_INFO.items()
+    for element_type, info in _ELEMENT_TYPES.items()
     if element_type != 16
 }
-_DLPACK_TYPES = {
-    (dtype_code, dtype_bits): element_type
-    for element_type, (dtype_code, dtype_bits, _) in _TYPE_INFO.items()
+_FROM_DLPACK = {
+    (code, bits): element_type
+    for element_type, (code, bits, _) in _ELEMENT_TYPES.items()
 }
 
-
-def _checked_product(values: Sequence[int], context: str) -> int:
-    result = 1
-    for value in values:
-        if value < 0:
-            raise ValueError('Tensor shape dimensions must be nonnegative')
-        if value and result > sys.maxsize // value:
-            raise OverflowError(context)
-        result *= value
-    return result
+ElementType = Union[int, numpy.dtype, type]
 
 
-def _contiguous_strides(shape: Sequence[int]) -> tuple[int, ...]:
-    strides = [0] * len(shape)
-    stride = 1
-    for index in range(len(shape) - 1, -1, -1):
-        strides[index] = stride
-        dimension = shape[index]
-        if dimension and stride > sys.maxsize // dimension:
-            raise OverflowError('Tensor strides overflow')
-        stride *= dimension
-    return tuple(strides)
-
-
-def _normalize_element_type(element_type: object) -> int:
-    if isinstance(element_type, np.dtype):
-        result = _NUMPY_TYPES.get(element_type)
+def _element_type(element_type: ElementType) -> int:
+    if isinstance(element_type, numpy.dtype):
+        resolved = _FROM_NUMPY.get(element_type)
     elif isinstance(element_type, type):
-        result = _NUMPY_TYPES.get(np.dtype(element_type))
-    elif isinstance(element_type, (int, np.integer)):
-        result = int(element_type)
+        resolved = _FROM_NUMPY.get(numpy.dtype(element_type))
+    elif isinstance(element_type, (int, numpy.integer)):
+        resolved = int(element_type)
     else:
-        result = None
-    if result not in _TYPE_INFO:
-        raise ValueError('Unsupported ONNX tensor element type')
-    return result
+        resolved = None
+    if resolved not in _ELEMENT_TYPES:
+        raise ValueError(f'Unsupported ONNX tensor element type: {element_type!r}')
+    return resolved
 
 
-def _metadata_for(
-    shape: Sequence[int],
-    element_type: object,
-    byte_offset: int = 0,
-) -> TensorMetadata:
-    normalized_shape = tuple(int(dimension) for dimension in shape)
-    normalized_type = _normalize_element_type(element_type)
-    dtype_code, dtype_bits, _ = _TYPE_INFO[normalized_type]
-    element_count = _checked_product(
-        normalized_shape, 'Tensor element count overflow')
-    element_size = dtype_bits // 8
-    if element_count and element_count > sys.maxsize // element_size:
-        raise OverflowError('Tensor byte count overflow')
-    if byte_offset < 0:
-        raise ValueError('Tensor byte_offset must be nonnegative')
-    if byte_offset % element_size:
-        raise ValueError('Tensor byte_offset is not element-aligned')
-    return TensorMetadata(
-        normalized_shape,
-        _contiguous_strides(normalized_shape),
-        normalized_type,
-        dtype_code,
-        dtype_bits,
-        1,
-        element_count,
-        element_count * element_size,
-        byte_offset,
-        _TYPE_INFO[normalized_type][2],
-    )
-
-
-def _validate_message(msg: ExperimentalTensor) -> TensorMetadata:
+def _element_type_of(msg: ExperimentalTensor) -> int:
     if int(msg.dtype_lanes) != 1:
         raise ValueError('ONNX Runtime tensors require dtype_lanes == 1')
-    element_type = _DLPACK_TYPES.get(
-        (int(msg.dtype_code), int(msg.dtype_bits)))
+    element_type = _FROM_DLPACK.get((int(msg.dtype_code), int(msg.dtype_bits)))
     if element_type is None:
         raise ValueError(
             'ExperimentalTensor dtype is unsupported by ONNX Runtime')
-    metadata = _metadata_for(msg.shape, element_type, int(msg.byte_offset))
-    strides = tuple(int(stride) for stride in msg.strides)
-    if strides and strides != metadata.strides:
-        raise ValueError(
-            'ONNX Runtime conversion requires contiguous tensor strides')
-    if metadata.byte_offset > len(msg.data):
-        raise ValueError('Tensor byte_offset exceeds its backing buffer')
-    if metadata.byte_count > len(msg.data) - metadata.byte_offset:
-        raise ValueError('Tensor view exceeds its backing buffer')
-    return metadata
+    return element_type
 
 
-def _set_metadata(
-    msg: ExperimentalTensor,
-    metadata: TensorMetadata,
-) -> None:
-    msg.dtype_code = metadata.dtype_code
-    msg.dtype_bits = metadata.dtype_bits
-    msg.dtype_lanes = metadata.dtype_lanes
-    msg.shape = array('q', metadata.shape)
-    msg.strides = array('q', metadata.strides)
-    msg.byte_offset = metadata.byte_offset
+class _Producer:
+    """Presents one DLPack capsule through the array API protocol."""
+
+    def __init__(self, capsule: object, dtype: numpy.dtype):
+        self._capsule = capsule
+        self._device = capsule_device(capsule)
+        self.dtype = dtype
+
+    def __dlpack__(self, stream: Optional[int] = None, **kwargs: object) -> object:
+        del stream, kwargs
+        capsule = self._capsule
+        if capsule is None:
+            raise RuntimeError('DLPack tensor has already been consumed')
+        self._capsule = None
+        return capsule
+
+    def __dlpack_device__(self) -> tuple:
+        return self._device
 
 
-def _backend_type(data: object) -> str:
-    return str(getattr(data, 'backend_type', 'cpu')).lower()
+class OrtTensorView:
+    """An OrtValue over tensor message storage.
+
+    ONNX Runtime takes over the DLPack deleter, so the value itself holds the
+    storage lease. Keep the view alive while ONNX Runtime reads or writes it.
+    """
+
+    def __init__(self, value: ort.OrtValue) -> None:
+        self._value: Optional[ort.OrtValue] = value
+
+    @property
+    def value(self) -> ort.OrtValue:
+        if self._value is None:
+            raise RuntimeError('OrtTensorView is closed')
+        return self._value
+
+    @property
+    def closed(self) -> bool:
+        return self._value is None
+
+    def close(self) -> None:
+        self._value = None
+
+    def __enter__(self) -> ort.OrtValue:
+        return self.value
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> bool:
+        self.close()
+        return False
 
 
-_registry = OrtConversionRegistry()
-load_external_plugins(_registry)
+def available_backends() -> list:
+    return dlpack_conversions.available_backends()
+
+
+def default_backend() -> str:
+    return dlpack_conversions.default_backend()
 
 
 def allocate_tensor_msg(
     shape: Sequence[int],
-    element_type: object,
-    device_type: str = 'auto',
-    device_id: int = 0,
-    stream: Optional[int] = None,
+    element_type: ElementType,
+    backend: Optional[str] = None,
 ) -> ExperimentalTensor:
-    metadata = _metadata_for(shape, element_type)
-    msg = ExperimentalTensor()
-    _set_metadata(msg, metadata)
-    normalized_device = device_type.lower()
-    plugin = (
-        _registry.default()
-        if normalized_device == 'auto'
-        else _registry.for_device(normalized_device)
-    )
-    msg.data = plugin.allocate(metadata, device_id, stream)
-    return msg
+    code, bits, _ = _ELEMENT_TYPES[_element_type(element_type)]
+    return dlpack_conversions.allocate_tensor_msg(shape, (code, bits, 1), backend)
 
 
-def _from_tensor_msg(
-    msg: ExperimentalTensor,
-    stream: Optional[int],
-    output: bool,
-) -> OrtTensorView:
-    if not isinstance(msg, ExperimentalTensor):
-        raise TypeError('msg must be an ExperimentalTensor')
-    metadata = _validate_message(msg)
-    plugin = _registry.for_data(msg.data)
-    return plugin.view(msg, metadata, stream, output)
+def _prepare(msg: ExperimentalTensor) -> tuple:
+    element_type = _element_type_of(msg)
+    strides = list(msg.strides)
+    if strides and strides != dlpack_conversions.contiguous_strides(
+            list(msg.shape)):
+        raise ValueError(
+            'ONNX Runtime conversion requires contiguous tensor strides')
+    # ONNX Runtime rejects the DLPack bool code and instead infers bool from
+    # the producer dtype, so bool storage is described as the uint8 it is.
+    dtype = (1, 8, 1) if element_type == _BOOL else None
+    return element_type, dtype
+
+
+def _view(
+    element_type: int,
+    capsule: Optional[object],
+) -> Optional[OrtTensorView]:
+    if capsule is None:
+        return None
+    producer = _Producer(capsule, _ELEMENT_TYPES[element_type][2])
+    return OrtTensorView(ort.OrtValue.from_dlpack(producer))
 
 
 def from_input_tensor_msg(
     msg: ExperimentalTensor,
     stream: Optional[int] = None,
-) -> OrtTensorView:
-    return _from_tensor_msg(msg, stream, False)
+) -> Optional[OrtTensorView]:
+    element_type, dtype = _prepare(msg)
+    return _view(
+        element_type,
+        dlpack_conversions.from_input_tensor_msg(msg, stream, dtype),
+    )
 
 
 def from_output_tensor_msg(
     msg: ExperimentalTensor,
     stream: Optional[int] = None,
-) -> OrtTensorView:
-    return _from_tensor_msg(msg, stream, True)
-
-
-def _value_metadata(value: ort.OrtValue) -> TensorMetadata:
-    if not isinstance(value, ort.OrtValue) or not value.is_tensor():
-        raise TypeError('value must be an ONNX Runtime tensor OrtValue')
-    return _metadata_for(value.shape(), value.element_type())
-
-
-def _value_device_id(value: ort.OrtValue) -> int:
-    dlpack_device = getattr(value, '__dlpack_device__', None)
-    if dlpack_device is None:
-        dlpack_device = value._ortvalue.__dlpack_device__
-    return int(dlpack_device()[1])
+) -> Optional[OrtTensorView]:
+    element_type, dtype = _prepare(msg)
+    return _view(
+        element_type,
+        dlpack_conversions.from_output_tensor_msg(msg, stream, dtype),
+    )
 
 
 def to_tensor_msg(
     destination_or_value: Union[ExperimentalTensor, ort.OrtValue],
     value: Optional[ort.OrtValue] = None,
     stream: Optional[int] = None,
-    device_type: str = 'auto',
+    backend: Optional[str] = None,
 ) -> ExperimentalTensor:
+    """Copy an OrtValue into message storage.
+
+    ONNX Runtime exposes no device-to-device copy into external memory from
+    Python, so this stages through host memory. The C++ adapter does not.
+    """
     if value is None:
         value = destination_or_value
-        metadata = _value_metadata(value)
-        source_device = value.device_name().lower()
-        device_id = (
-            _value_device_id(value)
-            if source_device != 'cpu' else 0)
-        destination = allocate_tensor_msg(
-            metadata.shape,
-            metadata.element_type,
-            device_type,
-            device_id,
-            stream,
-        )
+        destination = None
     else:
-        if not isinstance(destination_or_value, ExperimentalTensor):
-            raise TypeError('destination must be an ExperimentalTensor')
         destination = destination_or_value
-        metadata = _value_metadata(value)
-        if metadata.byte_count > len(destination.data):
-            raise ValueError('OrtValue tensor exceeds the destination buffer')
-        metadata = _metadata_for(
-            metadata.shape, metadata.element_type, int(destination.byte_offset))
-        if metadata.byte_count > len(destination.data) - metadata.byte_offset:
-            raise ValueError('OrtValue tensor exceeds the destination view')
-        _set_metadata(destination, metadata)
+        if not isinstance(destination, ExperimentalTensor):
+            raise TypeError('destination must be an ExperimentalTensor')
 
-    destination_backend = _backend_type(destination.data)
-    conversion_stream = stream if destination_backend != 'cpu' else None
-    view = from_output_tensor_msg(destination, conversion_stream)
-    view.value.update_inplace(value.numpy())
-    view.close()
+    if not isinstance(value, ort.OrtValue) or not value.is_tensor():
+        raise TypeError('value must be an ONNX Runtime tensor OrtValue')
+    host = value.numpy()
+
+    if destination is None:
+        destination = allocate_tensor_msg(
+            host.shape, host.dtype, backend or _backend_of(value))
+    elif host.nbytes > len(destination.data):
+        raise ValueError('OrtValue tensor exceeds the destination buffer')
+    else:
+        code, bits, _ = _ELEMENT_TYPES[_element_type(host.dtype)]
+        destination.dtype_code, destination.dtype_bits = code, bits
+        destination.dtype_lanes = 1
+        destination.shape = list(host.shape)
+        destination.strides = dlpack_conversions.contiguous_strides(
+            list(host.shape))
+        destination.byte_offset = 0
+
+    view = from_output_tensor_msg(destination, stream)
+    if view is not None:
+        view.value.update_inplace(numpy.ascontiguousarray(host))
+        view.close()
     return destination
+
+
+def _backend_of(value: ort.OrtValue) -> Optional[str]:
+    if value.device_name().lower() == 'cpu':
+        return 'cpu'
+    return None
+
+
+def session_providers(
+    backend: Optional[str] = None,
+    device_id: int = 0,
+    stream: Optional[int] = None,
+) -> list:
+    """Provider list that runs a session where the given backend allocates.
+
+    Only the backends ONNX Runtime ships a provider for are handled. For any
+    other backend, build the provider list yourself.
+    """
+    selected = backend or dlpack_conversions.default_backend()
+    if selected == 'cpu':
+        if stream is not None:
+            raise ValueError('Host memory sessions take no execution stream')
+        return ['CPUExecutionProvider']
+    if stream is None:
+        raise ValueError(
+            f'Backend {selected!r} requires an explicit execution stream')
+    if selected == 'cuda':
+        provider = 'CUDAExecutionProvider'
+    elif selected == 'rocm':
+        provider = 'ROCMExecutionProvider'
+    else:
+        raise ValueError(
+            f'No ONNX Runtime execution provider is known for backend '
+            f'{selected!r}; build the provider list yourself'
+        )
+    return [
+        (provider, {
+            'device_id': str(device_id),
+            'user_compute_stream': str(stream),
+        }),
+        'CPUExecutionProvider',
+    ]

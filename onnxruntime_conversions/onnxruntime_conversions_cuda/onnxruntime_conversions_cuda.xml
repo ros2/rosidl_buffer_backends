@@ -1,8 +1,0 @@
-<library path="onnxruntime_conversions_cuda_plugin">
-  <class
-    name="cuda"
-    type="onnxruntime_conversions::CudaConversionPlugin"
-    base_class_type="onnxruntime_conversions::ConversionPlugin">
-    <description>CPU and CUDA ONNX Runtime conversion plugin.</description>
-  </class>
-</library>

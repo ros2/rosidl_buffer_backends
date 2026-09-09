@@ -26,12 +26,11 @@
 #include "rclcpp_components/register_node_macro.hpp"
 #include "std_msgs/msg/u_int32.hpp"
 
-class CudaTensorPublisher : public rclcpp::Node
+class OrtTensorPublisher : public rclcpp::Node
 {
 public:
-  explicit CudaTensorPublisher(const rclcpp::NodeOptions & options)
-  : Node("onnxruntime_cuda_tensor_publisher", options),
-    memory_info_("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault)
+  explicit OrtTensorPublisher(const rclcpp::NodeOptions & options)
+  : Node("onnxruntime_tensor_publisher", options)
   {
     if (cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking) != cudaSuccess) {
       throw std::runtime_error("Failed to create publisher CUDA stream");
@@ -40,10 +39,10 @@ public:
       "test_onnxruntime_cuda_tensor", 10);
     count_publisher_ = create_publisher<std_msgs::msg::UInt32>("publisher_count", 10);
     timer_ = create_wall_timer(
-      std::chrono::milliseconds(100), std::bind(&CudaTensorPublisher::publish, this));
+      std::chrono::milliseconds(100), std::bind(&OrtTensorPublisher::publish, this));
   }
 
-  ~CudaTensorPublisher() override
+  ~OrtTensorPublisher() override
   {
     if (stream_) {
       cudaStreamDestroy(stream_);
@@ -53,13 +52,11 @@ public:
 private:
   void publish()
   {
-    auto owner = std::shared_ptr<onnxruntime_conversions::TensorMsg>(
-      onnxruntime_conversions::allocate_tensor_msg(
-        {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda"));
+    auto owner = onnxruntime_conversions::allocate_tensor_msg(
+      {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
     const std::vector<float> values(6, static_cast<float>(count_ + 1));
     {
-      auto view = onnxruntime_conversions::from_output_tensor_msg(
-        owner, memory_info_, stream_);
+      auto view = onnxruntime_conversions::from_output_tensor_msg(*owner, stream_);
       if (cudaMemcpyAsync(
           view.value().GetTensorMutableRawData(), values.data(),
           values.size() * sizeof(float), cudaMemcpyHostToDevice, stream_) != cudaSuccess)
@@ -76,7 +73,6 @@ private:
     count_publisher_->publish(count);
   }
 
-  Ort::MemoryInfo memory_info_;
   cudaStream_t stream_{nullptr};
   rclcpp::Publisher<onnxruntime_conversions::TensorMsg>::SharedPtr publisher_;
   rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr count_publisher_;
@@ -84,4 +80,4 @@ private:
   uint32_t count_{0};
 };
 
-RCLCPP_COMPONENTS_REGISTER_NODE(CudaTensorPublisher)
+RCLCPP_COMPONENTS_REGISTER_NODE(OrtTensorPublisher)
