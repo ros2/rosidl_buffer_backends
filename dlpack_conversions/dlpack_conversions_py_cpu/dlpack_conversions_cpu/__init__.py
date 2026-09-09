@@ -12,4 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CPU plugin for Python PyTorch conversions."""
+"""Host memory storage plugin for DLPack tensor messages."""
+
+from dlpack_conversions_cpu._plugin import CpuStoragePlugin
+from dlpack_conversions_cpu._plugin import register
+
+__all__ = [
+    'CpuStoragePlugin',
+    'register',
+]

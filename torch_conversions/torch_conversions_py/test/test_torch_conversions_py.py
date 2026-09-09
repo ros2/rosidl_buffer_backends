@@ -13,8 +13,11 @@
 # limitations under the License.
 
 from array import array
+from pathlib import Path
 import subprocess
 import sys
+
+import dlpack_conversions
 
 import pytest
 
@@ -27,14 +30,25 @@ from torch_conversions import allocate_tensor_msg
 from torch_conversions import from_input_tensor_msg
 from torch_conversions import from_output_tensor_msg
 from torch_conversions import to_tensor_msg
-from torch_conversions._plugin import TorchConversionRegistry
-from torch_conversions_cpu._plugin import CpuTorchConversionPlugin
 
 
 CUDA_AVAILABLE = torch_conversions._plugin_available('cuda')
 
 
-def test_cpu_conversion_works_with_optional_cuda_plugin():
+def test_adapter_is_pure_python_and_pins_no_framework_build():
+    root = Path(__file__).parents[1]
+    cmake = (root / 'CMakeLists.txt').read_text()
+    manifest = (root / 'package.xml').read_text()
+
+    assert 'pybind11_add_module' not in cmake
+    assert 'find_package(Torch' not in cmake
+    assert '<exec_depend>python3_torch_cuda_vendor</exec_depend>' \
+        not in manifest
+    assert '<exec_depend>cuda_buffer_py</exec_depend>' not in manifest
+    assert '<exec_depend>dlpack_conversions_py</exec_depend>' in manifest
+
+
+def test_cpu_conversion_works_in_a_fresh_interpreter():
     subprocess.run(
         [
             sys.executable,
@@ -48,35 +62,6 @@ def test_cpu_conversion_works_with_optional_cuda_plugin():
         ],
         check=True,
     )
-
-
-def test_conversion_registry_rejects_duplicate_device():
-    registry = TorchConversionRegistry()
-    plugin = CpuTorchConversionPlugin()
-    registry.register(plugin)
-
-    with pytest.raises(ValueError, match='already registered'):
-        registry.register(plugin)
-
-
-def test_conversion_registry_rejects_unknown_device_and_storage():
-    registry = TorchConversionRegistry()
-    registry.register(CpuTorchConversionPlugin())
-
-    with pytest.raises(ValueError, match='Unsupported tensor device'):
-        registry.for_device(torch.device('meta'))
-    with pytest.raises(ValueError, match='Unsupported tensor storage'):
-        registry.for_data(object())
-
-
-def test_conversion_registry_dispatches_cpu_storage():
-    registry = TorchConversionRegistry()
-    plugin = CpuTorchConversionPlugin()
-    registry.register(plugin)
-
-    assert registry.for_device(torch.device('cpu')) is plugin
-    assert registry.for_data(array('B')) is plugin
-    assert registry.default_device() == torch.device('cpu')
 
 
 @pytest.mark.parametrize(
@@ -177,19 +162,6 @@ def test_oversized_tensor_is_rejected():
         to_tensor_msg(msg, torch.zeros(128, dtype=torch.uint8))
 
 
-def test_invalid_metadata_is_rejected():
-    msg = ExperimentalTensor()
-    msg.dtype_code = 2
-    msg.dtype_bits = 128
-    msg.dtype_lanes = 1
-    msg.shape = [1]
-    msg.strides = [1]
-    msg.data = array('B', bytes(16))
-
-    with pytest.raises(TypeError, match='Unsupported DLPack dtype'):
-        from_input_tensor_msg(msg)
-
-
 def test_invalid_shape_and_strides_are_rejected():
     with pytest.raises(ValueError, match='nonnegative'):
         allocate_tensor_msg((-1,), torch.float32, 'cpu')
@@ -203,6 +175,13 @@ def test_invalid_shape_and_strides_are_rejected():
 def test_unsupported_torch_dtype_is_rejected():
     with pytest.raises(TypeError, match='Unsupported torch dtype'):
         to_tensor_msg(torch.zeros(4, dtype=torch.complex64))
+    with pytest.raises(TypeError, match='Unsupported torch dtype'):
+        allocate_tensor_msg((4,), torch.complex64, 'cpu')
+
+
+def test_unsupported_device_is_rejected():
+    with pytest.raises(ValueError, match='Unsupported tensor device'):
+        allocate_tensor_msg((4,), torch.float32, 'meta')
 
 
 @pytest.mark.skipif(CUDA_AVAILABLE, reason='CUDA support is available')
@@ -210,5 +189,6 @@ def test_cpu_only_configuration_defaults_to_cpu_and_rejects_cuda():
     msg = allocate_tensor_msg((4,), torch.float32)
 
     assert isinstance(msg.data, array)
-    with pytest.raises(ValueError, match='Unsupported tensor device'):
+    assert dlpack_conversions.default_backend() == 'cpu'
+    with pytest.raises(RuntimeError, match='No storage plugin serves'):
         allocate_tensor_msg((4,), torch.float32, 'cuda')

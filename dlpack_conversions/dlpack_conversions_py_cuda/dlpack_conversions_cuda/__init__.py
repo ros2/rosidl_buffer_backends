@@ -12,4 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CUDA plugin for Python PyTorch conversions."""
+"""CUDA device memory storage plugin for DLPack tensor messages."""
+
+from dlpack_conversions_cuda._plugin import CudaStoragePlugin
+from dlpack_conversions_cuda._plugin import register
+
+__all__ = [
+    'CudaStoragePlugin',
+    'register',
+]

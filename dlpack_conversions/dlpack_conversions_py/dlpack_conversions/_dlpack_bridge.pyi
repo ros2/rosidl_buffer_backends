@@ -13,3 +13,6 @@ def make_dlpack_capsule(
     byte_offset: int,
     owner: object,
 ) -> object: ...
+
+
+def buffer_address(buffer: object) -> int: ...

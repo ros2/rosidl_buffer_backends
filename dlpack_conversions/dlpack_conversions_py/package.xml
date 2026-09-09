@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>torch_conversions_py</name>
-  <version>0.2.0</version>
-  <description>Python adapter between torch.Tensor and DLPack tensor messages.</description>
+  <name>dlpack_conversions_py</name>
+  <version>0.1.0</version>
+  <description>Framework-free Python DLPack storage for tensor messages.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -12,21 +12,17 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <exec_depend>dlpack_conversions_py</exec_depend>
-  <exec_depend>dlpack_conversions_py_cpu</exec_depend>
+  <build_depend>pybind11-dev</build_depend>
+  <build_depend>python3-dev</build_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rosidl_buffer_py</exec_depend>
   <exec_depend>tensor_msgs</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
-  <test_depend>cuda_buffer_py</test_depend>
-  <test_depend>dlpack_conversions_py_cuda</test_depend>
-  <test_depend>launch_ros</test_depend>
-  <test_depend>launch_testing</test_depend>
-  <test_depend>launch_testing_ament_cmake</test_depend>
-  <test_depend>python3_torch_cuda_vendor</test_depend>
-  <test_depend>rclpy</test_depend>
-  <test_depend>rmw_fastrtps_cpp</test_depend>
+  <test_depend>python3-numpy</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

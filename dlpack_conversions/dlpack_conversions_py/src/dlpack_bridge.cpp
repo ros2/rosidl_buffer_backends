@@ -120,6 +120,11 @@ py::capsule make_dlpack_capsule(
   return capsule;
 }
 
+uintptr_t buffer_address(const py::buffer & buffer)
+{
+  return reinterpret_cast<uintptr_t>(buffer.request(false).ptr);
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_dlpack_bridge, module)
@@ -130,4 +135,5 @@ PYBIND11_MODULE(_dlpack_bridge, module)
     py::arg("dtype_code"), py::arg("dtype_bits"), py::arg("dtype_lanes"),
     py::arg("shape"), py::arg("strides"), py::arg("byte_offset"),
     py::arg("owner"));
+  module.def("buffer_address", &buffer_address, py::arg("buffer"));
 }
