@@ -2,12 +2,19 @@
 
 CUDA buffer backend plugin for the ROS 2 Buffer system. Enables zero-copy GPU memory sharing between publishers and subscribers on the same host using CUDA VMM (Virtual Memory Management).
 
+See the [design document](docs/cuda_buffer_backend_design.md) for architecture
+and implementation details.
+
+## Prerequisites
+
+- A ROS 2 Rolling source workspace; see
+  [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
+  for the canonical setup.
+- CUDA Toolkit (>= 11.8) on the host.
+
 ## Build
 
-Requires a ROS 2 Rolling source workspace; see
-[Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
-for the canonical setup. After cloning this repo into your workspace's
-`src/` directory:
+After cloning this repo into your workspace's `src/` directory:
 
 ```bash
 # Install system dependencies (CUDA toolkit, etc.).

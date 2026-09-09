@@ -1,16 +1,15 @@
 # rosidl_buffer_backends
 
-CUDA buffer backend implementation for `rosidl::Buffer`, enabling zero-copy
-GPU memory sharing between ROS 2 publishers and subscribers, plus a
-PyTorch-side helper library that builds on the same buffer infrastructure.
+Vendor-specific storage backends for `rosidl::Buffer`, enabling ROS 2
+publishers and subscribers to share accelerator-accessible memory without
+copying when supported, with automatic fallback to the default CPU path.
 
 ## Packages
 
-- **cuda_buffer** -- Core CUDA buffer library (VMM-backed IPC memory pool,
-  host endpoint manager, ReadHandle/WriteHandle with CUDA event sync).
-- **cuda_buffer_backend** -- BufferBackend plugin for CUDA IPC transport.
-- **cuda_buffer_backend_msgs** -- ROS 2 message definitions for CUDA buffer
-  descriptors.
+- [`cuda_buffer_backend`](cuda_buffer_backend/README.md) -- CUDA buffer backend
+  packages for zero-copy GPU memory sharing using CUDA VMM IPC.
+- [`qc_buffer_backend`](qc_buffer_backend/README.md) -- Qualcomm buffer backend
+  packages for HTP-CPU zero-copy sharing using dma-buf memory.
 - **libtorch_vendor** -- Vendor package that downloads and installs the
   pre-built LibTorch C++ distribution.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
@@ -51,65 +50,13 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- CUDA Toolkit (>= 11.8) on the host.
-
-Per-package build, test, and run details live in each package's README:
+- Each backend depends on its vendor-specific platform support. Refer to the
+  backend documentation for detailed prerequisites, setup, build, test, and
+  usage instructions:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
+- [`qc_buffer_backend/README.md`](qc_buffer_backend/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
-
-## API overview
-
-### CUDA buffer backend (`cuda_buffer_backend`)
-
-```cpp
-#include "cuda_buffer/cuda_buffer_api.hpp"
-
-// Publisher: allocate + write directly to the output buffer.
-sensor_msgs::msg::Image msg;
-msg.data = cuda_buffer_backend::allocate_buffer(byte_count);
-{
-  auto wh = cuda_buffer_backend::from_output_buffer(msg.data, stream);
-  uint8_t * out = wh.get_ptr();
-  my_kernel<<<...>>>(out, ...);
-}  // wh destructor records the write event on `stream`
-publisher->publish(msg);
-
-// Subscriber: input/read handle (waits on publisher's write event).
-auto rh = cuda_buffer_backend::from_input_buffer(msg->data, stream);
-use_data<<<...>>>(rh.get_ptr(), ...);  // rh.get_ptr() returns const uint8_t *
-
-// Auto-promotion: passing a non-CUDA buffer allocates a fresh CUDA buffer
-// and (for inputs) copies H2D;
-auto rh = cuda_buffer_backend::from_input_buffer(cpu_or_other_buf, stream);
-```
-
-### Torch tensor API (`torch_conversions`)
-
-```cpp
-#include "torch_conversions/torch_conversions.hpp"
-#include "tensor_msgs/msg/experimental_tensor.hpp"
-
-// Publisher: allocate a Tensor message (accelerated backend when available).
-auto guard = torch_conversions::set_stream();
-auto msg = torch_conversions::allocate_tensor_msg(
-  /*shape=*/{1080, 1920, 3}, torch::kUInt8);
-
-// Wrap as at::Tensor without copying and write into it.
-at::Tensor t_out = torch_conversions::from_output_tensor_msg(*msg);
-my_pipeline(t_out);
-publisher->publish(std::move(msg));
-
-// Subscriber: independent tensor by default.
-auto guard = torch_conversions::set_stream();
-at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
-```
-
-The message schema carries DLPack's dtype / shape / stride / offset
-metadata, while device placement is derived from the underlying
-`rosidl::Buffer` backend. Any DLPack-compatible framework (PyTorch,
-TensorFlow, JAX, CuPy, ONNX Runtime, ...) can interoperate over the wire by
-converting to / from its own DLPack representation.
 
 ## License
 
