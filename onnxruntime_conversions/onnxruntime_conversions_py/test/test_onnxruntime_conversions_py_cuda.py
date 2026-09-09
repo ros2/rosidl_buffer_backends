@@ -28,6 +28,7 @@ from onnxruntime_conversions import default_backend
 from onnxruntime_conversions import from_input_tensor_msg
 from onnxruntime_conversions import from_output_tensor_msg
 from onnxruntime_conversions import session_providers
+from onnxruntime_conversions import to_tensor_msg
 
 import pytest
 
@@ -179,3 +180,64 @@ def test_identity_inference_on_device_storage(cuda_buffer, cuda_stream):
         output_msg.data.to_bytes(), dtype=np.float32).tolist() == [
         0.0, 1.0, 2.0, 3.0,
     ]
+
+
+def test_to_tensor_msg_copies_host_values_onto_the_device(cuda_stream):
+    source = np.arange(6, dtype=np.float32).reshape(2, 3)
+    value = ort.OrtValue.ortvalue_from_numpy(source)
+    destination = allocate_tensor_msg((2, 3), np.float32, 'cuda')
+
+    to_tensor_msg(destination, value, cuda_stream)
+
+    assert destination.data.backend_type == 'cuda'
+    assert list(destination.shape) == [2, 3]
+    assert np.array_equal(
+        np.frombuffer(destination.data.to_bytes(), dtype=np.float32).reshape(
+            2, 3),
+        source)
+
+
+def test_to_tensor_msg_copies_device_values_without_staging_on_the_host(
+    cuda_buffer, cuda_stream,
+):
+    source = np.arange(4, dtype=np.float32)
+    staged = allocate_tensor_msg((4,), np.float32, 'cuda')
+    staged.data = cuda_buffer.from_cpu(source.tobytes())
+    destination = allocate_tensor_msg((4,), np.float32, 'cuda')
+
+    with from_input_tensor_msg(staged, cuda_stream) as value:
+        to_tensor_msg(destination, value, cuda_stream)
+
+    assert destination.data.backend_type == 'cuda'
+    assert np.array_equal(
+        np.frombuffer(destination.data.to_bytes(), dtype=np.float32), source)
+
+
+def test_to_tensor_msg_allocates_on_the_device_that_owns_the_value(
+    cuda_buffer, cuda_stream,
+):
+    source = np.arange(4, dtype=np.float32)
+    staged = allocate_tensor_msg((4,), np.float32, 'cuda')
+    staged.data = cuda_buffer.from_cpu(source.tobytes())
+
+    with from_input_tensor_msg(staged, cuda_stream) as value:
+        allocated = to_tensor_msg(value, stream=cuda_stream)
+
+    assert allocated.data.backend_type == 'cuda'
+    assert np.array_equal(
+        np.frombuffer(allocated.data.to_bytes(), dtype=np.float32), source)
+
+
+def test_to_tensor_msg_copies_device_values_into_host_storage(
+    cuda_buffer, cuda_stream,
+):
+    source = np.arange(4, dtype=np.float32)
+    staged = allocate_tensor_msg((4,), np.float32, 'cuda')
+    staged.data = cuda_buffer.from_cpu(source.tobytes())
+    destination = allocate_tensor_msg((4,), np.float32, 'cpu')
+
+    with from_input_tensor_msg(staged, cuda_stream) as value:
+        to_tensor_msg(destination, value, cuda_stream)
+
+    assert np.array_equal(
+        np.frombuffer(destination.data, dtype=np.float32), source)

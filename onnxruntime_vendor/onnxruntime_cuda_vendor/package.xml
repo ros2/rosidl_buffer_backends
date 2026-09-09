@@ -17,7 +17,6 @@
   <exec_depend version_gte="9" version_lt="10">nvidia-cudnn</exec_depend>
 
   <conflict>libonnxruntime-dev</conflict>
-  <conflict>onnxruntime_conversions_cpu</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>
   <test_depend>ament_lint_auto</test_depend>

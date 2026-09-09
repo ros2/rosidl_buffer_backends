@@ -40,6 +40,9 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
   find_package(ament_cmake_gtest REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
+  # The CUDA tests and component nodes drive the runtime API directly, so they
+  # need the toolkit even though the adapter itself does not.
+  find_package(CUDAToolkit QUIET)
   find_package(onnxruntime_cuda_vendor QUIET)
   if(NOT TARGET onnxruntime::onnxruntime)
     find_package(onnxruntime REQUIRED)
@@ -62,9 +65,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_onnxruntime_conversions test_fixture)
   endif()
 
-  # The CUDA test drives cudaMemcpyAsync directly, so it needs the toolkit even
-  # though the adapter itself does not.
-  find_package(CUDAToolkit QUIET)
+  # The pub/sub nodes exchange device storage, so they and the CUDA test only
+  # build where the toolkit is present.
   if(CUDAToolkit_FOUND)
     ament_add_gtest(test_onnxruntime_conversions_cuda
       test/test_onnxruntime_conversions_cuda.cpp)
@@ -72,57 +74,59 @@ if(BUILD_TESTING)
       target_link_libraries(test_onnxruntime_conversions_cuda
         test_fixture CUDA::cudart)
     endif()
+
+    add_library(ort_tensor_publisher_component SHARED
+      test/src/ort_tensor_publisher_node.cpp
+    )
+    set_target_properties(ort_tensor_publisher_component PROPERTIES
+      INSTALL_RPATH_USE_LINK_PATH TRUE)
+    target_link_libraries(ort_tensor_publisher_component
+      test_fixture
+      CUDA::cudart
+      rclcpp::rclcpp
+      rclcpp_components::component
+      rosidl_runtime_cpp::rosidl_runtime_cpp
+      ${std_msgs_TARGETS}
+      ${tensor_msgs_TARGETS}
+    )
+    rclcpp_components_register_node(ort_tensor_publisher_component
+      PLUGIN "OrtTensorPublisher"
+      EXECUTABLE ort_tensor_publisher_node
+    )
+
+    add_library(ort_tensor_subscriber_component SHARED
+      test/src/ort_tensor_subscriber_node.cpp
+    )
+    set_target_properties(ort_tensor_subscriber_component PROPERTIES
+      INSTALL_RPATH_USE_LINK_PATH TRUE)
+    target_link_libraries(ort_tensor_subscriber_component
+      test_fixture
+      CUDA::cudart
+      rclcpp::rclcpp
+      rclcpp_components::component
+      rosidl_runtime_cpp::rosidl_runtime_cpp
+      ${std_msgs_TARGETS}
+      ${tensor_msgs_TARGETS}
+    )
+    rclcpp_components_register_node(ort_tensor_subscriber_component
+      PLUGIN "OrtTensorSubscriber"
+      EXECUTABLE ort_tensor_subscriber_node
+    )
+
+    install(
+      TARGETS
+        ort_tensor_publisher_component
+        ort_tensor_subscriber_component
+      ARCHIVE DESTINATION lib
+      LIBRARY DESTINATION lib
+      RUNTIME DESTINATION bin
+    )
+
+    add_launch_test(test/test_ort_tensor_inter_pubsub_fastrtps_launch.py
+      TARGET test_ort_tensor_inter_pubsub_fastrtps_launch
+      TIMEOUT 30
+    )
   endif()
-
-  add_library(ort_tensor_publisher_component SHARED
-    test/src/ort_tensor_publisher_node.cpp
-  )
-  set_target_properties(ort_tensor_publisher_component PROPERTIES
-    INSTALL_RPATH_USE_LINK_PATH TRUE)
-  target_link_libraries(ort_tensor_publisher_component
-    test_fixture
-    rclcpp::rclcpp
-    rclcpp_components::component
-    rosidl_runtime_cpp::rosidl_runtime_cpp
-    ${std_msgs_TARGETS}
-    ${tensor_msgs_TARGETS}
-  )
-  rclcpp_components_register_node(ort_tensor_publisher_component
-    PLUGIN "OrtTensorPublisher"
-    EXECUTABLE ort_tensor_publisher_node
-  )
-
-  add_library(ort_tensor_subscriber_component SHARED
-    test/src/ort_tensor_subscriber_node.cpp
-  )
-  set_target_properties(ort_tensor_subscriber_component PROPERTIES
-    INSTALL_RPATH_USE_LINK_PATH TRUE)
-  target_link_libraries(ort_tensor_subscriber_component
-    test_fixture
-    rclcpp::rclcpp
-    rclcpp_components::component
-    rosidl_runtime_cpp::rosidl_runtime_cpp
-    ${std_msgs_TARGETS}
-    ${tensor_msgs_TARGETS}
-  )
-  rclcpp_components_register_node(ort_tensor_subscriber_component
-    PLUGIN "OrtTensorSubscriber"
-    EXECUTABLE ort_tensor_subscriber_node
-  )
-
-  install(
-    TARGETS
-      ort_tensor_publisher_component
-      ort_tensor_subscriber_component
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
-  )
-
-  add_launch_test(test/test_ort_tensor_inter_pubsub_fastrtps_launch.py
-    TARGET test_ort_tensor_inter_pubsub_fastrtps_launch
-    TIMEOUT 30
-  )
 endif()
 
 ament_package(

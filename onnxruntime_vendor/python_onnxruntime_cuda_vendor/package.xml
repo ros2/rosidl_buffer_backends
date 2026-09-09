@@ -16,7 +16,6 @@
   <build_depend>python3-pip</build_depend>
 
   <conflict>python3-onnxruntime</conflict>
-  <conflict>onnxruntime_conversions_py_cpu</conflict>
 
   <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
   <exec_depend version_gte="9" version_lt="10">nvidia-cudnn</exec_depend>

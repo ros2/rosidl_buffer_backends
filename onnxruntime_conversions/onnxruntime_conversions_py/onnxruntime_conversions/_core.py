@@ -207,48 +207,34 @@ def to_tensor_msg(
     stream: Optional[int] = None,
     backend: Optional[str] = None,
 ) -> ExperimentalTensor:
-    """Copy an OrtValue into message storage.
+    """Copy an OrtValue into message storage and stamp its metadata.
 
-    ONNX Runtime exposes no device-to-device copy into external memory from
-    Python, so this stages through host memory. The C++ adapter does not.
+    Called with one argument, allocates a message on the backend that owns the
+    value. Called with two, copies into the message given first. The copy runs
+    through the storage plugin, so device values never stage through the host.
     """
     if value is None:
         value = destination_or_value
         destination = None
     else:
         destination = destination_or_value
-        if not isinstance(destination, ExperimentalTensor):
-            raise TypeError('destination must be an ExperimentalTensor')
 
     if not isinstance(value, ort.OrtValue) or not value.is_tensor():
         raise TypeError('value must be an ONNX Runtime tensor OrtValue')
-    host = value.numpy()
 
+    capsule = value.__dlpack__()
     if destination is None:
-        destination = allocate_tensor_msg(
-            host.shape, host.dtype, backend or _backend_of(value))
-    elif host.nbytes > len(destination.data):
-        raise ValueError('OrtValue tensor exceeds the destination buffer')
+        copied = dlpack_conversions.to_tensor_msg(
+            capsule, stream=stream, backend=backend)
     else:
-        code, bits, _ = _ELEMENT_TYPES[_element_type(host.dtype)]
-        destination.dtype_code, destination.dtype_bits = code, bits
-        destination.dtype_lanes = 1
-        destination.shape = list(host.shape)
-        destination.strides = dlpack_conversions.contiguous_strides(
-            list(host.shape))
-        destination.byte_offset = 0
+        copied = dlpack_conversions.to_tensor_msg(
+            destination, capsule, stream)
 
-    view = from_output_tensor_msg(destination, stream)
-    if view is not None:
-        view.value.update_inplace(numpy.ascontiguousarray(host))
-        view.close()
-    return destination
-
-
-def _backend_of(value: ort.OrtValue) -> Optional[str]:
-    if value.device_name().lower() == 'cpu':
-        return 'cpu'
-    return None
+    # ONNX Runtime exports bool storage as uint8, so restore the element type
+    # the value actually carries.
+    if value.element_type() == _BOOL:
+        copied.dtype_code, copied.dtype_bits, _ = _ELEMENT_TYPES[_BOOL]
+    return copied
 
 
 def session_providers(

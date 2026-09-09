@@ -314,6 +314,13 @@ inline OrtTensorView make_view(dlpack_conversions::ManagedTensor managed)
   }
   const DLTensor & tensor = managed.get()->dl_tensor;
   require_contiguous(tensor);
+  // Ort::Value::CreateTensor takes a base pointer with no offset of its own,
+  // so the core is expected to have folded byte_offset into the pointer.
+  if (tensor.byte_offset != 0) {
+    throw std::invalid_argument(
+            "onnxruntime_conversions: DLPack byte_offset must be folded into "
+            "the data pointer");
+  }
   const auto dtype = onnx_dtype(tensor.dtype);
   auto memory_info = memory_info_for(tensor.device);
   auto value = Ort::Value::CreateTensor(
