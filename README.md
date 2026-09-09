@@ -10,7 +10,8 @@ conversion libraries that build on the same buffer infrastructure.
   host endpoint manager, ReadHandle/WriteHandle with CUDA event sync).
 - **cuda_buffer_py** -- Python CUDA buffer allocation and scoped read/write
   handles for rclpy publishers and subscribers.
-- **cuda_buffer_backend** -- BufferBackend plugin for CUDA IPC transport.
+- **[cuda_buffer_backend](cuda_buffer_backend/README.md)** -- BufferBackend
+  plugin for CUDA IPC transport.
 - **cuda_buffer_backend_msgs** -- ROS 2 message definitions for CUDA buffer
   descriptors.
 - **libtorch_vendor** -- CUDA LibTorch 2.9.1 vendor for C++ conversions,
@@ -20,34 +21,19 @@ conversion libraries that build on the same buffer infrastructure.
   `cu130` wheel from the detected CUDA Toolkit; JetPack provides the
   required installation on Tegra.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **onnxruntime_core_vendor** -- CUDA-neutral ONNX Runtime headers, core
-  runtime, and shared provider support extracted from an official GPU archive.
-- **onnxruntime_cuda_vendor** -- Optional CUDA execution-provider
-  library installed beside the canonical core runtime.
-- **python_onnxruntime_vendor** -- Unmodified CPU-only Python ONNX Runtime
-  wheel packaged for ROS.
+- **onnxruntime_cuda_vendor** -- ONNX Runtime GPU 1.23.2 C++ distribution for
+  CUDA 12 and cuDNN 9.
 - **python_onnxruntime_cuda_vendor** -- Unmodified CUDA Python ONNX Runtime
   wheel packaged for ROS.
-- **[onnxruntime_conversions](onnxruntime_conversions/onnxruntime_conversions/README.md)**
-  -- Compiled C++ conversion library and adapter registry, including its
-  required runtime-discovered CPU plugin.
-- **onnxruntime_conversions_cuda** -- Optional runtime-discovered CUDA storage
-  and execution-provider adapter.
-- **onnxruntime_conversions_py_core** -- Vendor-neutral Python ROS package under the shared
-  `onnxruntime_conversions/` source container, providing CPU and CUDA
-  conversions using NumPy views or ONNX Runtime's public DLPack protocol.
-- **onnxruntime_conversions_py** -- User-facing CPU Python conversion runtime
-  metapackage.
-- **onnxruntime_conversions_py_cuda** -- CUDA Python conversion runtime
-  metapackage.
-- **torch_conversions** -- Header-only helper library that converts between
-  `tensor_msgs/ExperimentalTensor` and `at::Tensor` and exposes DLPack import /
-  export. Replaces the older `torch_buffer_backend` plugin approach with a
-  plain message + bridge library that rides on top of whichever
-  `rosidl::Buffer` backend is registered (CUDA when available, CPU
-  otherwise).
-- **torch_conversions_py** -- Python CPU conversions and optional, lazily
-  loaded CUDA buffer support for `tensor_msgs/ExperimentalTensor`.
+- **[onnxruntime_conversions](onnxruntime_conversions/README.md)** -- C++
+  conversions. Install `onnxruntime_conversions_cpu` or
+  `onnxruntime_conversions_cuda`.
+- **onnxruntime_conversions_py** -- Python conversions. Install
+  `onnxruntime_conversions_py_cpu` or `onnxruntime_conversions_py_cuda`.
+- **[torch_conversions](torch_conversions/README.md)** -- C++ conversions.
+  Install `torch_conversions_cpu` or `torch_conversions_cuda`.
+- **torch_conversions_py** -- Python conversions. Install
+  `torch_conversions_py_cpu` or `torch_conversions_py_cuda`.
 
 ## Deb build status
 
@@ -77,7 +63,15 @@ conversion libraries that build on the same buffer infrastructure.
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- CUDA Toolkit on the host for CUDA packages.
+- CUDA Toolkit 12.6-12.9 or 13.0 for CUDA buffer and Torch conversion
+  packages. ONNX Runtime CUDA conversions support CUDA 12 with cuDNN 9 only.
+  CPU-only conversions do not require CUDA.
+
+Torch conversions use Ubuntu Resolute's `libtorch-dev` and `python3-torch` on
+CPU, and `libtorch_vendor` and `python3_torch_cuda_vendor` on CUDA. ONNX
+Runtime conversions use Ubuntu's `libonnxruntime-dev` 1.23.2 and
+`python3-onnxruntime` on CPU, and a separate, conflicting ONNX Runtime GPU
+1.23.2 vendor plus the matching wheel on CUDA.
 
 ## API overview
 
@@ -126,12 +120,41 @@ auto guard = torch_conversions::set_stream();
 at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
 ```
 
+### ONNX Runtime tensor API (`onnxruntime_conversions`)
+
+```cpp
+#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
+#include "tensor_msgs/msg/experimental_tensor.hpp"
+
+Ort::MemoryInfo memory_info("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault);
+
+// Publisher: allocate a Tensor message and write through an Ort::Value view.
+std::shared_ptr<onnxruntime_conversions::TensorMsg> msg(
+  onnxruntime_conversions::allocate_tensor_msg(
+    {1080, 1920, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8, "cuda"));
+{
+  auto t_out = onnxruntime_conversions::from_output_tensor_msg(
+    msg, memory_info, stream);
+  my_pipeline(t_out.value());
+}  // t_out destructor releases the write view
+publisher->publish(std::move(*msg));
+
+// Subscriber: wrap the received message as Ort::Value.
+auto t_in = onnxruntime_conversions::from_input_tensor_msg(
+  received_msg, memory_info, stream);
+use_tensor(t_in.value());
+
+// CUDA session: bind the application stream before creating the session.
+onnxruntime_conversions::ConversionConfiguration config;
+config.execution_stream = stream;
+onnxruntime_conversions::configure_session_options(
+  options, "cuda", config);
+```
+
 The message schema carries DLPack-compatible dtype, shape, stride, and offset
 metadata, while device placement is derived from the underlying
-`rosidl::Buffer` backend. ONNX Runtime's public C++ API has no direct
-`from_dlpack` operation. The ONNX Runtime conversion packages validate the
-message metadata and wrap its CPU or CUDA pointer without copying by calling
-`Ort::Value::CreateTensor`.
+`rosidl::Buffer` backend. ONNX Runtime has no public `from_dlpack` C++ API;
+the conversion wraps the message pointer with `Ort::Value::CreateTensor`.
 
 ## License
 
