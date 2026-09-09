@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef TORCH_CONVERSIONS__CONVERSION_PLUGIN_HPP_
-#define TORCH_CONVERSIONS__CONVERSION_PLUGIN_HPP_
+#ifndef DLPACK_CONVERSIONS__STORAGE_PLUGIN_HPP_
+#define DLPACK_CONVERSIONS__STORAGE_PLUGIN_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -23,16 +23,10 @@
 
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
-namespace torch_conversions
+namespace dlpack_conversions
 {
 
-// DLPack device type codes, as reported by StorageView::dl_device_type.
-namespace dl_device
-{
-constexpr int32_t cpu = 1;
-constexpr int32_t cuda = 2;
-}  // namespace dl_device
-
+/// Storage handed to DLPack, with a lease that keeps the buffer readable.
 struct StorageView
 {
   void * data{};
@@ -41,26 +35,42 @@ struct StorageView
   std::shared_ptr<void> lease;
 };
 
-class ConversionPlugin
+/// Allocates and exposes rosidl buffer storage for one or more accelerators.
+///
+/// Implementations depend on their accelerator runtime and on a rosidl buffer
+/// backend, never on a tensor framework.
+class StoragePlugin
 {
 public:
   using TensorMsg = tensor_msgs::msg::ExperimentalTensor;
 
-  virtual ~ConversionPlugin() = default;
+  virtual ~StoragePlugin() = default;
 
-  // Buffer backend names this plugin allocates, for diagnostics.
+  /// Buffer backend names this plugin allocates.
   virtual std::vector<std::string> backends() const = 0;
-  // Backend storing tensors for the given DLPack device type, or an empty
-  // string when this plugin does not serve that device.
+
+  /// Backend storing tensors for the given DLPack device type, or an empty
+  /// string when this plugin does not serve that device.
   virtual std::string backend_for_device(int32_t dl_device_type) const = 0;
-  virtual std::string default_backend() const = 0;
+
+  /// Whether the backend can be used on this machine right now.
   virtual bool backend_available(const std::string & backend) const = 0;
+
+  /// Preference when no backend is requested. Highest wins; host memory is 0.
+  virtual int priority() const = 0;
+
   virtual void allocate(
     TensorMsg & msg,
     size_t byte_count,
     const std::string & backend) = 0;
+
   virtual StorageView acquire_input(const TensorMsg & msg, uintptr_t stream) = 0;
+
   virtual StorageView acquire_output(TensorMsg & msg, uintptr_t stream) = 0;
+
+  /// Copies host or accelerator memory into the message storage. Accelerator
+  /// plugins are also asked to copy into host-backed messages, because only
+  /// they can read their own device memory.
   virtual void copy_to(
     TensorMsg & msg,
     const void * source,
@@ -69,6 +79,6 @@ public:
     uintptr_t stream) = 0;
 };
 
-}  // namespace torch_conversions
+}  // namespace dlpack_conversions
 
-#endif  // TORCH_CONVERSIONS__CONVERSION_PLUGIN_HPP_
+#endif  // DLPACK_CONVERSIONS__STORAGE_PLUGIN_HPP_

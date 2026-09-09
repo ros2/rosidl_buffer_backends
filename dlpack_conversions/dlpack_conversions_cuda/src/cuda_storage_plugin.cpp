@@ -14,7 +14,6 @@
 
 #include <cuda_runtime_api.h>
 
-#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -24,35 +23,33 @@
 
 #include "cuda_buffer/cuda_buffer_api.hpp"
 #include "cuda_buffer/cuda_buffer_impl.hpp"
-#include "torch_conversions/conversion_plugin.hpp"
+#include "dlpack_conversions/dlpack.h"
+#include "dlpack_conversions/storage_plugin.hpp"
 
-namespace torch_conversions_cuda
+namespace dlpack_conversions_cuda
 {
 
-class CudaConversionPlugin final : public torch_conversions::ConversionPlugin
+class CudaStoragePlugin final : public dlpack_conversions::StoragePlugin
 {
 public:
   std::vector<std::string> backends() const override
   {
-    return {"cpu", "cuda"};
+    return {"cuda"};
   }
 
   std::string backend_for_device(int32_t dl_device_type) const override
   {
-    if (dl_device_type == torch_conversions::dl_device::cpu) {
-      return "cpu";
-    }
-    return dl_device_type == torch_conversions::dl_device::cuda ? "cuda" : "";
-  }
-
-  std::string default_backend() const override
-  {
-    return cuda_available() ? "cuda" : "cpu";
+    return dl_device_type == kDLCUDA ? "cuda" : "";
   }
 
   bool backend_available(const std::string & backend) const override
   {
-    return backend == "cpu" || (backend == "cuda" && cuda_available());
+    return backend == "cuda" && cuda_available();
+  }
+
+  int priority() const override
+  {
+    return 100;
   }
 
   void allocate(
@@ -60,13 +57,9 @@ public:
     size_t byte_count,
     const std::string & backend) override
   {
-    if (backend == "cpu") {
-      msg.data.resize(byte_count);
-      return;
-    }
     if (backend != "cuda") {
       throw std::runtime_error(
-              "torch_conversions_cuda does not support backend '" + backend + "'");
+              "dlpack_conversions_cuda does not support backend '" + backend + "'");
     }
     require_cuda();
     auto implementation =
@@ -74,41 +67,30 @@ public:
     msg.data = rosidl::Buffer<uint8_t>(std::move(implementation));
   }
 
-  torch_conversions::StorageView acquire_input(
+  dlpack_conversions::StorageView acquire_input(
     const TensorMsg & msg, uintptr_t stream_value) override
   {
-    if (msg.data.get_backend_type() == "cpu") {
-      return {
-        const_cast<uint8_t *>(msg.data.data()),
-        torch_conversions::dl_device::cpu,
-        0,
-        {},
-      };
-    }
     const auto * implementation = cuda_implementation(msg);
     auto lease = std::make_shared<cuda_buffer_backend::ReadHandle>(
       implementation->get_cuda_buffer().get_read_handle(stream(stream_value)));
     return {
       const_cast<uint8_t *>(lease->get_ptr()),
-      torch_conversions::dl_device::cuda,
+      kDLCUDA,
       implementation->get_device_id(),
       lease,
     };
   }
 
-  torch_conversions::StorageView acquire_output(
+  dlpack_conversions::StorageView acquire_output(
     TensorMsg & msg, uintptr_t stream_value) override
   {
-    if (msg.data.get_backend_type() == "cpu") {
-      return {msg.data.data(), torch_conversions::dl_device::cpu, 0, {}};
-    }
     auto * implementation = cuda_implementation(msg);
     implementation->set_stream(stream(stream_value));
     auto lease = std::make_shared<cuda_buffer_backend::WriteHandle>(
       implementation->get_cuda_buffer().get_write_handle(stream(stream_value)));
     return {
       lease->get_ptr(),
-      torch_conversions::dl_device::cuda,
+      kDLCUDA,
       implementation->get_device_id(),
       lease,
     };
@@ -123,10 +105,6 @@ public:
   {
     const auto cuda_stream = stream(stream_value);
     if (msg.data.get_backend_type() == "cpu") {
-      if (source_backend == "cpu") {
-        std::memcpy(msg.data.data(), source, byte_count);
-        return;
-      }
       check_cuda(cudaMemcpyAsync(
           msg.data.data(), source, byte_count,
           cudaMemcpyDeviceToHost, cuda_stream));
@@ -155,7 +133,7 @@ private:
   {
     if (!cuda_available()) {
       throw std::runtime_error(
-              "torch_conversions_cuda: CUDA was requested but is unavailable");
+              "dlpack_conversions_cuda: CUDA was requested but is unavailable");
     }
   }
 
@@ -168,7 +146,7 @@ private:
   {
     if (result != cudaSuccess) {
       throw std::runtime_error(
-              std::string("torch_conversions_cuda: ") +
+              std::string("dlpack_conversions_cuda: ") +
               cudaGetErrorString(result));
     }
   }
@@ -178,7 +156,7 @@ private:
   {
     if (msg.data.get_backend_type() != "cuda") {
       throw std::runtime_error(
-              "torch_conversions_cuda cannot handle buffer backend '" +
+              "dlpack_conversions_cuda cannot handle buffer backend '" +
               msg.data.get_backend_type() + "'");
     }
     const auto * implementation =
@@ -186,7 +164,7 @@ private:
       msg.data.get_impl());
     if (implementation == nullptr) {
       throw std::runtime_error(
-              "torch_conversions_cuda: invalid CUDA buffer implementation");
+              "dlpack_conversions_cuda: invalid CUDA buffer implementation");
     }
     return implementation;
   }
@@ -199,8 +177,8 @@ private:
   }
 };
 
-}  // namespace torch_conversions_cuda
+}  // namespace dlpack_conversions_cuda
 
 PLUGINLIB_EXPORT_CLASS(
-  torch_conversions_cuda::CudaConversionPlugin,
-  torch_conversions::ConversionPlugin)
+  dlpack_conversions_cuda::CudaStoragePlugin,
+  dlpack_conversions::StoragePlugin)

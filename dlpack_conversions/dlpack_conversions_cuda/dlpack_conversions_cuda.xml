@@ -1,0 +1,8 @@
+<library path="dlpack_conversions_cuda">
+  <class
+    name="cuda"
+    type="dlpack_conversions_cuda::CudaStoragePlugin"
+    base_class_type="dlpack_conversions::StoragePlugin">
+    <description>CUDA device memory storage for DLPack tensor messages.</description>
+  </class>
+</library>

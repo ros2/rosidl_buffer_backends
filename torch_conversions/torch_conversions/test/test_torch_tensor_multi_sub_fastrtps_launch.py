@@ -33,7 +33,7 @@ from std_msgs.msg import Bool, UInt32
 def generate_test_description():
     """One publisher, two subscribers (1-to-N fan-out) over FastRTPS."""
     publisher_node = Node(
-        package='torch_conversions_cpu',
+        package='torch_conversions',
         executable='torch_tensor_publisher_node',
         name='torch_tensor_publisher',
         output='screen',
@@ -44,7 +44,7 @@ def generate_test_description():
     )
 
     subscriber1_node = Node(
-        package='torch_conversions_cpu',
+        package='torch_conversions',
         executable='torch_tensor_subscriber_node',
         name='torch_tensor_subscriber_1',
         output='screen',
@@ -55,7 +55,7 @@ def generate_test_description():
     )
 
     subscriber2_node = Node(
-        package='torch_conversions_cpu',
+        package='torch_conversions',
         executable='torch_tensor_subscriber_node',
         name='torch_tensor_subscriber_2',
         output='screen',

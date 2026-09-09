@@ -13,19 +13,19 @@
 // limitations under the License.
 
 #include <cstring>
-#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <pluginlib/class_list_macros.hpp>
 
-#include "torch_conversions/conversion_plugin.hpp"
+#include "dlpack_conversions/dlpack.h"
+#include "dlpack_conversions/storage_plugin.hpp"
 
-namespace torch_conversions_cpu
+namespace dlpack_conversions_cpu
 {
 
-class CpuConversionPlugin final : public torch_conversions::ConversionPlugin
+class CpuStoragePlugin final : public dlpack_conversions::StoragePlugin
 {
 public:
   std::vector<std::string> backends() const override
@@ -35,17 +35,17 @@ public:
 
   std::string backend_for_device(int32_t dl_device_type) const override
   {
-    return dl_device_type == torch_conversions::dl_device::cpu ? "cpu" : "";
-  }
-
-  std::string default_backend() const override
-  {
-    return "cpu";
+    return dl_device_type == kDLCPU ? "cpu" : "";
   }
 
   bool backend_available(const std::string & backend) const override
   {
     return backend == "cpu";
+  }
+
+  int priority() const override
+  {
+    return 0;
   }
 
   void allocate(
@@ -57,23 +57,18 @@ public:
     msg.data.resize(byte_count);
   }
 
-  torch_conversions::StorageView acquire_input(
+  dlpack_conversions::StorageView acquire_input(
     const TensorMsg & msg, uintptr_t) override
   {
-    require_cpu_backend(msg);
-    return {
-      const_cast<uint8_t *>(msg.data.data()),
-      torch_conversions::dl_device::cpu,
-      0,
-      {},
-    };
+    require_cpu_storage(msg);
+    return {const_cast<uint8_t *>(msg.data.data()), kDLCPU, 0, {}};
   }
 
-  torch_conversions::StorageView acquire_output(
+  dlpack_conversions::StorageView acquire_output(
     TensorMsg & msg, uintptr_t) override
   {
-    require_cpu_backend(msg);
-    return {msg.data.data(), torch_conversions::dl_device::cpu, 0, {}};
+    require_cpu_storage(msg);
+    return {msg.data.data(), kDLCPU, 0, {}};
   }
 
   void copy_to(
@@ -84,7 +79,7 @@ public:
     uintptr_t) override
   {
     require_cpu(source_backend);
-    require_cpu_backend(msg);
+    require_cpu_storage(msg);
     std::memcpy(msg.data.data(), source, byte_count);
   }
 
@@ -93,22 +88,22 @@ private:
   {
     if (backend != "cpu") {
       throw std::runtime_error(
-              "torch_conversions_cpu does not support backend '" + backend + "'");
+              "dlpack_conversions_cpu does not support backend '" + backend + "'");
     }
   }
 
-  static void require_cpu_backend(const TensorMsg & msg)
+  static void require_cpu_storage(const TensorMsg & msg)
   {
     if (msg.data.get_backend_type() != "cpu") {
       throw std::runtime_error(
-              "torch_conversions_cpu cannot handle buffer backend '" +
+              "dlpack_conversions_cpu cannot handle buffer backend '" +
               msg.data.get_backend_type() + "'");
     }
   }
 };
 
-}  // namespace torch_conversions_cpu
+}  // namespace dlpack_conversions_cpu
 
 PLUGINLIB_EXPORT_CLASS(
-  torch_conversions_cpu::CpuConversionPlugin,
-  torch_conversions::ConversionPlugin)
+  dlpack_conversions_cpu::CpuStoragePlugin,
+  dlpack_conversions::StoragePlugin)

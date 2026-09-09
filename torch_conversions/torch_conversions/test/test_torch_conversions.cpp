@@ -16,12 +16,13 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
 #include "torch_conversions/torch_conversions.hpp"
 
-TEST(TorchConversionsCpu, AllocatePopulatesMetadata)
+TEST(TorchConversions, AllocatePopulatesMetadata)
 {
   auto msg = torch_conversions::allocate_tensor_msg(
     {2, 3, 4}, at::kFloat, c10::kCPU);
@@ -36,7 +37,7 @@ TEST(TorchConversionsCpu, AllocatePopulatesMetadata)
   EXPECT_EQ(msg->data.get_backend_type(), "cpu");
 }
 
-TEST(TorchConversionsCpu, RoundTrip)
+TEST(TorchConversions, RoundTrip)
 {
   auto source = torch::arange(12, torch::kFloat).reshape({3, 4});
   auto msg = torch_conversions::to_tensor_msg(source);
@@ -46,7 +47,7 @@ TEST(TorchConversionsCpu, RoundTrip)
       torch_conversions::from_input_tensor_msg(*msg)));
 }
 
-TEST(TorchConversionsCpu, OutputViewAliasesMessageStorage)
+TEST(TorchConversions, OutputViewAliasesMessageStorage)
 {
   auto msg = torch_conversions::allocate_tensor_msg(
     {4}, at::kInt, c10::kCPU);
@@ -60,7 +61,7 @@ TEST(TorchConversionsCpu, OutputViewAliasesMessageStorage)
   EXPECT_TRUE(torch::equal(input, output));
 }
 
-TEST(TorchConversionsCpu, ByteOffsetSelectsStorageSubview)
+TEST(TorchConversions, ByteOffsetSelectsStorageSubview)
 {
   auto msg = torch_conversions::allocate_tensor_msg(
     {8}, at::kInt, c10::kCPU);
@@ -74,7 +75,7 @@ TEST(TorchConversionsCpu, ByteOffsetSelectsStorageSubview)
   EXPECT_TRUE(torch::equal(view, torch::tensor({2, 3, 4}, at::kInt)));
 }
 
-TEST(TorchConversionsCpu, ToExistingMessageUpdatesMetadata)
+TEST(TorchConversions, ToExistingMessageUpdatesMetadata)
 {
   auto msg = torch_conversions::allocate_tensor_msg(
     {16}, at::kFloat, c10::kCPU);
@@ -87,7 +88,7 @@ TEST(TorchConversionsCpu, ToExistingMessageUpdatesMetadata)
       source, torch_conversions::from_input_tensor_msg(*msg)));
 }
 
-TEST(TorchConversionsCpu, RejectsOversizedTensor)
+TEST(TorchConversions, RejectsOversizedTensor)
 {
   auto msg = torch_conversions::allocate_tensor_msg(
     {4}, at::kByte, c10::kCPU);
@@ -96,17 +97,28 @@ TEST(TorchConversionsCpu, RejectsOversizedTensor)
     std::runtime_error);
 }
 
-TEST(TorchConversionsCpu, EmptyDataReturnsUndefinedTensor)
+TEST(TorchConversions, EmptyDataReturnsUndefinedTensor)
 {
   torch_conversions::TensorMsg msg;
   EXPECT_FALSE(torch_conversions::from_input_tensor_msg(msg).defined());
   EXPECT_FALSE(torch_conversions::from_output_tensor_msg(msg).defined());
 }
 
-TEST(TorchConversionsCpu, RejectsCudaAllocation)
+TEST(TorchConversions, RejectsDeviceWithoutStoragePlugin)
 {
+  if (dlpack_conversions::backend_available("cuda")) {
+    GTEST_SKIP() << "the CUDA storage plugin is installed";
+  }
   EXPECT_THROW(
     torch_conversions::allocate_tensor_msg(
       {1}, at::kFloat, c10::kCUDA),
     std::runtime_error);
+}
+
+TEST(TorchConversions, ReportsInstalledBackends)
+{
+  const auto backends = dlpack_conversions::available_backends();
+  EXPECT_NE(
+    std::find(backends.begin(), backends.end(), "cpu"), backends.end());
+  EXPECT_FALSE(dlpack_conversions::default_backend().empty());
 }

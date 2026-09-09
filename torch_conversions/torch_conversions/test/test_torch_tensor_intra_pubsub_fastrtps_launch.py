@@ -40,13 +40,13 @@ def generate_test_description():
         executable='component_container',
         composable_node_descriptions=[
             ComposableNode(
-                package='torch_conversions_cpu',
+                package='torch_conversions',
                 plugin='TorchTensorPublisher',
                 name='torch_tensor_publisher',
                 extra_arguments=[{'use_intra_process_comms': True}],
             ),
             ComposableNode(
-                package='torch_conversions_cpu',
+                package='torch_conversions',
                 plugin='TorchTensorSubscriber',
                 name='torch_tensor_subscriber',
                 extra_arguments=[{'use_intra_process_comms': True}],

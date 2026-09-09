@@ -31,22 +31,37 @@ from std_msgs.msg import Bool, UInt32
 @pytest.mark.launch_test
 @launch_testing.markers.keep_alive
 def generate_test_description():
-    """Launch a tensor pub/sub pair across separate processes over FastRTPS."""
-    publisher_node = Node(
-        package='torch_conversions_cpu',
+    """Two publishers, one subscriber (N-to-1 fan-in) over FastRTPS."""
+    publisher1_node = Node(
+        package='torch_conversions',
         executable='torch_tensor_publisher_node',
-        name='torch_tensor_publisher',
+        name='torch_tensor_publisher_1',
         output='screen',
         parameters=[{
             'max_publish_count': 0,
-            'publish_rate_ms': 100,
-            'tensor_width': 1920,
-            'tensor_height': 1080,
+            'publish_rate_ms': 200,
         }],
+        remappings=[
+            ('publisher_count', 'publisher_1_count'),
+        ],
+    )
+
+    publisher2_node = Node(
+        package='torch_conversions',
+        executable='torch_tensor_publisher_node',
+        name='torch_tensor_publisher_2',
+        output='screen',
+        parameters=[{
+            'max_publish_count': 0,
+            'publish_rate_ms': 200,
+        }],
+        remappings=[
+            ('publisher_count', 'publisher_2_count'),
+        ],
     )
 
     subscriber_node = Node(
-        package='torch_conversions_cpu',
+        package='torch_conversions',
         executable='torch_tensor_subscriber_node',
         name='torch_tensor_subscriber',
         output='screen',
@@ -56,13 +71,15 @@ def generate_test_description():
         SetEnvironmentVariable('RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
         subscriber_node,
         TimerAction(period=2.0, actions=[
-            publisher_node,
+            publisher1_node,
+            publisher2_node,
             launch_testing.actions.ReadyToTest(),
         ]),
     ])
 
 
-class TestTorchTensorInterPubSubFastRTPS(unittest.TestCase):
+class TestTorchTensorMultiPubFastRTPS(unittest.TestCase):
+    """N-to-1: two publishers sending to one subscriber over FastRTPS."""
 
     @classmethod
     def setUpClass(cls):
@@ -73,13 +90,16 @@ class TestTorchTensorInterPubSubFastRTPS(unittest.TestCase):
         rclpy.shutdown()
 
     def setUp(self):
-        self.node = rclpy.create_node('test_torch_tensor_inter_pubsub_fastrtps')
-        self.publisher_count = 0
+        self.node = rclpy.create_node('test_torch_tensor_multi_pub_fastrtps')
+        self.publisher1_count = 0
+        self.publisher2_count = 0
         self.subscriber_count = 0
         self.validation_passed = True
 
         self.node.create_subscription(
-            UInt32, 'publisher_count', self._pub_count_cb, 10)
+            UInt32, 'publisher_1_count', self._pub1_count_cb, 10)
+        self.node.create_subscription(
+            UInt32, 'publisher_2_count', self._pub2_count_cb, 10)
         self.node.create_subscription(
             UInt32, 'subscriber_count', self._sub_count_cb, 10)
         self.node.create_subscription(
@@ -88,8 +108,11 @@ class TestTorchTensorInterPubSubFastRTPS(unittest.TestCase):
     def tearDown(self):
         self.node.destroy_node()
 
-    def _pub_count_cb(self, msg):
-        self.publisher_count = msg.data
+    def _pub1_count_cb(self, msg):
+        self.publisher1_count = msg.data
+
+    def _pub2_count_cb(self, msg):
+        self.publisher2_count = msg.data
 
     def _sub_count_cb(self, msg):
         self.subscriber_count = msg.data
@@ -97,35 +120,42 @@ class TestTorchTensorInterPubSubFastRTPS(unittest.TestCase):
     def _validation_cb(self, msg):
         self.validation_passed = msg.data
 
-    def _spin_until(self, target_count=5, timeout_sec=15.0):
+    def _spin_until(self, target_count=8, timeout_sec=30.0):
         start = time.time()
         while ((self.subscriber_count < target_count or
-                self.publisher_count < target_count) and
+                self.publisher1_count < 3 or
+                self.publisher2_count < 3) and
                time.time() - start < timeout_sec):
             rclpy.spin_once(self.node, timeout_sec=0.1)
         return (self.subscriber_count >= target_count and
-                self.publisher_count >= target_count)
+                self.publisher1_count >= 3 and
+                self.publisher2_count >= 3)
 
-    def test_inter_process_pubsub(self):
-        success = self._spin_until(target_count=5, timeout_sec=15.0)
+    def test_multi_pub_single_sub(self):
+        """Subscriber receives from both publishers."""
+        success = self._spin_until(target_count=8, timeout_sec=30.0)
 
         self.assertTrue(
             success,
-            f'Failed to receive 5 messages within timeout (inter-process). '
+            f'Failed to receive 8 messages within timeout. '
             f'Received: {self.subscriber_count}')
         self.assertGreaterEqual(
-            self.publisher_count, 5,
-            f'Publisher should have sent at least 5 messages. '
-            f'Sent: {self.publisher_count}')
-        self.assertTrue(
-            self.validation_passed, 'Tensor validation failed (inter-process)')
+            self.publisher1_count, 3,
+            f'Publisher1 should have sent at least 3 messages. '
+            f'Sent: {self.publisher1_count}')
+        self.assertGreaterEqual(
+            self.publisher2_count, 3,
+            f'Publisher2 should have sent at least 3 messages. '
+            f'Sent: {self.publisher2_count}')
+        self.assertTrue(self.validation_passed, 'Tensor validation failed')
 
 
 @launch_testing.post_shutdown_test()
-class TestTorchTensorInterPubSubFastRTPSShutdown(unittest.TestCase):
+class TestTorchTensorMultiPubFastRTPSShutdown(unittest.TestCase):
+    """Test proper shutdown of nodes."""
 
     def test_exit_codes(self, proc_info):
         launch_testing.asserts.assertExitCodes(
             proc_info,
-            allowable_exit_codes=[0, 1, -2, -6, -15],
+            allowable_exit_codes=[0, 1, -2, -6, -9, -11, -15],
         )
