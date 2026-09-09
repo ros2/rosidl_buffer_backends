@@ -21,6 +21,8 @@ import textwrap
 import time
 import uuid
 
+from identity_model import identity_model
+
 import onnxruntime as ort
 
 from onnxruntime_conversions import available_backends
@@ -98,9 +100,6 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
         import time
 
         import numpy as np
-        import onnx
-        from onnx import helper
-        from onnx import TensorProto
         import onnxruntime as ort
         import rclpy
         from rclpy.node import Node
@@ -111,21 +110,8 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
         from onnxruntime_conversions import session_providers
         from tensor_msgs.msg import ExperimentalTensor
 
-        graph = helper.make_graph(
-            [helper.make_node('Identity', ['input'], ['output'])],
-            'identity',
-            [helper.make_tensor_value_info(
-                'input', TensorProto.FLOAT, [2, 3])],
-            [helper.make_tensor_value_info(
-                'output', TensorProto.FLOAT, [2, 3])],
-        )
-        model = helper.make_model(
-            graph,
-            opset_imports=[helper.make_opsetid('', 18)],
-            ir_version=onnx.IR_VERSION,
-        )
         session = ort.InferenceSession(
-            model.SerializeToString(),
+            {identity_model((2, 3))!r},
             providers=session_providers('cuda', 0, stream),
         )
         rclpy.init()

@@ -14,11 +14,10 @@
 
 import ctypes
 
-import numpy as np
+from identity_model import ElementType as TensorProto
+from identity_model import identity_model
 
-import onnx
-from onnx import helper
-from onnx import TensorProto
+import numpy as np
 
 import onnxruntime as ort
 
@@ -33,10 +32,16 @@ from onnxruntime_conversions import to_tensor_msg
 import pytest
 
 
-pytestmark = pytest.mark.skipif(
-    'cuda' not in available_backends(),
-    reason='the CUDA storage plugin is unavailable',
-)
+pytestmark = [
+    pytest.mark.skipif(
+        'cuda' not in available_backends(),
+        reason='the CUDA storage plugin is unavailable',
+    ),
+    pytest.mark.skipif(
+        not hasattr(ort.OrtValue, 'from_dlpack'),
+        reason='this onnxruntime build exposes no DLPack support',
+    ),
+]
 
 
 @pytest.fixture
@@ -145,19 +150,8 @@ def test_identity_inference_on_device_storage(cuda_buffer, cuda_stream):
     if 'CUDAExecutionProvider' not in ort.get_available_providers():
         pytest.skip('this ONNX Runtime build has no CUDA execution provider')
 
-    graph = helper.make_graph(
-        [helper.make_node('Identity', ['input'], ['output'])],
-        'identity',
-        [helper.make_tensor_value_info('input', TensorProto.FLOAT, [4])],
-        [helper.make_tensor_value_info('output', TensorProto.FLOAT, [4])],
-    )
-    model = helper.make_model(
-        graph,
-        opset_imports=[helper.make_opsetid('', 18)],
-        ir_version=onnx.IR_VERSION,
-    )
     session = ort.InferenceSession(
-        model.SerializeToString(),
+        identity_model((4,)),
         providers=session_providers('cuda', 0, cuda_stream),
     )
     input_msg = allocate_tensor_msg((4,), np.float32, 'cuda')

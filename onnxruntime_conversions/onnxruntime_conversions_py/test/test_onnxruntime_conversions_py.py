@@ -15,11 +15,10 @@
 from array import array
 import gc
 
-import numpy as np
+from identity_model import ElementType as TensorProto
+from identity_model import identity_model
 
-import onnx
-from onnx import helper
-from onnx import TensorProto
+import numpy as np
 
 import onnxruntime as ort
 
@@ -35,6 +34,14 @@ import pytest
 
 from tensor_msgs.msg import ExperimentalTensor
 
+
+# Some distribution rebuilds of ONNX Runtime, including Ubuntu's
+# python3-onnxruntime, drop the DLPack entry points this package converts
+# through. Report that as a skip rather than as a wall of AttributeErrors.
+pytestmark = pytest.mark.skipif(
+    not hasattr(ort.OrtValue, 'from_dlpack'),
+    reason='this onnxruntime build exposes no DLPack support',
+)
 
 SUPPORTED_TYPES = [
     (TensorProto.FLOAT, np.float32),
@@ -53,19 +60,8 @@ SUPPORTED_TYPES = [
 
 
 def identity_session():
-    graph = helper.make_graph(
-        [helper.make_node('Identity', ['input'], ['output'])],
-        'identity',
-        [helper.make_tensor_value_info('input', TensorProto.FLOAT, [2, 3])],
-        [helper.make_tensor_value_info('output', TensorProto.FLOAT, [2, 3])],
-    )
-    model = helper.make_model(
-        graph,
-        opset_imports=[helper.make_opsetid('', 18)],
-        ir_version=onnx.IR_VERSION,
-    )
     return ort.InferenceSession(
-        model.SerializeToString(), providers=session_providers('cpu'))
+        identity_model((2, 3)), providers=session_providers('cpu'))
 
 
 @pytest.mark.parametrize('element_type,numpy_type', SUPPORTED_TYPES)
