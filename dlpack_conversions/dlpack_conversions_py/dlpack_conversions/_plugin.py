@@ -97,6 +97,9 @@ class StorageRegistry:
     def backend_for_device(self, dl_device_type: int) -> Optional[str]:
         return self._by_device.get(dl_device_type)
 
+    def device_for_backend(self, backend: str) -> int:
+        return self.for_backend(backend).dl_device_types[0]
+
     def default_backend(self) -> str:
         requested = os.environ.get(BACKEND_ENVIRONMENT_VARIABLE)
         if requested:

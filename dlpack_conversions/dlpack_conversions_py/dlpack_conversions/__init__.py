@@ -20,6 +20,7 @@ from dlpack_conversions._core import backend_available
 from dlpack_conversions._core import backend_for_device
 from dlpack_conversions._core import contiguous_strides
 from dlpack_conversions._core import default_backend
+from dlpack_conversions._core import device_for_backend
 from dlpack_conversions._core import from_input_tensor_msg
 from dlpack_conversions._core import from_output_tensor_msg
 from dlpack_conversions._core import metadata
@@ -43,6 +44,7 @@ __all__ = [
     'backend_for_device',
     'contiguous_strides',
     'default_backend',
+    'device_for_backend',
     'from_input_tensor_msg',
     'from_output_tensor_msg',
     'metadata',

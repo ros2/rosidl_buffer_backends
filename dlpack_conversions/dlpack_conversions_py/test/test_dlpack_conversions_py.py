@@ -21,6 +21,7 @@ import weakref
 import dlpack_conversions
 from dlpack_conversions import StorageRegistry
 from dlpack_conversions._dlpack_bridge import buffer_address
+from dlpack_conversions._dlpack_bridge import capsule_device
 from dlpack_conversions._dlpack_bridge import make_dlpack_capsule
 
 import numpy
@@ -125,6 +126,17 @@ def test_buffer_address_matches_host_storage():
     assert buffer_address(storage) == storage.buffer_info()[0]
 
 
+def test_capsule_device_reports_the_producing_device():
+    storage = array('B', bytes(16))
+    plugin = HostPlugin()
+    metadata = dlpack_conversions.TensorMetadata(
+        [4], [1], 0, 32, 1, 4, 0, 4)
+
+    capsule = plugin.acquire_input(storage, metadata, None)
+
+    assert capsule_device(capsule) == (dlpack_conversions.CPU, 0)
+
+
 def test_core_has_no_framework_dependency():
     root = Path(__file__).parents[1]
     source = (root / 'src/dlpack_bridge.cpp').read_text()
@@ -157,6 +169,7 @@ def test_registry_reports_backends_and_devices():
     assert registry.backends() == ['host']
     assert registry.backend_for_device(dlpack_conversions.CPU) == 'host'
     assert registry.backend_for_device(dlpack_conversions.CUDA) is None
+    assert registry.device_for_backend('host') == dlpack_conversions.CPU
     assert registry.default_backend() == 'host'
 
 

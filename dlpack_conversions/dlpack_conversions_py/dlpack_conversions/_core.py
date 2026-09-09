@@ -81,6 +81,10 @@ def backend_for_device(dl_device_type: int) -> Optional[str]:
     return _registry.backend_for_device(dl_device_type)
 
 
+def device_for_backend(backend: str) -> int:
+    return _registry.device_for_backend(backend)
+
+
 def backend_available(backend: str) -> bool:
     return backend in _registry.backends()
 

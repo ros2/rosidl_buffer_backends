@@ -1,4 +1,5 @@
 from typing import Sequence
+from typing import Tuple
 
 
 def make_dlpack_capsule(
@@ -16,3 +17,6 @@ def make_dlpack_capsule(
 
 
 def buffer_address(buffer: object) -> int: ...
+
+
+def capsule_device(capsule: object) -> Tuple[int, int]: ...

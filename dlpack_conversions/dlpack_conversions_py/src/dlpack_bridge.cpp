@@ -125,6 +125,18 @@ uintptr_t buffer_address(const py::buffer & buffer)
   return reinterpret_cast<uintptr_t>(buffer.request(false).ptr);
 }
 
+// Frameworks that take a producer object rather than a bare capsule need to
+// answer __dlpack_device__ before handing the capsule over.
+std::pair<int32_t, int32_t> capsule_device(const py::capsule & capsule)
+{
+  auto * managed = static_cast<DLManagedTensor *>(
+    PyCapsule_GetPointer(capsule.ptr(), "dltensor"));
+  if (managed == nullptr) {
+    throw py::value_error("expected an unconsumed dltensor capsule");
+  }
+  return {managed->dl_tensor.device.device_type, managed->dl_tensor.device.device_id};
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_dlpack_bridge, module)
@@ -136,4 +148,5 @@ PYBIND11_MODULE(_dlpack_bridge, module)
     py::arg("shape"), py::arg("strides"), py::arg("byte_offset"),
     py::arg("owner"));
   module.def("buffer_address", &buffer_address, py::arg("buffer"));
+  module.def("capsule_device", &capsule_device, py::arg("capsule"));
 }
