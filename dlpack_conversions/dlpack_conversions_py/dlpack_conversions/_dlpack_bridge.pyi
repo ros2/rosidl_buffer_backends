@@ -1,3 +1,4 @@
+from typing import Dict
 from typing import Sequence
 from typing import Tuple
 
@@ -20,3 +21,6 @@ def buffer_address(buffer: object) -> int: ...
 
 
 def capsule_device(capsule: object) -> Tuple[int, int]: ...
+
+
+def capsule_tensor(capsule: object) -> Dict[str, object]: ...

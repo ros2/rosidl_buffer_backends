@@ -17,6 +17,7 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+from dlpack_conversions._dlpack_bridge import capsule_tensor
 from dlpack_conversions._plugin import load_external_plugins
 from dlpack_conversions._plugin import StorageRegistry
 from dlpack_conversions._plugin import TensorMetadata
@@ -145,3 +146,70 @@ def from_output_tensor_msg(
         return None
     plugin = _registry.for_data(msg.data)
     return plugin.acquire_output(msg.data, metadata(msg, dtype), stream)
+
+
+def to_tensor_msg(
+    destination_or_source: object,
+    source: Optional[object] = None,
+    stream: Optional[int] = None,
+    backend: Optional[str] = None,
+) -> ExperimentalTensor:
+    """Copy a DLPack capsule into message storage and stamp its metadata.
+
+    Called with one argument, allocates a message on the backend that owns the
+    capsule. Called with two, copies into the message given first. The capsule
+    is described rather than consumed, so its owner keeps it.
+    """
+    if source is None:
+        source, destination = destination_or_source, None
+    else:
+        destination = destination_or_source
+        if not isinstance(destination, ExperimentalTensor):
+            raise TypeError('destination must be an ExperimentalTensor')
+
+    described = capsule_tensor(source)
+    shape = list(described['shape'])
+    strides = list(described['strides'])
+    if strides and strides != contiguous_strides(shape):
+        raise ValueError('Cannot copy from a non-contiguous DLPack tensor')
+    dtype = (
+        described['dtype_code'],
+        described['dtype_bits'],
+        described['dtype_lanes'],
+    )
+    byte_count = prod(shape) * _item_size(dtype)
+
+    source_backend = _registry.backend_for_device(described['device_type'])
+    if source_backend is None:
+        raise ValueError(
+            'No storage plugin handles DLPack device type '
+            f'{described["device_type"]}'
+        )
+
+    if destination is None:
+        destination = allocate_tensor_msg(
+            shape, dtype, backend or source_backend)
+    elif byte_count > len(destination.data):
+        raise ValueError(
+            f'Source tensor needs {byte_count} bytes; destination buffer has '
+            f'{len(destination.data)}'
+        )
+
+    # Only the accelerator's own plugin can read its device memory, so it also
+    # copies into host-backed messages.
+    copier = _registry.backend_of(destination.data) \
+        if source_backend == 'cpu' else source_backend
+    _registry.for_backend(copier).copy_to(
+        destination.data,
+        described['data'] + described['byte_offset'],
+        byte_count,
+        source_backend,
+        stream,
+    )
+
+    destination.dtype_code, destination.dtype_bits, destination.dtype_lanes = \
+        dtype
+    destination.shape = shape
+    destination.strides = contiguous_strides(shape)
+    destination.byte_offset = 0
+    return destination

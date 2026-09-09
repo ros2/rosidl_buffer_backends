@@ -125,16 +125,47 @@ uintptr_t buffer_address(const py::buffer & buffer)
   return reinterpret_cast<uintptr_t>(buffer.request(false).ptr);
 }
 
-// Frameworks that take a producer object rather than a bare capsule need to
-// answer __dlpack_device__ before handing the capsule over.
-std::pair<int32_t, int32_t> capsule_device(const py::capsule & capsule)
+DLManagedTensor * unconsumed(const py::capsule & capsule)
 {
   auto * managed = static_cast<DLManagedTensor *>(
     PyCapsule_GetPointer(capsule.ptr(), "dltensor"));
   if (managed == nullptr) {
     throw py::value_error("expected an unconsumed dltensor capsule");
   }
-  return {managed->dl_tensor.device.device_type, managed->dl_tensor.device.device_id};
+  return managed;
+}
+
+// Frameworks that take a producer object rather than a bare capsule need to
+// answer __dlpack_device__ before handing the capsule over.
+std::pair<int32_t, int32_t> capsule_device(const py::capsule & capsule)
+{
+  const DLTensor & tensor = unconsumed(capsule)->dl_tensor;
+  return {tensor.device.device_type, tensor.device.device_id};
+}
+
+// Describes a capsule without consuming it, so the core can copy out of
+// storage a framework owns.
+py::dict capsule_tensor(const py::capsule & capsule)
+{
+  const DLTensor & tensor = unconsumed(capsule)->dl_tensor;
+  const auto ndim = static_cast<size_t>(tensor.ndim);
+  std::vector<int64_t> shape(tensor.shape, tensor.shape + ndim);
+  std::vector<int64_t> strides;
+  if (tensor.strides != nullptr) {
+    strides.assign(tensor.strides, tensor.strides + ndim);
+  }
+
+  py::dict described;
+  described["data"] = reinterpret_cast<uintptr_t>(tensor.data);
+  described["device_type"] = tensor.device.device_type;
+  described["device_id"] = tensor.device.device_id;
+  described["dtype_code"] = tensor.dtype.code;
+  described["dtype_bits"] = tensor.dtype.bits;
+  described["dtype_lanes"] = tensor.dtype.lanes;
+  described["shape"] = shape;
+  described["strides"] = strides;
+  described["byte_offset"] = tensor.byte_offset;
+  return described;
 }
 
 }  // namespace
@@ -149,4 +180,5 @@ PYBIND11_MODULE(_dlpack_bridge, module)
     py::arg("owner"));
   module.def("buffer_address", &buffer_address, py::arg("buffer"));
   module.def("capsule_device", &capsule_device, py::arg("capsule"));
+  module.def("capsule_tensor", &capsule_tensor, py::arg("capsule"));
 }

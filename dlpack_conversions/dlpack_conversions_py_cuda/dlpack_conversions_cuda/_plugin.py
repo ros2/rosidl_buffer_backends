@@ -18,6 +18,7 @@ from typing import Optional
 
 from cuda_buffer import CudaBuffer
 
+from dlpack_conversions._dlpack_bridge import buffer_address
 from dlpack_conversions._dlpack_bridge import make_dlpack_capsule
 from dlpack_conversions._plugin import CUDA
 from dlpack_conversions._plugin import StorageRegistry
@@ -25,22 +26,53 @@ from dlpack_conversions._plugin import TensorMetadata
 
 
 _CUDART_CANDIDATES = ('libcudart.so', 'libcudart.so.13', 'libcudart.so.12')
+# Unified addressing lets the driver infer the direction of every copy.
+_CUDA_MEMCPY_DEFAULT = 4
 
 
 @lru_cache(maxsize=1)
-def _device_count() -> int:
+def _runtime() -> Optional[ctypes.CDLL]:
     for name in _CUDART_CANDIDATES:
         try:
             runtime = ctypes.CDLL(name)
         except OSError:
             continue
-        count = ctypes.c_int(0)
         runtime.cudaGetDeviceCount.argtypes = [ctypes.POINTER(ctypes.c_int)]
         runtime.cudaGetDeviceCount.restype = ctypes.c_int
-        if runtime.cudaGetDeviceCount(ctypes.byref(count)) != 0:
-            return 0
-        return count.value
-    return 0
+        runtime.cudaMemcpyAsync.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+            ctypes.c_int, ctypes.c_void_p,
+        ]
+        runtime.cudaMemcpyAsync.restype = ctypes.c_int
+        runtime.cudaStreamSynchronize.argtypes = [ctypes.c_void_p]
+        runtime.cudaStreamSynchronize.restype = ctypes.c_int
+        return runtime
+    return None
+
+
+@lru_cache(maxsize=1)
+def _device_count() -> int:
+    runtime = _runtime()
+    if runtime is None:
+        return 0
+    count = ctypes.c_int(0)
+    if runtime.cudaGetDeviceCount(ctypes.byref(count)) != 0:
+        return 0
+    return count.value
+
+
+def _copy(destination: int, source: int, byte_count: int, stream: int) -> None:
+    runtime = _runtime()
+    result = runtime.cudaMemcpyAsync(
+        ctypes.c_void_p(destination), ctypes.c_void_p(source), byte_count,
+        _CUDA_MEMCPY_DEFAULT, ctypes.c_void_p(stream))
+    if result != 0:
+        raise RuntimeError(f'cudaMemcpyAsync failed with error {result}')
+    # Callers may read the destination as soon as this returns.
+    result = runtime.cudaStreamSynchronize(ctypes.c_void_p(stream))
+    if result != 0:
+        raise RuntimeError(
+            f'cudaStreamSynchronize failed with error {result}')
 
 
 class CudaStoragePlugin:
@@ -74,6 +106,21 @@ class CudaStoragePlugin:
         return _capsule(
             CudaBuffer.from_output_buffer(data, stream), data, metadata
         )
+
+    def copy_to(
+        self,
+        data: object,
+        source: int,
+        byte_count: int,
+        source_backend: str,
+        stream: Optional[int],
+    ) -> None:
+        del source_backend
+        if getattr(data, 'backend_type', 'cpu') != 'cuda':
+            _copy(buffer_address(data), source, byte_count, stream or 0)
+            return
+        with CudaBuffer.from_output_buffer(data, stream) as handle:
+            _copy(handle.device_ptr, source, byte_count, stream or 0)
 
     def unavailable_error(self) -> RuntimeError:
         return RuntimeError('No CUDA device is visible to this process')

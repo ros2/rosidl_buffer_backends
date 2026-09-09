@@ -22,6 +22,8 @@ from dlpack_conversions import allocate_tensor_msg
 from dlpack_conversions import from_input_tensor_msg
 from dlpack_conversions import from_output_tensor_msg
 
+import numpy
+
 import pytest
 
 
@@ -121,3 +123,37 @@ def test_byte_offset_is_folded_into_the_device_pointer():
 
     assert tensor.data == base + 16
     assert tensor.byte_offset == 0
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason='CUDA support is unavailable')
+def test_to_tensor_msg_copies_host_memory_onto_the_device():
+    source = numpy.arange(6, dtype=numpy.float32).reshape(2, 3)
+    destination = allocate_tensor_msg((2, 3), FLOAT32, 'cuda')
+
+    dlpack_conversions.to_tensor_msg(destination, source.__dlpack__(), 0)
+
+    assert destination.data.backend_type == 'cuda'
+    staged = allocate_tensor_msg((2, 3), FLOAT32, 'cpu')
+    dlpack_conversions.to_tensor_msg(
+        staged, from_input_tensor_msg(destination, 0), 0)
+    assert numpy.array_equal(
+        numpy.frombuffer(staged.data, dtype=numpy.float32).reshape(2, 3),
+        source)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason='CUDA support is unavailable')
+def test_to_tensor_msg_allocates_on_the_device_that_owns_the_capsule():
+    source = numpy.arange(4, dtype=numpy.float32)
+    device_msg = allocate_tensor_msg((4,), FLOAT32, 'cuda')
+    dlpack_conversions.to_tensor_msg(device_msg, source.__dlpack__(), 0)
+
+    allocated = dlpack_conversions.to_tensor_msg(
+        from_input_tensor_msg(device_msg, 0), stream=0)
+
+    assert allocated.data.backend_type == 'cuda'
+    assert list(allocated.shape) == [4]
+    staged = allocate_tensor_msg((4,), FLOAT32, 'cpu')
+    dlpack_conversions.to_tensor_msg(
+        staged, from_input_tensor_msg(allocated, 0), 0)
+    assert numpy.array_equal(
+        numpy.frombuffer(staged.data, dtype=numpy.float32), source)

@@ -222,3 +222,54 @@ def test_environment_override_selects_a_backend(monkeypatch):
 def test_contiguous_strides_are_row_major():
     assert dlpack_conversions.contiguous_strides([2, 3, 4]) == [12, 4, 1]
     assert dlpack_conversions.contiguous_strides([]) == []
+
+
+def test_to_tensor_msg_allocates_and_copies_from_a_capsule():
+    source = numpy.arange(6, dtype=numpy.float32).reshape(2, 3)
+
+    msg = dlpack_conversions.to_tensor_msg(source.__dlpack__())
+
+    assert list(msg.shape) == [2, 3]
+    assert list(msg.strides) == [3, 1]
+    assert msg.byte_offset == 0
+    assert (msg.dtype_code, msg.dtype_bits, msg.dtype_lanes) == (2, 32, 1)
+    copied = numpy.from_dlpack(
+        Consumer(dlpack_conversions.from_input_tensor_msg(msg)))
+    assert numpy.array_equal(copied, source)
+
+
+def test_to_tensor_msg_copies_into_an_existing_message():
+    source = numpy.arange(6, dtype=numpy.float32).reshape(2, 3)
+    destination = dlpack_conversions.allocate_tensor_msg(
+        (2, 3), (2, 32, 1), 'cpu')
+
+    returned = dlpack_conversions.to_tensor_msg(
+        destination, source.__dlpack__())
+
+    assert returned is destination
+    copied = numpy.from_dlpack(
+        Consumer(dlpack_conversions.from_input_tensor_msg(destination)))
+    assert numpy.array_equal(copied, source)
+
+
+def test_to_tensor_msg_rejects_a_source_that_does_not_fit():
+    source = numpy.arange(6, dtype=numpy.float32)
+    destination = dlpack_conversions.allocate_tensor_msg(
+        (2,), (2, 32, 1), 'cpu')
+
+    with pytest.raises(ValueError, match='Source tensor needs 24 bytes'):
+        dlpack_conversions.to_tensor_msg(destination, source.__dlpack__())
+
+
+def test_to_tensor_msg_rejects_a_non_contiguous_source():
+    source = numpy.arange(12, dtype=numpy.float32).reshape(3, 4)[:, ::2]
+
+    with pytest.raises(ValueError, match='non-contiguous'):
+        dlpack_conversions.to_tensor_msg(source.__dlpack__())
+
+
+def test_to_tensor_msg_rejects_a_destination_that_is_not_a_message():
+    source = numpy.arange(2, dtype=numpy.float32)
+
+    with pytest.raises(TypeError, match='must be an ExperimentalTensor'):
+        dlpack_conversions.to_tensor_msg(object(), source.__dlpack__())

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from array import array
+import ctypes
 from typing import Optional
 
 from dlpack_conversions._dlpack_bridge import buffer_address
@@ -55,6 +56,22 @@ class CpuStoragePlugin:
     ) -> object:
         del stream
         return _capsule(data, metadata)
+
+    def copy_to(
+        self,
+        data: object,
+        source: int,
+        byte_count: int,
+        source_backend: str,
+        stream: Optional[int],
+    ) -> None:
+        del stream
+        if source_backend != 'cpu':
+            raise ValueError(
+                f'Host memory cannot read {source_backend!r} storage; the '
+                f'{source_backend!r} plugin owns that copy'
+            )
+        ctypes.memmove(buffer_address(data), source, byte_count)
 
     def unavailable_error(self) -> RuntimeError:
         return RuntimeError('Host memory storage is unavailable')

@@ -24,6 +24,7 @@ from dlpack_conversions._core import device_for_backend
 from dlpack_conversions._core import from_input_tensor_msg
 from dlpack_conversions._core import from_output_tensor_msg
 from dlpack_conversions._core import metadata
+from dlpack_conversions._core import to_tensor_msg
 from dlpack_conversions._plugin import CPU
 from dlpack_conversions._plugin import CUDA
 from dlpack_conversions._plugin import ROCM
@@ -48,4 +49,5 @@ __all__ = [
     'from_input_tensor_msg',
     'from_output_tensor_msg',
     'metadata',
+    'to_tensor_msg',
 ]

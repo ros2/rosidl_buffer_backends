@@ -131,3 +131,23 @@ def test_undersized_storage_is_rejected():
 def test_unknown_backend_is_rejected():
     with pytest.raises(ValueError, match='No storage plugin provides'):
         allocate_tensor_msg((4,), FLOAT32, 'nonexistent')
+
+
+def test_the_host_plugin_refuses_to_read_accelerator_memory():
+    from dlpack_conversions_cpu._plugin import CpuStoragePlugin
+
+    with pytest.raises(ValueError, match="'cuda' plugin owns that copy"):
+        CpuStoragePlugin().copy_to(array('B', bytes(16)), 0, 16, 'cuda', None)
+
+
+def test_the_host_plugin_copies_host_memory_into_storage():
+    from dlpack_conversions_cpu._plugin import CpuStoragePlugin
+
+    source = numpy.arange(4, dtype=numpy.int32)
+    destination = array('B', bytes(source.nbytes))
+
+    CpuStoragePlugin().copy_to(
+        destination, source.ctypes.data, source.nbytes, 'cpu', None)
+
+    assert numpy.array_equal(
+        numpy.frombuffer(destination, dtype=numpy.int32), source)

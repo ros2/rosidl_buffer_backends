@@ -67,6 +67,20 @@ class StoragePlugin(Protocol):
         self, data: object, metadata: TensorMetadata, stream: Optional[int]
     ) -> object: ...
 
+    def copy_to(
+        self,
+        data: object,
+        source: int,
+        byte_count: int,
+        source_backend: str,
+        stream: Optional[int],
+    ) -> None:
+        """Copy host or accelerator memory into message storage.
+
+        Accelerator plugins are also asked to copy into host-backed storage,
+        because only they can read their own device memory.
+        """
+
     def unavailable_error(self) -> RuntimeError: ...
 
 
@@ -125,6 +139,9 @@ class StorageRegistry:
                 f'installed backends are {self.backends()}'
             )
         return plugin
+
+    def backend_of(self, data: object) -> str:
+        return self.for_data(data).backends[0]
 
     def for_data(self, data: object) -> StoragePlugin:
         if isinstance(data, Buffer):
