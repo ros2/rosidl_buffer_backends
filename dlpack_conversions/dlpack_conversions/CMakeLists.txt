@@ -66,6 +66,12 @@ if(BUILD_TESTING)
   ament_copyright(EXCLUDE include/dlpack_conversions/dlpack.h)
   ament_cpplint(EXCLUDE include/dlpack_conversions/dlpack.h)
   ament_uncrustify(EXCLUDE include/dlpack_conversions/dlpack.h)
+
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_dlpack_conversions test/test_dlpack_conversions.cpp)
+  if(TARGET test_dlpack_conversions)
+    target_link_libraries(test_dlpack_conversions ${PROJECT_NAME})
+  endif()
 endif()
 
 ament_package()
