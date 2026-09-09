@@ -35,6 +35,8 @@ def _device_count() -> int:
         except OSError:
             continue
         count = ctypes.c_int(0)
+        runtime.cudaGetDeviceCount.argtypes = [ctypes.POINTER(ctypes.c_int)]
+        runtime.cudaGetDeviceCount.restype = ctypes.c_int
         if runtime.cudaGetDeviceCount(ctypes.byref(count)) != 0:
             return 0
         return count.value
@@ -63,21 +65,38 @@ class CudaStoragePlugin:
         self, data: object, metadata: TensorMetadata, stream: Optional[int]
     ) -> object:
         return _capsule(
-            CudaBuffer.from_input_buffer(data, stream), metadata
+            CudaBuffer.from_input_buffer(data, stream), data, metadata
         )
 
     def acquire_output(
         self, data: object, metadata: TensorMetadata, stream: Optional[int]
     ) -> object:
         return _capsule(
-            CudaBuffer.from_output_buffer(data, stream), metadata
+            CudaBuffer.from_output_buffer(data, stream), data, metadata
         )
 
     def unavailable_error(self) -> RuntimeError:
         return RuntimeError('No CUDA device is visible to this process')
 
 
-def _capsule(handle: object, metadata: TensorMetadata) -> object:
+class _Lease:
+    """Holds a mapping open, and the buffer it maps, until DLPack is done.
+
+    A handle that outlives its buffer leaves a dangling mapping, so the
+    handle is closed first and only then is the buffer released.
+    """
+
+    def __init__(self, handle: object, data: object) -> None:
+        self._handle = handle
+        self._data = data
+
+    def __del__(self) -> None:
+        self._handle.close()
+
+
+def _capsule(
+    handle: object, data: object, metadata: TensorMetadata
+) -> object:
     # DLPack consumers disagree on byte_offset, so fold it into the pointer.
     return make_dlpack_capsule(
         handle.device_ptr + metadata.byte_offset,
@@ -89,7 +108,7 @@ def _capsule(handle: object, metadata: TensorMetadata) -> object:
         list(metadata.shape),
         list(metadata.strides),
         0,
-        handle,
+        _Lease(handle, data),
     )
 
 

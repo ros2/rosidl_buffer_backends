@@ -98,7 +98,9 @@ def test_capsule_aliases_device_storage():
         expected_pointer = handle.device_ptr
         expected_device = handle.device_id
 
-    tensor = dl_tensor(from_output_tensor_msg(msg, 0))
+    # The ctypes view borrows the capsule's memory, so keep the capsule.
+    capsule = from_output_tensor_msg(msg, 0)
+    tensor = dl_tensor(capsule)
 
     assert tensor.data == expected_pointer
     assert tensor.device.device_type == dlpack_conversions.CUDA

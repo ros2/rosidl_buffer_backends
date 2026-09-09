@@ -44,14 +44,28 @@ def _item_size(dtype: DType) -> int:
     return (bits * lanes + 7) // 8
 
 
-def metadata(msg: ExperimentalTensor) -> TensorMetadata:
+def metadata(
+    msg: ExperimentalTensor,
+    dtype: Optional[DType] = None,
+) -> TensorMetadata:
+    """Describe the view a message defines over its storage.
+
+    Pass ``dtype`` to describe the storage as an equally sized dtype, which
+    frameworks need when they cannot consume the message dtype directly.
+    """
     shape = list(msg.shape)
     if any(dimension < 0 for dimension in shape):
         raise ValueError('Tensor shape dimensions must be nonnegative')
     strides = list(msg.strides) or contiguous_strides(shape)
     if len(strides) != len(shape) or any(stride < 0 for stride in strides):
         raise ValueError('Tensor strides must match rank and be nonnegative')
-    dtype = (msg.dtype_code, msg.dtype_bits, msg.dtype_lanes)
+    stored = (msg.dtype_code, msg.dtype_bits, msg.dtype_lanes)
+    if dtype is not None and _item_size(dtype) != _item_size(stored):
+        raise ValueError(
+            f'Cannot describe a {_item_size(stored)} byte dtype as '
+            f'{dtype}, which is {_item_size(dtype)} bytes wide'
+        )
+    dtype = stored if dtype is None else dtype
     item_size = _item_size(dtype)
     span = 0 if 0 in shape else 1 + sum(
         (dimension - 1) * stride
@@ -114,18 +128,20 @@ def allocate_tensor_msg(
 def from_input_tensor_msg(
     msg: ExperimentalTensor,
     stream: Optional[int] = None,
+    dtype: Optional[DType] = None,
 ) -> Optional[object]:
     if len(msg.data) == 0:
         return None
     plugin = _registry.for_data(msg.data)
-    return plugin.acquire_input(msg.data, metadata(msg), stream)
+    return plugin.acquire_input(msg.data, metadata(msg, dtype), stream)
 
 
 def from_output_tensor_msg(
     msg: ExperimentalTensor,
     stream: Optional[int] = None,
+    dtype: Optional[DType] = None,
 ) -> Optional[object]:
     if len(msg.data) == 0:
         return None
     plugin = _registry.for_data(msg.data)
-    return plugin.acquire_output(msg.data, metadata(msg), stream)
+    return plugin.acquire_output(msg.data, metadata(msg, dtype), stream)
