@@ -1,19 +1,22 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>onnxruntime_core_vendor</name>
+  <name>onnxruntime_conversions_cpu</name>
   <version>0.1.2</version>
-  <description>Vendor package for the CUDA-neutral ONNX Runtime C++ SDK and core runtime.</description>
-
+  <description>Compiled CPU runtime plugin for ONNX Runtime tensor conversions.</description>
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
-  <license>MIT</license>
   <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
-  <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
+  <depend version_gte="1.23.2" version_lt="1.24">libonnxruntime-dev</depend>
+  <depend>onnxruntime_conversions</depend>
+  <depend>pluginlib</depend>
 
-  <test_depend>ament_cmake_xmllint</test_depend>
+  <conflict>onnxruntime_conversions_cuda</conflict>
+  <conflict>onnxruntime_cuda_vendor</conflict>
+
+  <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

@@ -87,7 +87,8 @@ def test_cuda_input_dlpack_alias_and_bool_compatibility(
 
     view = from_input_tensor_msg(msg, cuda_stream)
     assert view.value.data_ptr() == expected_pointer
-    assert view.value.__dlpack_device__() == (2, expected_device)
+    ortvalue = getattr(view.value, '_ortvalue', view.value)
+    assert ortvalue.__dlpack_device__() == (2, expected_device)
     assert view.value.element_type() == TensorProto.BOOL
     view.close()
 

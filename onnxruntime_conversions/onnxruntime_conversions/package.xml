@@ -3,7 +3,7 @@
 <package format="3">
   <name>onnxruntime_conversions</name>
   <version>0.1.2</version>
-  <description>C++ API, adapter registry, and CPU plugin for ONNX Runtime tensor conversions.</description>
+  <description>Stable C++ interface for ONNX Runtime tensor conversion plugins.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -11,12 +11,11 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>onnxruntime_core_vendor</depend>
+  <depend>ament_cmake_core</depend>
   <depend>pluginlib</depend>
   <depend>rosidl_buffer</depend>
   <depend>tensor_msgs</depend>
 
-  <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

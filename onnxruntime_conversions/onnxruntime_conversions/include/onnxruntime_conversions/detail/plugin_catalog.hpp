@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef ADAPTER_CATALOG_HPP_
-#define ADAPTER_CATALOG_HPP_
+#ifndef ONNXRUNTIME_CONVERSIONS__DETAIL__PLUGIN_CATALOG_HPP_
+#define ONNXRUNTIME_CONVERSIONS__DETAIL__PLUGIN_CATALOG_HPP_
 
 #include <map>
 #include <stdexcept>
@@ -22,16 +22,16 @@
 namespace onnxruntime_conversions::detail
 {
 
-inline void register_adapter_id(
-  std::map<std::string, std::string> & adapter_classes,
-  const std::string & adapter_id,
+inline void register_plugin_id(
+  std::map<std::string, std::string> & plugin_classes,
+  const std::string & plugin_id,
   const std::string & plugin_class)
 {
   const auto [existing, inserted] =
-    adapter_classes.emplace(adapter_id, plugin_class);
+    plugin_classes.emplace(plugin_id, plugin_class);
   if (!inserted) {
     throw std::runtime_error(
-            "Duplicate ONNX Runtime conversion adapter ID '" + adapter_id +
+            "Duplicate ONNX Runtime conversion plugin ID '" + plugin_id +
             "' returned by plugin classes '" + existing->second + "' and '" +
             plugin_class + "'");
   }
@@ -39,4 +39,4 @@ inline void register_adapter_id(
 
 }  // namespace onnxruntime_conversions::detail
 
-#endif  // ADAPTER_CATALOG_HPP_
+#endif  // ONNXRUNTIME_CONVERSIONS__DETAIL__PLUGIN_CATALOG_HPP_

@@ -8,7 +8,8 @@ ament_python_install_package(onnxruntime_conversions_cuda)
 
 install(
   FILES resource/${PROJECT_NAME}
-  DESTINATION share/ament_index/resource_index/onnxruntime_conversions__adapters
+  DESTINATION
+    share/ament_index/resource_index/onnxruntime_conversions__python_plugins
 )
 
 if(BUILD_TESTING)

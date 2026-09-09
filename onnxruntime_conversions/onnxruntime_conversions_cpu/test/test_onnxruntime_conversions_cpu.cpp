@@ -27,7 +27,7 @@
 namespace
 {
 
-using onnxruntime_conversions::ConversionAdapterRegistry;
+using onnxruntime_conversions::ConversionPluginRegistry;
 using onnxruntime_conversions::TensorMsg;
 using onnxruntime_conversions::allocate_tensor_msg;
 using onnxruntime_conversions::from_input_tensor_msg;
@@ -49,20 +49,20 @@ const uint8_t identity_model[] = {
 
 TEST(OnnxRuntimeConversions, DiscoversRequiredCpuPlugin)
 {
-  const auto adapters = onnxruntime_conversions::available_adapters();
-  EXPECT_NE(std::find(adapters.begin(), adapters.end(), "cpu"), adapters.end());
-  EXPECT_EQ(
-    ConversionAdapterRegistry::instance().get_adapter("cpu")->adapter_name(),
-    "cpu");
+  const auto plugins = onnxruntime_conversions::available_plugins();
+  EXPECT_NE(std::find(plugins.begin(), plugins.end(), "cpu"), plugins.end());
+  const auto backends =
+    ConversionPluginRegistry::instance().get_plugin("cpu")->backends();
+  EXPECT_NE(std::find(backends.begin(), backends.end(), "cpu"), backends.end());
 }
 
 TEST(OnnxRuntimeConversions, RegistryIsThreadSafe)
 {
-  std::vector<std::shared_ptr<onnxruntime_conversions::ConversionAdapter>> results(16);
+  std::vector<std::shared_ptr<onnxruntime_conversions::ConversionPlugin>> results(16);
   std::vector<std::thread> threads;
   for (size_t index = 0; index < results.size(); ++index) {
     threads.emplace_back([index, &results]() {
-        results[index] = ConversionAdapterRegistry::instance().get_adapter("cpu");
+        results[index] = ConversionPluginRegistry::instance().get_plugin("cpu");
       });
   }
   for (auto & thread : threads) {
@@ -75,8 +75,8 @@ TEST(OnnxRuntimeConversions, RegistryIsThreadSafe)
 
 TEST(OnnxRuntimeConversions, ExplicitUnavailableCudaThrows)
 {
-  const auto adapters = onnxruntime_conversions::available_adapters();
-  if (std::find(adapters.begin(), adapters.end(), "cuda") != adapters.end()) {
+  const auto plugins = onnxruntime_conversions::available_plugins();
+  if (std::find(plugins.begin(), plugins.end(), "cuda") != plugins.end()) {
     GTEST_SKIP() << "CUDA plugin is installed";
   }
   EXPECT_THROW(

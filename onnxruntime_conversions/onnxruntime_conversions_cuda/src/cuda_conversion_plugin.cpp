@@ -14,36 +14,113 @@
 
 #include <cuda_runtime.h>
 
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <pluginlib/class_list_macros.hpp>
 
 #include "cuda_buffer/cuda_buffer_api.hpp"
 #include "cuda_buffer/cuda_buffer_impl.hpp"
 #include "cuda_buffer/cuda_error.hpp"
-#include "onnxruntime_conversions/conversion_adapter.hpp"
+#include "onnxruntime_conversions/conversion_plugin.hpp"
 
 namespace onnxruntime_conversions
 {
 namespace
 {
 
+uint8_t empty_storage = 0;
+
+class CpuStorageLease final : public StorageLease
+{
+public:
+  CpuStorageLease(
+    std::shared_ptr<const TensorMsg> owner,
+    void * data,
+    size_t size)
+  : owner_(std::move(owner))
+  {
+    metadata_.data = data;
+    metadata_.size_bytes = size;
+    metadata_.device_type = OrtMemoryInfoDeviceType_CPU;
+    metadata_.device_id = 0;
+  }
+
+  const StorageMetadata & metadata() const noexcept override
+  {
+    return metadata_;
+  }
+
+private:
+  std::shared_ptr<const TensorMsg> owner_;
+  StorageMetadata metadata_;
+};
+
+void validate_cpu(const TensorMsg & msg, void * execution_stream)
+{
+  if (msg.data.get_backend_type() != "cpu") {
+    throw std::invalid_argument("CPU conversion requires CPU message storage");
+  }
+  if (execution_stream != nullptr) {
+    throw std::invalid_argument("CPU conversion does not accept an execution stream");
+  }
+}
+
+std::shared_ptr<StorageLease> acquire_cpu_input(
+  std::shared_ptr<const TensorMsg> msg,
+  void * execution_stream)
+{
+  validate_cpu(*msg, execution_stream);
+  void * data = msg->data.empty() ?
+    static_cast<void *>(&empty_storage) :
+    const_cast<void *>(static_cast<const void *>(msg->data.data()));
+  const size_t size = msg->data.size();
+  return std::make_shared<CpuStorageLease>(std::move(msg), data, size);
+}
+
+std::shared_ptr<StorageLease> acquire_cpu_output(
+  std::shared_ptr<TensorMsg> msg,
+  void * execution_stream)
+{
+  validate_cpu(*msg, execution_stream);
+  void * data = msg->data.empty() ?
+    static_cast<void *>(&empty_storage) :
+    static_cast<void *>(msg->data.data());
+  const size_t size = msg->data.size();
+  return std::make_shared<CpuStorageLease>(std::move(msg), data, size);
+}
+
+void copy_cpu_from_ort(
+  TensorMsg & msg,
+  const Ort::Value & value,
+  size_t byte_count,
+  void * execution_stream)
+{
+  validate_cpu(msg, execution_stream);
+  if (value.GetTensorMemoryInfo().GetDeviceType() != OrtMemoryInfoDeviceType_CPU) {
+    throw std::invalid_argument("CPU conversion requires a CPU Ort::Value");
+  }
+  if (byte_count != 0) {
+    std::memcpy(msg.data.data(), value.GetTensorRawData(), byte_count);
+  }
+}
+
 cudaStream_t require_explicit_stream(void * execution_stream)
 {
   const auto stream = reinterpret_cast<cudaStream_t>(execution_stream);
   if (stream == nullptr || stream == cudaStreamLegacy || stream == cudaStreamPerThread) {
     throw std::invalid_argument(
-            "CUDA adapter requires a non-null application-owned CUDA stream");
+            "CUDA plugin requires a non-null application-owned CUDA stream");
   }
   const cudaError_t status = cudaStreamQuery(stream);
   if (status != cudaSuccess && status != cudaErrorNotReady) {
     (void)cudaGetLastError();
-    throw std::invalid_argument("CUDA adapter received an invalid CUDA stream");
+    throw std::invalid_argument("CUDA plugin received an invalid CUDA stream");
   }
   return stream;
 }
@@ -62,7 +139,7 @@ T * require_cuda_impl(rosidl::Buffer<uint8_t> & buffer)
 {
   auto * impl = dynamic_cast<T *>(buffer.get_impl());
   if (!impl) {
-    throw std::invalid_argument("CUDA adapter requires cuda_buffer-backed message storage");
+    throw std::invalid_argument("CUDA plugin requires cuda_buffer-backed message storage");
   }
   return impl;
 }
@@ -73,7 +150,7 @@ const cuda_buffer_backend::CudaBufferImpl<uint8_t> * require_cuda_impl(
   const auto * impl =
     dynamic_cast<const cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(buffer.get_impl());
   if (!impl) {
-    throw std::invalid_argument("CUDA adapter requires cuda_buffer-backed message storage");
+    throw std::invalid_argument("CUDA plugin requires cuda_buffer-backed message storage");
   }
   return impl;
 }
@@ -162,13 +239,13 @@ private:
 
 }  // namespace
 
-class CudaConversionAdapter final
-  : public ConversionAdapter, public AutomaticSelectionCapability
+class CudaConversionPlugin final
+  : public ConversionPlugin, public AutomaticSelectionCapability
 {
 public:
-  std::string adapter_name() const override
+  std::vector<std::string> backends() const override
   {
-    return "cuda";
+    return {"cpu", "cuda"};
   }
 
   bool supports_automatic_selection(
@@ -200,11 +277,23 @@ public:
     return true;
   }
 
-  void allocate_storage(TensorMsg & msg, size_t byte_count) override
+  void allocate_storage(
+    TensorMsg & msg, size_t byte_count, const std::string & backend) override
   {
+    if (backend == "cpu") {
+      if (msg.data.get_backend_type() != "cpu") {
+        throw std::invalid_argument("CPU conversion requires CPU message storage");
+      }
+      msg.data.resize(byte_count);
+      return;
+    }
+    if (backend != "cuda") {
+      throw std::invalid_argument(
+              "CUDA plugin cannot allocate '" + backend + "' storage");
+    }
     if (byte_count == 0) {
       throw std::invalid_argument(
-              "CUDA adapter does not support zero-byte tensor storage");
+              "CUDA plugin does not support zero-byte tensor storage");
     }
     msg.data = cuda_buffer_backend::allocate_buffer(byte_count);
     if (msg.data.get_backend_type() != "cuda") {
@@ -219,6 +308,9 @@ public:
     if (!msg) {
       throw std::invalid_argument("CUDA input message must not be null");
     }
+    if (msg->data.get_backend_type() == "cpu") {
+      return acquire_cpu_input(std::move(msg), execution_stream);
+    }
     return std::make_shared<CudaInputLease>(
       std::move(msg), require_explicit_stream(execution_stream));
   }
@@ -230,6 +322,9 @@ public:
     if (!msg) {
       throw std::invalid_argument("CUDA output message must not be null");
     }
+    if (msg->data.get_backend_type() == "cpu") {
+      return acquire_cpu_output(std::move(msg), execution_stream);
+    }
     return std::make_shared<CudaOutputLease>(
       std::move(msg), require_explicit_stream(execution_stream));
   }
@@ -240,6 +335,10 @@ public:
     size_t byte_count,
     void * execution_stream) override
   {
+    if (msg.data.get_backend_type() == "cpu") {
+      copy_cpu_from_ort(msg, value, byte_count, execution_stream);
+      return;
+    }
     const auto stream = require_explicit_stream(execution_stream);
     auto * impl =
       require_cuda_impl<cuda_buffer_backend::CudaBufferImpl<uint8_t>>(msg.data);
@@ -247,7 +346,7 @@ public:
     if (memory_info.GetDeviceType() != OrtMemoryInfoDeviceType_GPU ||
       memory_info.GetAllocatorName() != std::string("Cuda"))
     {
-      throw std::invalid_argument("CUDA adapter requires a CUDA Ort::Value");
+      throw std::invalid_argument("CUDA plugin requires a CUDA Ort::Value");
     }
     if (memory_info.GetDeviceId() != impl->get_device_id()) {
       throw std::invalid_argument("CUDA Ort::Value and message storage device IDs differ");
@@ -270,8 +369,20 @@ public:
 
   void configure_session(
     Ort::SessionOptions & session_options,
+    const std::string & backend,
     const ConversionConfiguration & configuration) override
   {
+    if (backend == "cpu") {
+      if (configuration.device_id != 0 || configuration.execution_stream != nullptr) {
+        throw std::invalid_argument(
+                "CPU conversion requires device_id 0 and a null execution stream");
+      }
+      return;
+    }
+    if (backend != "cuda") {
+      throw std::invalid_argument(
+              "CUDA plugin cannot configure a '" + backend + "' session");
+    }
     validate_device_id(configuration.device_id);
     int current_device = -1;
     CUDA_CHECK(cudaGetDevice(&current_device));
@@ -290,5 +401,5 @@ public:
 }  // namespace onnxruntime_conversions
 
 PLUGINLIB_EXPORT_CLASS(
-  onnxruntime_conversions::CudaConversionAdapter,
-  onnxruntime_conversions::ConversionAdapter)
+  onnxruntime_conversions::CudaConversionPlugin,
+  onnxruntime_conversions::ConversionPlugin)

@@ -3,23 +3,24 @@
 <package format="3">
   <name>onnxruntime_conversions_py</name>
   <version>0.1.2</version>
-  <description>CPU runtime dependencies for Python ONNX Runtime conversions.</description>
+  <description>Stable Python API for ONNX Runtime tensor conversions.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
   <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <exec_depend>onnxruntime_conversions_py_core</exec_depend>
-  <exec_depend>python_onnxruntime_vendor</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <depend>python3-numpy</depend>
+  <depend>tensor_msgs</depend>
 
-  <conflict>onnxruntime_conversions_py_cuda</conflict>
+  <build_depend>pybind11-dev</build_depend>
+  <build_depend>python3-dev</build_depend>
 
-  <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
-  <test_depend>python3-onnx</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

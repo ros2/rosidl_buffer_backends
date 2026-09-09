@@ -28,8 +28,8 @@ from onnxruntime_conversions import from_input_tensor_msg
 from onnxruntime_conversions import from_output_tensor_msg
 from onnxruntime_conversions import OrtTensorView
 from onnxruntime_conversions import to_tensor_msg
-from onnxruntime_conversions._adapter import OrtConversionRegistry
-from onnxruntime_conversions._cpu_adapter import CpuOrtConversionAdapter
+from onnxruntime_conversions._cpu_plugin import CpuOrtConversionPlugin
+from onnxruntime_conversions._plugin import OrtConversionRegistry
 import pytest
 from tensor_msgs.msg import ExperimentalTensor
 
@@ -132,6 +132,9 @@ def test_view_keeps_message_storage_alive():
 
 
 def test_platform_neutral_dlpack_bridge_retains_owner():
+    if not hasattr(ort.OrtValue, 'from_dlpack'):
+        pytest.skip('ONNX Runtime does not provide OrtValue.from_dlpack')
+
     class Producer:
 
         def __init__(self, capsule):
@@ -208,13 +211,13 @@ def test_cpu_package_selects_cpu_by_default():
 
 
 def test_registry_rejects_ambiguous_default():
-    class OtherCpuAdapter(CpuOrtConversionAdapter):
+    class OtherCpuPlugin(CpuOrtConversionPlugin):
         device_type = 'other'
         buffer_backend = 'other'
 
     registry = OrtConversionRegistry()
-    registry.register(CpuOrtConversionAdapter())
-    registry.register(OtherCpuAdapter())
+    registry.register(CpuOrtConversionPlugin())
+    registry.register(OtherCpuPlugin())
     with pytest.raises(RuntimeError, match='Ambiguous default'):
         registry.default()
 
@@ -223,7 +226,7 @@ def test_explicit_cpu_overrides_platform_default(monkeypatch):
     monkeypatch.setattr(
         _core._registry,
         'default',
-        lambda: pytest.fail('default adapter must not be selected'),
+        lambda: pytest.fail('default plugin must not be selected'),
     )
     msg = allocate_tensor_msg(
         (1,), np.float32, device_type='cpu', stream=123)
@@ -237,13 +240,13 @@ def test_unregistered_device_raises():
 
 
 def test_cuda_default_does_not_fallback_after_allocation_error(monkeypatch):
-    class FailingAdapter:
+    class FailingPlugin:
 
         def allocate(self, metadata, device_id, stream):
             raise RuntimeError('injected CUDA allocation failure')
 
     monkeypatch.setattr(
-        _core._registry, 'default', lambda: FailingAdapter())
+        _core._registry, 'default', lambda: FailingPlugin())
     with pytest.raises(RuntimeError, match='injected CUDA allocation failure'):
         allocate_tensor_msg((1,), np.float32, stream=123)
 

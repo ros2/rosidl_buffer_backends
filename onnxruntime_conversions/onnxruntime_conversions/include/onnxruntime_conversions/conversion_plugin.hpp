@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef ONNXRUNTIME_CONVERSIONS__CONVERSION_ADAPTER_HPP_
-#define ONNXRUNTIME_CONVERSIONS__CONVERSION_ADAPTER_HPP_
+#ifndef ONNXRUNTIME_CONVERSIONS__CONVERSION_PLUGIN_HPP_
+#define ONNXRUNTIME_CONVERSIONS__CONVERSION_PLUGIN_HPP_
 
 #include <onnxruntime_cxx_api.h>
 
@@ -52,26 +52,23 @@ struct ConversionConfiguration
   void * execution_stream{nullptr};
 };
 
-class ONNXRUNTIME_CONVERSIONS_PUBLIC ConversionAdapter
+class ONNXRUNTIME_CONVERSIONS_PUBLIC ConversionPlugin
 {
 public:
-  virtual ~ConversionAdapter();
-
-  virtual std::string adapter_name() const = 0;
-  virtual void allocate_storage(TensorMsg & msg, size_t byte_count) = 0;
+  virtual ~ConversionPlugin();
+  virtual std::vector<std::string> backends() const = 0;
+  virtual void allocate_storage(
+    TensorMsg & msg, size_t byte_count, const std::string & backend) = 0;
   virtual std::shared_ptr<StorageLease> acquire_input(
-    std::shared_ptr<const TensorMsg> msg,
-    void * execution_stream) = 0;
+    std::shared_ptr<const TensorMsg> msg, void * execution_stream) = 0;
   virtual std::shared_ptr<StorageLease> acquire_output(
-    std::shared_ptr<TensorMsg> msg,
-    void * execution_stream) = 0;
+    std::shared_ptr<TensorMsg> msg, void * execution_stream) = 0;
   virtual void copy_from_ort(
-    TensorMsg & msg,
-    const Ort::Value & value,
-    size_t byte_count,
+    TensorMsg & msg, const Ort::Value & value, size_t byte_count,
     void * execution_stream) = 0;
   virtual void configure_session(
     Ort::SessionOptions & session_options,
+    const std::string & backend,
     const ConversionConfiguration & configuration) = 0;
 };
 
@@ -83,27 +80,24 @@ public:
     const ConversionConfiguration & configuration) const noexcept = 0;
 };
 
-class ONNXRUNTIME_CONVERSIONS_PUBLIC ConversionAdapterRegistry
+class ONNXRUNTIME_CONVERSIONS_PUBLIC ConversionPluginRegistry
 {
 public:
-  static ConversionAdapterRegistry & instance();
+  static ConversionPluginRegistry & instance();
+  std::shared_ptr<ConversionPlugin> get_plugin(const std::string & plugin);
+  std::string select_backend(const ConversionConfiguration & configuration);
+  std::vector<std::string> available_plugins() const;
 
-  std::shared_ptr<ConversionAdapter> get_adapter(const std::string & adapter);
-  std::shared_ptr<ConversionAdapter> select_adapter(
-    const ConversionConfiguration & configuration);
-  std::vector<std::string> available_adapters() const;
-
-  ConversionAdapterRegistry(const ConversionAdapterRegistry &) = delete;
-  ConversionAdapterRegistry & operator=(const ConversionAdapterRegistry &) = delete;
+  ConversionPluginRegistry(const ConversionPluginRegistry &) = delete;
+  ConversionPluginRegistry & operator=(const ConversionPluginRegistry &) = delete;
 
 private:
-  ConversionAdapterRegistry();
-  ~ConversionAdapterRegistry();
-
+  ConversionPluginRegistry();
+  ~ConversionPluginRegistry();
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace onnxruntime_conversions
 
-#endif  // ONNXRUNTIME_CONVERSIONS__CONVERSION_ADAPTER_HPP_
+#endif  // ONNXRUNTIME_CONVERSIONS__CONVERSION_PLUGIN_HPP_

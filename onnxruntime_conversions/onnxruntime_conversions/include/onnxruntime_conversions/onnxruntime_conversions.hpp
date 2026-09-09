@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#include "onnxruntime_conversions/conversion_adapter.hpp"
+#include "onnxruntime_conversions/conversion_plugin.hpp"
 #include "onnxruntime_conversions/visibility_control.hpp"
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
@@ -34,88 +34,71 @@ using TensorMsg = tensor_msgs::msg::ExperimentalTensor;
 class OrtTensorView
 {
 public:
-  ONNXRUNTIME_CONVERSIONS_PUBLIC
-  OrtTensorView(OrtTensorView &&) noexcept;
+  ONNXRUNTIME_CONVERSIONS_PUBLIC OrtTensorView(OrtTensorView &&) noexcept;
   ONNXRUNTIME_CONVERSIONS_PUBLIC
   OrtTensorView & operator=(OrtTensorView &&) noexcept;
-  ONNXRUNTIME_CONVERSIONS_PUBLIC
-  ~OrtTensorView();
+  ONNXRUNTIME_CONVERSIONS_PUBLIC ~OrtTensorView();
 
   OrtTensorView(const OrtTensorView &) = delete;
   OrtTensorView & operator=(const OrtTensorView &) = delete;
 
-  ONNXRUNTIME_CONVERSIONS_PUBLIC
-  Ort::Value & value();
-  ONNXRUNTIME_CONVERSIONS_PUBLIC
-  const Ort::Value & value() const;
+  ONNXRUNTIME_CONVERSIONS_PUBLIC Ort::Value & value();
+  ONNXRUNTIME_CONVERSIONS_PUBLIC const Ort::Value & value() const;
 
 private:
   struct Impl;
-
   explicit OrtTensorView(std::unique_ptr<Impl> impl);
-
   std::unique_ptr<Impl> impl_;
 
   friend OrtTensorView from_input_tensor_msg(
-    std::shared_ptr<const TensorMsg>,
-    const Ort::MemoryInfo &,
-    void *);
+    std::shared_ptr<const TensorMsg>, const Ort::MemoryInfo &, void *);
   friend OrtTensorView from_output_tensor_msg(
-    std::shared_ptr<TensorMsg>,
-    const Ort::MemoryInfo &,
-    void *);
+    std::shared_ptr<TensorMsg>, const Ort::MemoryInfo &, void *);
 };
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
-  const std::vector<int64_t> & shape,
-  ONNXTensorElementDataType dtype,
-  const std::string & adapter = "auto");
+  const std::vector<int64_t> & shape, ONNXTensorElementDataType dtype,
+  const std::string & plugin = "auto");
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
-  const std::vector<int64_t> & shape,
-  ONNXTensorElementDataType dtype,
+  const std::vector<int64_t> & shape, ONNXTensorElementDataType dtype,
   const ConversionConfiguration & configuration);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
-  const std::vector<int64_t> & shape,
-  ONNXTensorElementDataType dtype,
-  const std::string & adapter,
+  const std::vector<int64_t> & shape, ONNXTensorElementDataType dtype,
+  const std::string & plugin,
   const ConversionConfiguration & configuration);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 OrtTensorView from_input_tensor_msg(
-  std::shared_ptr<const TensorMsg> msg,
-  const Ort::MemoryInfo & memory_info,
+  std::shared_ptr<const TensorMsg> msg, const Ort::MemoryInfo & memory_info,
   void * execution_stream = nullptr);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 OrtTensorView from_output_tensor_msg(
-  std::shared_ptr<TensorMsg> msg,
-  const Ort::MemoryInfo & memory_info,
+  std::shared_ptr<TensorMsg> msg, const Ort::MemoryInfo & memory_info,
   void * execution_stream = nullptr);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 void to_tensor_msg(
-  TensorMsg & msg,
-  const Ort::Value & value,
+  TensorMsg & msg, const Ort::Value & value,
   void * execution_stream = nullptr);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 std::unique_ptr<TensorMsg> to_tensor_msg(
-  const Ort::Value & value,
-  const std::string & adapter = "auto",
+  const Ort::Value & value, const std::string & plugin = "auto",
   void * execution_stream = nullptr);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
-std::vector<std::string> available_adapters();
+std::vector<std::string> available_plugins();
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC
 void configure_session_options(
   Ort::SessionOptions & session_options,
-  const std::string & adapter = "auto",
+  const std::string & plugin = "auto",
   const ConversionConfiguration & configuration = {});
 
 }  // namespace onnxruntime_conversions

@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CUDA adapter for Python ONNX Runtime conversions."""
+"""CUDA plugin for Python ONNX Runtime conversions."""

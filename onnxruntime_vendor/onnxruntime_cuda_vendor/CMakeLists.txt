@@ -17,77 +17,37 @@ project(onnxruntime_cuda_vendor)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_vendor_package REQUIRED)
-find_package(onnxruntime_core_vendor REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
-set(ONNXRUNTIME_CUDA_VENDOR_VERSION
-  "${onnxruntime_core_vendor_VERSION}" CACHE STRING
-  "ONNX Runtime CUDA provider version")
-set(ONNXRUNTIME_CUDA_VENDOR_VARIANT
-  "${ONNXRUNTIME_CORE_VENDOR_VARIANT}" CACHE STRING
-  "Official GPU archive variant: cuda12 or cuda13")
-set_property(
-  CACHE ONNXRUNTIME_CUDA_VENDOR_VARIANT
-  PROPERTY STRINGS cuda12 cuda13)
-set(ONNXRUNTIME_CUDA_VENDOR_SHA256
-  "${ONNXRUNTIME_CORE_VENDOR_SHA256}" CACHE STRING
-  "SHA256 of the official ONNX Runtime GPU archive")
+set(ONNXRUNTIME_CUDA_VENDOR_VERSION "1.23.2")
 
-if(NOT ONNXRUNTIME_CUDA_VENDOR_VERSION STREQUAL
-    onnxruntime_core_vendor_VERSION)
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
+if(NOT _system_arch MATCHES "^(x86_64|amd64)$")
   message(FATAL_ERROR
-    "${PROJECT_NAME}: provider version "
-    "${ONNXRUNTIME_CUDA_VENDOR_VERSION} does not match core version "
-    "${onnxruntime_core_vendor_VERSION}")
+    "${PROJECT_NAME}: ONNX Runtime 1.23.2 GPU archives support x86_64 only")
 endif()
-if(NOT ONNXRUNTIME_CUDA_VENDOR_VARIANT STREQUAL
-    ONNXRUNTIME_CORE_VENDOR_VARIANT)
+if(NOT CUDAToolkit_VERSION_MAJOR EQUAL 12)
   message(FATAL_ERROR
-    "${PROJECT_NAME}: provider variant "
-    "${ONNXRUNTIME_CUDA_VENDOR_VARIANT} does not match core variant "
-    "${ONNXRUNTIME_CORE_VENDOR_VARIANT}")
-endif()
-if(NOT ONNXRUNTIME_CUDA_VENDOR_SHA256 STREQUAL
-    ONNXRUNTIME_CORE_VENDOR_SHA256)
-  message(FATAL_ERROR
-    "${PROJECT_NAME}: provider checksum does not match the core archive")
+    "${PROJECT_NAME}: ONNX Runtime 1.23.2 requires CUDA 12 and cuDNN 9, "
+    "but found CUDA ${CUDAToolkit_VERSION}")
 endif()
 
-if(ONNXRUNTIME_CUDA_VENDOR_VARIANT STREQUAL "cuda12")
-  set(_required_cuda_major 12)
-elseif(ONNXRUNTIME_CUDA_VENDOR_VARIANT STREQUAL "cuda13")
-  set(_required_cuda_major 13)
-else()
-  message(FATAL_ERROR
-    "${PROJECT_NAME}: ONNXRUNTIME_CUDA_VENDOR_VARIANT must be "
-    "cuda12 or cuda13")
-endif()
-if(NOT CUDAToolkit_VERSION_MAJOR EQUAL _required_cuda_major)
-  message(FATAL_ERROR
-    "${PROJECT_NAME}: ${ONNXRUNTIME_CUDA_VENDOR_VARIANT} requires "
-    "CUDA ${_required_cuda_major}, but found ${CUDAToolkit_VERSION}")
-endif()
+set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE_STEM
+  "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_CUDA_VENDOR_VERSION}")
+set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE
+  "${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE_STEM}.tgz")
+set(ONNXRUNTIME_CUDA_VENDOR_URL
+  "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_CUDA_VENDOR_VERSION}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
 
 set(_download_path
-  "${CMAKE_CURRENT_BINARY_DIR}/${ONNXRUNTIME_CORE_VENDOR_ARCHIVE}")
+  "${CMAKE_CURRENT_BINARY_DIR}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
 set(_extract_path "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime_extracted")
 set(_onnxruntime_root
-  "${_extract_path}/${ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM}")
+  "${_extract_path}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE_STEM}")
 
-if(NOT EXISTS
-    "${_onnxruntime_root}/lib/libonnxruntime_providers_cuda.so")
-  set(_hash_args)
-  if(ONNXRUNTIME_CUDA_VENDOR_SHA256)
-    list(APPEND _hash_args
-      EXPECTED_HASH
-        "SHA256=${ONNXRUNTIME_CUDA_VENDOR_SHA256}")
-  else()
-    message(WARNING
-      "${PROJECT_NAME}: no checksum is known for "
-      "${ONNXRUNTIME_CORE_VENDOR_ARCHIVE}")
-  endif()
-  file(DOWNLOAD "${ONNXRUNTIME_CORE_VENDOR_URL}" "${_download_path}"
-    ${_hash_args} SHOW_PROGRESS STATUS _download_status)
+if(NOT EXISTS "${_onnxruntime_root}/lib/libonnxruntime.so")
+  file(DOWNLOAD "${ONNXRUNTIME_CUDA_VENDOR_URL}" "${_download_path}"
+    SHOW_PROGRESS STATUS _download_status)
   list(GET _download_status 0 _download_code)
   if(NOT _download_code EQUAL 0)
     list(GET _download_status 1 _download_message)
@@ -98,26 +58,68 @@ if(NOT EXISTS
   file(REMOVE "${_download_path}")
 endif()
 
-set(_provider_library
-  "${_onnxruntime_root}/lib/libonnxruntime_providers_cuda.so")
-if(NOT EXISTS "${_provider_library}")
-  message(FATAL_ERROR
-    "${PROJECT_NAME}: archive is missing libonnxruntime_providers_cuda.so")
-endif()
+set(_required_files
+  include/onnxruntime_c_api.h
+  VERSION_NUMBER
+  lib/libonnxruntime.so
+  lib/libonnxruntime_providers_shared.so
+  lib/libonnxruntime_providers_cuda.so
+  lib/cmake/onnxruntime/onnxruntimeConfig.cmake
+  lib/cmake/onnxruntime/onnxruntimeConfigVersion.cmake)
+foreach(_required_file IN LISTS _required_files)
+  if(NOT EXISTS "${_onnxruntime_root}/${_required_file}")
+    message(FATAL_ERROR
+      "${PROJECT_NAME}: archive is missing ${_required_file}")
+  endif()
+endforeach()
 
-install(FILES "${_provider_library}"
-  DESTINATION "opt/onnxruntime_core_vendor/lib")
-install(
-  FILES "${_onnxruntime_root}/LICENSE"
+set(_onnxruntime_cmake_dir
+  "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime_cmake")
+file(REMOVE_RECURSE "${_onnxruntime_cmake_dir}")
+file(COPY "${_onnxruntime_root}/lib/cmake/onnxruntime"
+  DESTINATION "${_onnxruntime_cmake_dir}")
+file(GLOB _onnxruntime_cmake_files
+  "${_onnxruntime_cmake_dir}/onnxruntime/*.cmake")
+foreach(_cmake_file IN LISTS _onnxruntime_cmake_files)
+  file(READ "${_cmake_file}" _cmake_contents)
+  string(REPLACE
+    "\${_IMPORT_PREFIX}/lib64/" "\${_IMPORT_PREFIX}/lib/"
+    _cmake_contents "${_cmake_contents}")
+  file(WRITE "${_cmake_file}" "${_cmake_contents}")
+endforeach()
+
+install(DIRECTORY "${_onnxruntime_root}/include/"
+  DESTINATION "opt/${PROJECT_NAME}/include")
+install(DIRECTORY "${_onnxruntime_root}/lib/"
+  DESTINATION "opt/${PROJECT_NAME}/lib"
+  USE_SOURCE_PERMISSIONS
+  FILES_MATCHING
+    PATTERN "libonnxruntime.so*"
+    PATTERN "libonnxruntime_providers_shared.so*"
+    PATTERN "libonnxruntime_providers_cuda.so*"
+    PATTERN "cmake" EXCLUDE)
+install(DIRECTORY "${_onnxruntime_cmake_dir}/onnxruntime"
+  DESTINATION "opt/${PROJECT_NAME}/lib/cmake")
+install(FILES "${_onnxruntime_root}/VERSION_NUMBER"
+  DESTINATION "opt/${PROJECT_NAME}")
+install(FILES "${_onnxruntime_root}/LICENSE"
   DESTINATION "share/${PROJECT_NAME}")
 
-ament_index_register_resource(
-  "vendor_packages" CONTENT "opt/onnxruntime_core_vendor")
+ament_index_register_resource("vendor_packages" CONTENT "opt/${PROJECT_NAME}")
+if(APPLE)
+  set(_LIBDIR_VAR_NAME "DYLD_LIBRARY_PATH")
+elseif(WIN32)
+  set(_LIBDIR_VAR_NAME "PATH")
+else()
+  set(_LIBDIR_VAR_NAME "LD_LIBRARY_PATH")
+endif()
+ament_environment_hooks(
+  "${ament_cmake_vendor_package_DIR}/templates/vendor_package.sh.in"
+  "${ament_cmake_vendor_package_DIR}/templates/vendor_package.dsv.in")
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_package(
-  CONFIG_EXTRAS_POST "onnxruntime_cuda_vendor-extras.cmake.in")
+ament_package(CONFIG_EXTRAS_POST "onnxruntime_cuda_vendor-extras.cmake.in")

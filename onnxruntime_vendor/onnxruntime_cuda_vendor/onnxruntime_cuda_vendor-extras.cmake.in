@@ -12,15 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-find_package(onnxruntime_core_vendor REQUIRED)
+set(onnxruntime_cuda_vendor_VERSION "@ONNXRUNTIME_CUDA_VENDOR_VERSION@")
+set(ONNXRUNTIME_CUDA_VENDOR_VERSION "@ONNXRUNTIME_CUDA_VENDOR_VERSION@")
 
-set(onnxruntime_cuda_vendor_VERSION
-  "@ONNXRUNTIME_CUDA_VENDOR_VERSION@")
-set(ONNXRUNTIME_CUDA_VENDOR_VERSION
-  "@ONNXRUNTIME_CUDA_VENDOR_VERSION@")
-set(ONNXRUNTIME_CUDA_VENDOR_VARIANT
-  "@ONNXRUNTIME_CUDA_VENDOR_VARIANT@")
-set(ONNXRUNTIME_CUDA_VENDOR_SHA256
-  "@ONNXRUNTIME_CUDA_VENDOR_SHA256@")
+get_filename_component(
+  _onnxruntime_cuda_vendor_prefix
+  "${onnxruntime_cuda_vendor_DIR}/../../.."
+  ABSOLUTE)
+set(onnxruntime_cuda_vendor_ROOT
+  "${_onnxruntime_cuda_vendor_prefix}/opt/onnxruntime_cuda_vendor")
+set(onnxruntime_cuda_vendor_INCLUDE_DIRS
+  "${onnxruntime_cuda_vendor_ROOT}/include")
+set(onnxruntime_cuda_vendor_LIBRARY_DIRS
+  "${onnxruntime_cuda_vendor_ROOT}/lib")
 set(onnxruntime_cuda_vendor_LIBRARY
-  "${onnxruntime_core_vendor_LIBRARY_DIRS}/libonnxruntime_providers_cuda.so")
+  "${onnxruntime_cuda_vendor_LIBRARY_DIRS}/libonnxruntime_providers_cuda.so")
+
+if(NOT TARGET onnxruntime::onnxruntime)
+  add_library(onnxruntime::onnxruntime SHARED IMPORTED)
+  set_target_properties(onnxruntime::onnxruntime PROPERTIES
+    IMPORTED_LOCATION
+      "${onnxruntime_cuda_vendor_LIBRARY_DIRS}/libonnxruntime.so"
+    INTERFACE_INCLUDE_DIRECTORIES
+      "${onnxruntime_cuda_vendor_INCLUDE_DIRS}"
+    INTERFACE_LINK_OPTIONS
+      "$<$<PLATFORM_ID:Linux>:LINKER:-rpath,${onnxruntime_cuda_vendor_LIBRARY_DIRS}>")
+endif()
+
+unset(_onnxruntime_cuda_vendor_prefix)
