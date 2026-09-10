@@ -14,13 +14,12 @@
   <depend>dlpack_conversions</depend>
   <depend>tensor_msgs</depend>
 
-  <!-- The CPU runtime is the default; onnxruntime_cuda_vendor conflicts with
-       it and replaces it on GPU hosts. -->
+  <!-- Names one runtime only. onnxruntime_core_vendor covers both CPU and GPU
+       through its variant option, and every other provider conflicts with it,
+       so naming a second one here would make this package depend on two
+       packages that cannot be installed together. The build finds whichever
+       provider is present. -->
   <depend>onnxruntime_core_vendor</depend>
-
-  <!-- The adapter is header-only, so ONNX Runtime is resolved in the
-       consumer's build rather than in this one. -->
-  <build_export_depend>onnxruntime_cuda_vendor</build_export_depend>
 
   <exec_depend>dlpack_conversions_cpu</exec_depend>
 
@@ -29,7 +28,6 @@
   <test_depend>ament_lint_common</test_depend>
   <test_depend>dlpack_conversions_cuda</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
-  <test_depend>onnxruntime_cuda_vendor</test_depend>
   <test_depend>rclcpp</test_depend>
   <test_depend>rclcpp_components</test_depend>
   <test_depend>rosidl_runtime_cpp</test_depend>
