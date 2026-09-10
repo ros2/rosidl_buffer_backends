@@ -87,7 +87,9 @@ public:
     return {};
   }
 
-  const std::string & default_backend() const {return default_;}
+  // Per call, so an unusable ROSIDL_TENSOR_BACKEND fails here alone rather
+  // than from every entry point, available_backends() included.
+  std::string default_backend() const {return resolve_default();}
 
   bool available(const std::string & backend) const
   {
@@ -136,7 +138,6 @@ private:
         plugins_.push_back(plugin);
       }
     }
-    default_ = resolve_default();
   }
 
   std::string resolve_default() const
@@ -167,7 +168,6 @@ private:
   pluginlib::ClassLoader<StoragePlugin> loader_;
   std::vector<std::shared_ptr<StoragePlugin>> plugins_;
   std::map<std::string, std::shared_ptr<StoragePlugin>> backends_;
-  std::string default_;
 };
 
 std::string require_backend_for_device(int32_t dl_device_type)
