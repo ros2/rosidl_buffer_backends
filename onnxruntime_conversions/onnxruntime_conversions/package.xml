@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>onnxruntime_conversions</name>
-  <version>0.2.0</version>
+  <version>0.1.2</version>
   <description>Header-only adapter between Ort::Value and DLPack tensor messages.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
@@ -13,6 +13,10 @@
 
   <depend>dlpack_conversions</depend>
   <depend>tensor_msgs</depend>
+
+  <!-- The CPU runtime is the default; onnxruntime_cuda_vendor conflicts with
+       it and replaces it on GPU hosts. -->
+  <depend>onnxruntime_core_vendor</depend>
 
   <!-- The adapter is header-only, so ONNX Runtime is resolved in the
        consumer's build rather than in this one. -->
