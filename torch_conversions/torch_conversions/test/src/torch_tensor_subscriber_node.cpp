@@ -79,7 +79,6 @@ private:
     const std::string backend_type = msg->data.get_backend_type();
 
     if (msg_valid && !msg->data.empty()) {
-      torch_conversions::StreamGuard guard = torch_conversions::set_stream();
       at::Tensor tensor = torch_conversions::from_input_tensor_msg(
         *msg,
         /*clone=*/true);

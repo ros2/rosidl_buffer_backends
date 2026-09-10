@@ -165,4 +165,11 @@ def load_external_plugins(registry: StorageRegistry) -> None:
             raise RuntimeError(
                 f'Invalid storage plugin resource from {package_name}'
             )
-        getattr(import_module(module_name), function_name)(registry)
+        try:
+            plugin_module = import_module(module_name)
+        except (ImportError, OSError):
+            # An accelerator plugin whose runtime is absent is simply not
+            # offered, as in the C++ core. Letting it raise would take the
+            # host backend down with it.
+            continue
+        getattr(plugin_module, function_name)(registry)

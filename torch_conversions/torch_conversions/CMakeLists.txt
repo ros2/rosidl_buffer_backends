@@ -50,10 +50,6 @@ if(BUILD_TESTING)
 
   add_library(test_fixture INTERFACE)
   target_link_libraries(test_fixture INTERFACE ${PROJECT_NAME} torch)
-  if(TARGET torch_cuda)
-    target_compile_definitions(test_fixture INTERFACE
-      TORCH_CONVERSIONS_ENABLE_CUDA)
-  endif()
 
   ament_add_gtest(test_torch_conversions test/test_torch_conversions.cpp)
   if(TARGET test_torch_conversions)

@@ -37,12 +37,13 @@ colcon build --merge-install --packages-up-to torch_conversions \
 ### Publisher
 
 ```cpp
+#include <c10/cuda/CUDAStream.h>
 #include "torch_conversions/torch_conversions.hpp"
 
-auto guard = torch_conversions::set_stream();
+void * stream = c10::cuda::getCurrentCUDAStream().stream();
 auto msg = torch_conversions::allocate_tensor_msg(
   {480, 640, 3}, torch::kUInt8, c10::kCUDA);
-at::Tensor output = torch_conversions::from_output_tensor_msg(*msg);
+at::Tensor output = torch_conversions::from_output_tensor_msg(*msg, stream);
 my_pipeline(output);
 publisher->publish(std::move(msg));
 ```
@@ -50,21 +51,37 @@ publisher->publish(std::move(msg));
 ### Subscriber
 
 ```cpp
-auto guard = torch_conversions::set_stream();
-at::Tensor tensor = torch_conversions::from_input_tensor_msg(*received);
+void * stream = c10::cuda::getCurrentCUDAStream().stream();
+at::Tensor tensor = torch_conversions::from_input_tensor_msg(
+  *received, /*clone=*/true, stream);
 at::Tensor view = torch_conversions::from_input_tensor_msg(
-  *received, /*clone=*/false);
+  *received, /*clone=*/false, stream);
 ```
 
 ### Existing tensor
 
 ```cpp
 at::Tensor tensor = my_pipeline().contiguous();
-auto msg = torch_conversions::to_tensor_msg(tensor);
+auto msg = torch_conversions::to_tensor_msg(tensor, stream);
 publisher->publish(std::move(msg));
 ```
 
-`to_tensor_msg(*msg, tensor)` reuses a pre-sized message.
+`to_tensor_msg(*msg, tensor, stream)` reuses a pre-sized message.
+
+### Execution streams
+
+Every conversion takes an optional trailing execution stream, which the
+storage plugin uses to order its access against your kernels. It is the same
+parameter `onnxruntime_conversions` takes.
+
+Leave it unset for host storage, or when your work runs on the default stream.
+Pass it whenever it does not: reading storage on the default stream while your
+kernels write it on another is a race, and the adapter cannot detect the
+difference on your behalf. The adapter deliberately does not read the current
+stream itself, since doing so in C++ means compiling against a CUDA LibTorch,
+which would fix a consumer's accelerator at build time. Your own code that
+calls `getCurrentCUDAStream()` is already compiled against CUDA by definition,
+so the choice stays where the information is.
 
 ## Python
 
@@ -88,12 +105,10 @@ colcon build --merge-install --packages-up-to torch_conversions_py \
 import torch
 from torch_conversions import allocate_tensor_msg
 from torch_conversions import from_output_tensor_msg
-from torch_conversions import set_stream
 
-with set_stream():
-    msg = allocate_tensor_msg((480, 640, 3), torch.uint8, 'cuda')
-    output = from_output_tensor_msg(msg)
-    my_pipeline(output)
+msg = allocate_tensor_msg((480, 640, 3), torch.uint8, 'cuda')
+output = from_output_tensor_msg(msg)
+my_pipeline(output)
 publisher.publish(msg)
 ```
 
@@ -101,12 +116,10 @@ publisher.publish(msg)
 
 ```python
 from torch_conversions import from_input_tensor_msg
-from torch_conversions import set_stream
 
 def callback(msg):
-    with set_stream():
-        tensor = from_input_tensor_msg(msg)
-        view = from_input_tensor_msg(msg, clone=False)
+    tensor = from_input_tensor_msg(msg)
+    view = from_input_tensor_msg(msg, clone=False)
 ```
 
 ### Existing tensor
@@ -117,6 +130,26 @@ from torch_conversions import to_tensor_msg
 msg = to_tensor_msg(torch.arange(12, device='cuda').reshape(3, 4))
 publisher.publish(msg)
 ```
+
+### Execution streams
+
+Python needs no stream argument. Reading the current stream costs nothing
+here, so the conversions order themselves against whatever stream torch is on,
+including inside a `set_stream()` or `torch.cuda.stream()` block:
+
+```python
+from torch_conversions import set_stream
+
+with set_stream():
+    msg = allocate_tensor_msg((480, 640, 3), torch.uint8, 'cuda')
+    from_output_tensor_msg(msg)
+```
+
+Every conversion still accepts a `stream=` override for the rare case of
+handing storage to a stream torch does not know about. This is where the
+Python and C++ APIs differ on purpose: in C++ reading the current stream means
+compiling against a CUDA LibTorch, which would fix a consumer's accelerator at
+build time, so there the stream has to come from the caller.
 
 `to_tensor_msg(msg, tensor)` reuses a pre-sized message.
 

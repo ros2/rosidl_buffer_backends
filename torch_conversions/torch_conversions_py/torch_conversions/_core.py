@@ -91,7 +91,17 @@ def _has_accelerator_backend() -> bool:
     )
 
 
-def _stream() -> Optional[int]:
+def _resolve_stream(stream: Optional[int]) -> Optional[int]:
+    """
+    Take the caller's stream, or fall back to the one torch is running on.
+
+    The C++ adapter cannot do this: reading the current stream there means
+    compiling against a CUDA LibTorch, which would decide a consumer's
+    accelerator at build time. Here it is a plain runtime attribute lookup, so
+    an explicit stream is only needed to override the current one.
+    """
+    if stream is not None:
+        return stream
     if not _accelerator_available():
         return None
     return torch.cuda.current_stream().cuda_stream
@@ -120,8 +130,11 @@ def allocate_tensor_msg(
 
 def from_output_tensor_msg(
     msg: ExperimentalTensor,
+    stream: Optional[int] = None,
 ) -> Optional[torch.Tensor]:
-    capsule = dlpack_conversions.from_output_tensor_msg(msg, _stream())
+    capsule = dlpack_conversions.from_output_tensor_msg(
+        msg, _resolve_stream(stream)
+    )
     if capsule is None:
         return None
     return torch.utils.dlpack.from_dlpack(capsule)
@@ -130,15 +143,21 @@ def from_output_tensor_msg(
 def from_input_tensor_msg(
     msg: ExperimentalTensor,
     clone: bool = True,
+    stream: Optional[int] = None,
 ) -> Optional[torch.Tensor]:
-    capsule = dlpack_conversions.from_input_tensor_msg(msg, _stream())
+    capsule = dlpack_conversions.from_input_tensor_msg(
+        msg, _resolve_stream(stream)
+    )
     if capsule is None:
         return None
     tensor = torch.utils.dlpack.from_dlpack(capsule)
     return tensor.clone() if clone else tensor
 
 
-def to_tensor_msg(*args: object) -> ExperimentalTensor:
+def to_tensor_msg(
+    *args: object,
+    stream: Optional[int] = None,
+) -> ExperimentalTensor:
     if len(args) == 1 and isinstance(args[0], torch.Tensor):
         tensor = args[0]
         if tensor.numel() == 0:
@@ -167,7 +186,7 @@ def to_tensor_msg(*args: object) -> ExperimentalTensor:
     msg.shape = list(contiguous.shape)
     msg.strides = dlpack_conversions.contiguous_strides(msg.shape)
     msg.byte_offset = 0
-    output = from_output_tensor_msg(msg)
+    output = from_output_tensor_msg(msg, stream)
     if output is not None:
         output.copy_(contiguous)
     return msg

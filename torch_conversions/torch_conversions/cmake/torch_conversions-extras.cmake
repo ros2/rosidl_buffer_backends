@@ -29,11 +29,3 @@ endif()
 
 set_property(TARGET torch_conversions::torch_conversions APPEND PROPERTY
   INTERFACE_LINK_LIBRARIES torch)
-
-# Enables the accelerator stream lookup only when this LibTorch has CUDA. The
-# ATen CUDA headers ship with CPU-only builds too, so the target is the only
-# reliable signal.
-if(TARGET torch_cuda)
-  set_property(TARGET torch_conversions::torch_conversions APPEND PROPERTY
-    INTERFACE_COMPILE_DEFINITIONS TORCH_CONVERSIONS_ENABLE_CUDA)
-endif()
