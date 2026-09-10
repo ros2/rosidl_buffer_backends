@@ -21,8 +21,12 @@ conversion libraries that build on the same buffer infrastructure.
   `cu130` wheel from the detected CUDA Toolkit; JetPack provides the
   required installation on Tegra.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **onnxruntime_cuda_vendor** -- ONNX Runtime GPU 1.23.2 C++ distribution for
-  CUDA 12 and cuDNN 9.
+- **onnxruntime_core_vendor** -- ONNX Runtime 1.29.0 CPU and CUDA-neutral C++
+  distribution.
+- **onnxruntime_cuda_vendor** -- ONNX Runtime GPU 1.29.0 C++ distribution
+  matching the host CUDA major.
+- **python_onnxruntime_vendor** -- ONNX Runtime 1.29.0 CPU Python wheel
+  packaged for ROS.
 - **python_onnxruntime_cuda_vendor** -- Unmodified CUDA Python ONNX Runtime
   wheel packaged for ROS.
 - **[dlpack_conversions](dlpack_conversions/README.md)** -- Framework-free C++
@@ -79,15 +83,17 @@ choose one for the whole process.
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- CUDA Toolkit 12.6-12.9 or 13.0 for CUDA buffer and Torch conversion
-  packages. ONNX Runtime CUDA conversions support CUDA 12 with cuDNN 9 only.
-  CPU-only conversions do not require CUDA.
+- A CUDA Toolkit in the 12 or 13 series for the CUDA buffer, Torch, and ONNX
+  Runtime packages, declared through the `cuda-toolkit` rosdep key. The
+  vendors read only the major version, choosing `cu126`, `cu128`, or `cu130`
+  wheels and CUDA 12 or CUDA 13 ONNX Runtime archives. CPU-only conversions
+  do not require CUDA.
 
 Torch conversions use Ubuntu Resolute's `libtorch-dev` and `python3-torch` on
-CPU, and `libtorch_vendor` and `python3_torch_cuda_vendor` on CUDA. ONNX
-Runtime conversions use Ubuntu's `libonnxruntime-dev` 1.23.2 and
-`python3-onnxruntime` on CPU, and a separate, conflicting ONNX Runtime GPU
-1.23.2 vendor plus the matching wheel on CUDA.
+CPU, and `libtorch_vendor` and `python3_torch_cuda_vendor` on CUDA; each
+vendor conflicts with the distro package it replaces. ONNX Runtime is
+vendored at 1.29.0 on both paths, because Ubuntu ships 1.23.2, which predates
+the `OrtValue.from_dlpack` the Python adapter needs.
 
 ## API overview
 

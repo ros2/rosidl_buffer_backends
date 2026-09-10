@@ -1,7 +1,7 @@
 # ONNX Runtime conversions
 
 Zero-copy conversions between `tensor_msgs/msg/ExperimentalTensor` and ONNX
-Runtime 1.23.2. CUDA uses CUDA 12 and cuDNN 9.
+Runtime.
 
 `onnxruntime_conversions` translates between ONNX Runtime tensors and DLPack,
 and [`dlpack_conversions`](../dlpack_conversions/README.md) owns the message
@@ -156,5 +156,25 @@ session = ort.InferenceSession(
 
 ## Version
 
-Require ONNX Runtime 1.23.x. Remove other copies from `/usr/local`, pip,
-Conda, or `PYTHONPATH` if they take precedence.
+The C++ adapter is header-only and pins nothing. The Python adapter needs
+1.26.0 or newer, the first release where `OrtValue.from_dlpack` and
+`__dlpack__` ship.
+
+The vendor packages supply 1.29.0 on both sides:
+`onnxruntime_core_vendor` for the CPU and CUDA-neutral C++ runtime,
+`onnxruntime_cuda_vendor` for the GPU C++ runtime matching the host CUDA
+major, and `python_onnxruntime_vendor` or `python_onnxruntime_cuda_vendor`
+for the wheel. Exactly one provider of each may be installed, which the
+packages enforce by declared conflict.
+
+cuDNN is not a declared dependency. The CUDA execution provider dlopens it
+only for conv-style operators, and Ubuntu packages cuDNN for CUDA 12 alone,
+so install `nvidia-cudnn-cu13` yourself on a CUDA 13 host that runs those
+models.
+
+Only one ONNX Runtime may be reachable at a time. Remove other copies from
+`/usr/local`, pip, Conda, or `PYTHONPATH` if they take precedence.
+
+## License
+
+Apache-2.0
