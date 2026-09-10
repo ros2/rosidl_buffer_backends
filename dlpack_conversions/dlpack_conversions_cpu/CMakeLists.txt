@@ -34,6 +34,13 @@ install(
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_${PROJECT_NAME} test/test_dlpack_conversions_cpu.cpp)
+  if(TARGET test_${PROJECT_NAME})
+    target_link_libraries(test_${PROJECT_NAME}
+      dlpack_conversions::dlpack_conversions)
+  endif()
 endif()
 
 ament_package()
