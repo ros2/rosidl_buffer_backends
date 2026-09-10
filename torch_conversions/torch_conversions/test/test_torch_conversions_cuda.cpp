@@ -15,7 +15,21 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+// This translation unit is compiled only against a CUDA LibTorch, so it can
+// reach for a real stream the way a GPU consumer of the adapter would.
+#include <c10/cuda/CUDAStream.h>
+
 #include "torch_conversions/torch_conversions.hpp"
+
+namespace
+{
+
+void * current_stream()
+{
+  return c10::cuda::getCurrentCUDAStream().stream();
+}
+
+}  // namespace
 
 TEST(TorchConversionsCuda, AllocatesCudaStorage)
 {
@@ -30,4 +44,69 @@ TEST(TorchConversionsCuda, AllocatesCudaStorage)
   auto tensor = torch_conversions::from_output_tensor_msg(*msg);
   EXPECT_TRUE(tensor.is_cuda());
   tensor.fill_(1.0);
+}
+
+TEST(TorchConversionsCuda, RoundTripsOnACallerSuppliedStream)
+{
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA driver is unavailable";
+  }
+
+  auto msg = torch_conversions::allocate_tensor_msg(
+    {64}, at::kFloat, c10::kCUDA);
+
+  {
+    auto output = torch_conversions::from_output_tensor_msg(
+      *msg, current_stream());
+    ASSERT_TRUE(output.is_cuda());
+    output.fill_(3.0);
+  }
+
+  auto input = torch_conversions::from_input_tensor_msg(
+    *msg, /*clone=*/true, current_stream());
+  ASSERT_TRUE(input.is_cuda());
+  EXPECT_FLOAT_EQ(input.sum().item<float>(), 192.0f);
+}
+
+TEST(TorchConversionsCuda, CopiesIntoStorageOnACallerSuppliedStream)
+{
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA driver is unavailable";
+  }
+
+  const auto source = at::full({32}, 5.0, at::device(at::kCUDA).dtype(at::kFloat));
+
+  auto msg = torch_conversions::to_tensor_msg(source, current_stream());
+  ASSERT_EQ(msg->data.get_backend_type(), "cuda");
+
+  auto readback = torch_conversions::from_input_tensor_msg(
+    *msg, /*clone=*/true, current_stream());
+  EXPECT_FLOAT_EQ(readback.sum().item<float>(), 160.0f);
+}
+
+// A caller running off the default stream is the case the parameter exists
+// for: the storage plugin has to order against the stream that was passed,
+// not against whatever stream happens to be current inside the adapter.
+TEST(TorchConversionsCuda, HonoursANonDefaultStream)
+{
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA driver is unavailable";
+  }
+
+  const auto stream = c10::cuda::getStreamFromPool();
+  c10::cuda::CUDAStreamGuard guard(stream);
+  ASSERT_NE(stream.stream(), c10::cuda::getDefaultCUDAStream().stream());
+
+  auto msg = torch_conversions::allocate_tensor_msg(
+    {32}, at::kFloat, c10::kCUDA);
+
+  {
+    auto output = torch_conversions::from_output_tensor_msg(
+      *msg, stream.stream());
+    output.fill_(7.0);
+  }
+
+  auto input = torch_conversions::from_input_tensor_msg(
+    *msg, /*clone=*/true, stream.stream());
+  EXPECT_FLOAT_EQ(input.sum().item<float>(), 224.0f);
 }

@@ -63,8 +63,6 @@ private:
       return;
     }
 
-    torch_conversions::StreamGuard guard = torch_conversions::set_stream();
-
     auto msg = torch_conversions::allocate_tensor_msg(
       {tensor_height_, tensor_width_, 3}, torch::kByte);
 

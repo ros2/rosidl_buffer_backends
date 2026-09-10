@@ -15,8 +15,13 @@
   <exec_depend>dlpack_conversions_py</exec_depend>
   <exec_depend>dlpack_conversions_py_cpu</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
-  <exec_depend>python_onnxruntime_vendor</exec_depend>
   <exec_depend>tensor_msgs</exec_depend>
+
+  <!-- No wheel provider is named. Every provider conflicts with the others,
+       so depending on one would stop apt swapping it for another without
+       removing this package, which is the CPU to GPU upgrade. bloom emits no
+       Provides, so no virtual package can bridge them either. -->
+  <test_depend>python_onnxruntime_vendor</test_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>

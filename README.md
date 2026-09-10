@@ -128,17 +128,18 @@ auto rh = cuda_buffer_backend::from_input_buffer(cpu_or_other_buf, stream);
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
 // Publisher: allocate a Tensor message (accelerated backend when available).
-auto guard = torch_conversions::set_stream();
 auto msg = torch_conversions::allocate_tensor_msg(
   /*shape=*/{1080, 1920, 3}, torch::kUInt8);
 
-// Wrap as at::Tensor without copying and write into it.
+// Wrap as at::Tensor without copying and write into it. On an accelerator,
+// pass the stream your kernels run on as a trailing argument so the storage
+// plugin orders its access against them, the same way
+// onnxruntime_conversions takes an execution stream.
 at::Tensor t_out = torch_conversions::from_output_tensor_msg(*msg);
 my_pipeline(t_out);
 publisher->publish(std::move(msg));
 
 // Subscriber: independent tensor by default.
-auto guard = torch_conversions::set_stream();
 at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
 ```
 

@@ -30,7 +30,6 @@
 // translation unit and the core agree on DLManagedTensor. dlpack_conversions.hpp
 // static_asserts the layout, which fails the build on a real version skew.
 #include "dlpack_conversions/dlpack_conversions.hpp"
-#include "torch_conversions/detail/stream.hpp"
 
 namespace torch_conversions
 {
@@ -86,18 +85,6 @@ inline DLTensor as_dl_tensor(const at::Tensor & tensor)
   return source;
 }
 
-inline uintptr_t stream_for(const TensorMsg & msg)
-{
-  return msg.data.get_backend_type() == "cpu" ? 0 : current_stream();
-}
-
-inline uintptr_t stream_for(const TensorMsg & msg, const at::Tensor & source)
-{
-  const bool host_only =
-    source.device().is_cpu() && msg.data.get_backend_type() == "cpu";
-  return host_only ? 0 : current_stream();
-}
-
 // Storage plugins and the LibTorch build are installed independently, so an
 // accelerator plugin can be present alongside a LibTorch that has no kernels
 // for it. Handing that storage back would only fail later inside ATen, so an
@@ -126,20 +113,35 @@ inline std::unique_ptr<TensorMsg> allocate_tensor_msg(
     shape, detail::dl_dtype(dtype), backend);
 }
 
-inline at::Tensor from_output_tensor_msg(TensorMsg & msg)
+/// Exposes message storage for torch to write into.
+///
+/// On an accelerator, pass the stream your kernels run on so the storage
+/// plugin orders access against it. at::cuda::getCurrentCUDAStream().stream()
+/// is the usual value. Leaving it unset names the default stream, which is
+/// only safe if that is where the work happens.
+inline at::Tensor from_output_tensor_msg(
+  TensorMsg & msg,
+  void * execution_stream = nullptr)
 {
   auto managed = dlpack_conversions::from_output_tensor_msg(
-    msg, detail::stream_for(msg));
+    msg, reinterpret_cast<uintptr_t>(execution_stream));
   if (!managed) {
     return {};
   }
   return at::fromDLPack(managed.release());
 }
 
-inline at::Tensor from_input_tensor_msg(const TensorMsg & msg, bool clone = true)
+/// Reads message storage without copying, cloning by default so the result
+/// outlives the storage lease.
+///
+/// Takes an execution stream on the same terms as from_output_tensor_msg().
+inline at::Tensor from_input_tensor_msg(
+  const TensorMsg & msg,
+  bool clone = true,
+  void * execution_stream = nullptr)
 {
   auto managed = dlpack_conversions::from_input_tensor_msg(
-    msg, detail::stream_for(msg));
+    msg, reinterpret_cast<uintptr_t>(execution_stream));
   if (!managed) {
     return {};
   }
@@ -147,7 +149,13 @@ inline at::Tensor from_input_tensor_msg(const TensorMsg & msg, bool clone = true
   return clone ? tensor.clone() : tensor;
 }
 
-inline void to_tensor_msg(TensorMsg & msg, const at::Tensor & tensor)
+/// Copies a tensor into existing message storage and stamps its metadata.
+///
+/// Takes an execution stream on the same terms as from_output_tensor_msg().
+inline void to_tensor_msg(
+  TensorMsg & msg,
+  const at::Tensor & tensor,
+  void * execution_stream = nullptr)
 {
   if (!tensor.defined() || tensor.numel() == 0) {
     return;
@@ -156,10 +164,16 @@ inline void to_tensor_msg(TensorMsg & msg, const at::Tensor & tensor)
   dlpack_conversions::to_tensor_msg(
     msg,
     detail::as_dl_tensor(contiguous),
-    detail::stream_for(msg, contiguous));
+    reinterpret_cast<uintptr_t>(execution_stream));
 }
 
-inline std::unique_ptr<TensorMsg> to_tensor_msg(const at::Tensor & tensor)
+/// Allocates a message on the backend matching the tensor's device, then
+/// copies.
+///
+/// Takes an execution stream on the same terms as from_output_tensor_msg().
+inline std::unique_ptr<TensorMsg> to_tensor_msg(
+  const at::Tensor & tensor,
+  void * execution_stream = nullptr)
 {
   if (!tensor.defined() || tensor.numel() == 0) {
     return std::make_unique<TensorMsg>();
@@ -167,7 +181,7 @@ inline std::unique_ptr<TensorMsg> to_tensor_msg(const at::Tensor & tensor)
   const auto contiguous = tensor.contiguous();
   return dlpack_conversions::to_tensor_msg(
     detail::as_dl_tensor(contiguous),
-    contiguous.device().is_cpu() ? 0 : detail::current_stream());
+    reinterpret_cast<uintptr_t>(execution_stream));
 }
 
 }  // namespace torch_conversions
