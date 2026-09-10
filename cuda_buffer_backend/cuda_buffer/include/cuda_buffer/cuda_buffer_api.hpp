@@ -26,21 +26,11 @@
 #include "cuda_buffer/cuda_buffer_impl.hpp"
 #include "cuda_buffer/cuda_error.hpp"
 #include "cuda_buffer/external_memory_pool.hpp"
+#include "cuda_buffer/transport_pool.hpp"
 #include "rosidl_buffer/buffer.hpp"
 
 namespace cuda_buffer_backend
 {
-
-/// \brief Allocate a fresh CUDA-backed \c rosidl::Buffer<uint8_t> of \p count
-/// bytes. Pure allocation: no handle is acquired, no data is copied. The
-/// caller owns the returned buffer and assigns it wherever the schema needs
-/// it (e.g. `msg.data = allocate_buffer(n)` for messages that follow the
-/// `data` convention, or an arbitrary field on other messages).
-inline rosidl::Buffer<uint8_t> allocate_buffer(size_t count)
-{
-  return rosidl::Buffer<uint8_t>(
-    std::make_unique<CudaBufferImpl<uint8_t>>(count));
-}
 
 /// \brief Allocate \p count elements out of a caller-owned device region.
 ///
@@ -75,6 +65,43 @@ rosidl::Buffer<T> allocate_buffer_from(
   }
   return rosidl::Buffer<T>(
     std::make_unique<CudaBufferImpl<T>>(std::move(pool), count));
+}
+
+/// \brief Allocate a fresh CUDA-backed \c rosidl::Buffer<uint8_t> of \p count
+/// bytes. Pure allocation: no handle is acquired, no data is copied. The
+/// caller owns the returned buffer and assigns it wherever the schema needs
+/// it (e.g. `msg.data = allocate_buffer(n)` for messages that follow the
+/// `data` convention, or an arbitrary field on other messages).
+///
+/// Which device memory depends on the RMW the process actually loaded. One
+/// that offers a participant-wide transport pool is asked first, so the bytes
+/// are written straight into memory the transport can send without copying
+/// them; every other RMW falls through to this process's own CUDA pool, which
+/// is what this function has always done. The two are indistinguishable
+/// afterwards -- backend \c "cuda", the same handles, the same event ordering,
+/// resizable within whichever pool they came from -- and that is why the
+/// zero-copy path was put here rather than behind a second entry point: no
+/// call site has to be rewritten, or even to know.
+///
+/// Falling back is never silent about being *wrong*, only about being ordinary:
+/// once a transport has handed over a pool, failing to satisfy the request out
+/// of it throws rather than quietly costing a copy.
+///
+/// Ordered after allocate_buffer_from() because it calls it, and after the
+/// include of transport_pool.hpp because it calls that. The include runs one
+/// way only: transport_pool.hpp must not include this header back.
+inline rosidl::Buffer<uint8_t> allocate_buffer(size_t count)
+{
+  // Zero elements are worth nobody's transport memory, and 0 is the protocol's
+  // "no hint" besides -- asking a provider to pick a size class for an
+  // allocation that will not happen.
+  if (count > 0) {
+    if (std::shared_ptr<ExternalMemoryPool> pool = shared_transport_pool(count)) {
+      return allocate_buffer_from<uint8_t>(std::move(pool), count);
+    }
+  }
+  return rosidl::Buffer<uint8_t>(
+    std::make_unique<CudaBufferImpl<uint8_t>>(count));
 }
 
 /// \brief Wrap \p count elements of device memory allocated somewhere else.

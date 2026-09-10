@@ -23,12 +23,13 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <utility>
 
-#include "cuda_buffer/cuda_buffer_api.hpp"
+// Nothing from cuda_buffer_api.hpp, deliberately: allocate_buffer() consults
+// the pool declared below, so that header includes *this* one. The dependency
+// has to run one way, and this is the end of it that hands back a pool rather
+// than a buffer, so it can do without.
 #include "cuda_buffer/external_memory_pool.hpp"
 #include "rmw/rmw.h"
-#include "rosidl_buffer/buffer.hpp"
 
 namespace cuda_buffer_backend
 {
@@ -42,35 +43,43 @@ namespace cuda_buffer_backend
 /// transport wants an ordinary buffer and will copy it into whatever it sends.
 ///
 /// An application should not have to know which kind it is talking to, and
-/// certainly should not link the RMW to find out. So this asks, portably:
-///
-///     msg.data = allocate_for_publisher<uint8_t>(rmw_pub, count);
-///
-/// and gets transport memory when the transport offers it, an ordinary pooled
-/// buffer when it does not. The result is a `rosidl::Buffer` either way, with
-/// the same backend name, handles and event ordering, so nothing downstream
-/// changes.
+/// certainly should not link the RMW to find out. It should not have to hold a
+/// publisher either -- most allocation sites never see one -- so there is
+/// nothing portable to ask here at all. Ordinary `allocate_buffer(n)` consults
+/// the pool below and lands in transport memory where one exists; every
+/// existing call site gets that unmodified, and none of them names a writer.
 ///
 /// \par The protocol
 /// An RMW opts in by exporting two C symbols with default visibility:
 ///
 /// \code
-///   /// \param rmw_publisher an `rmw_publisher_t *`.
+///   /// \param size_hint bytes the caller is about to allocate, so a provider
+///   ///   keeping several size classes can pick one. 0 means "no hint".
 ///   /// \param out_pool receives a heap-allocated
 ///   ///   `std::shared_ptr<cuda_buffer_backend::ExternalMemoryPool> *`.
-///   /// \return 0 on success; anything else means "no pool for this
-///   ///   publisher", which is an ordinary answer and not an error.
-///   int rosidl_cuda_transport_pool_acquire_v1(const void * rmw_publisher,
-///                                             void ** out_pool);
+///   /// \return 0 on success; anything else means "no shared pool", which is
+///   ///   an ordinary answer and not an error.
+///   int rosidl_cuda_transport_pool_acquire_shared_v1(size_t size_hint,
+///                                                    void ** out_pool);
 ///
 ///   /// Destroy the holder from a successful acquire. The caller has copied
 ///   /// the shared_ptr out of it by then, so the pool itself survives.
-///   void rosidl_cuda_transport_pool_release_v1(void * out_pool);
+///   void rosidl_cuda_transport_pool_release_shared_v1(void * out_pool);
 /// \endcode
 ///
 /// The two-call shape exists because a `shared_ptr` cannot cross a C boundary.
 /// The `_v1` suffix is the ABI version: a future revision adds new symbols
 /// rather than changing these, so an old client and a new RMW keep working.
+///
+/// The `_shared` in the names is historical and load-bearing only as an ABI
+/// string. There was once a second, publisher-scoped pair -- `acquire_v1` /
+/// `release_v1`, reached through an `allocate_for_publisher()` that took an
+/// `rmw_publisher_t *` -- and these were "the participant-wide variant" of it.
+/// That pair is gone: an allocation that has to name a writer cannot serve the
+/// call sites this exists for, and keeping both meant two ways to ask one
+/// question. Do not reintroduce a publisher-scoped symbol under a new name
+/// without first showing that a caller which cannot reach `allocate_buffer()`
+/// actually exists.
 ///
 /// \par Why the RMW is found this way
 /// `rmw_implementation` loads the RMW with `dlopen(path, RTLD_LAZY)`, and glibc
@@ -91,10 +100,13 @@ namespace detail
 /// Absent for most RMWs, which is the expected case and not a failure.
 struct TransportPoolApi
 {
-  int (* acquire)(const void *, void **) = nullptr;
-  void (* release)(void *) = nullptr;
+  int (* acquire_shared)(size_t, void **) = nullptr;
+  void (* release_shared)(void *) = nullptr;
 
-  bool valid() const {return acquire != nullptr && release != nullptr;}
+  bool shared_valid() const
+  {
+    return acquire_shared != nullptr && release_shared != nullptr;
+  }
 };
 
 /// Resolve the protocol, memoizing only once the answer is *definitive*.
@@ -142,14 +154,15 @@ inline const TransportPoolApi & transport_pool_api()
     return api;  // not loaded yet; undecided
   }
 
-  api.acquire = reinterpret_cast<int (*)(const void *, void **)>(
-    dlsym(handle, "rosidl_cuda_transport_pool_acquire_v1"));
-  api.release = reinterpret_cast<void (*)(void *)>(
-    dlsym(handle, "rosidl_cuda_transport_pool_release_v1"));
-  if (!api.valid()) {
-    // Half a protocol is no protocol; treat it as absent rather than calling
-    // acquire with no way to release.
-    api = TransportPoolApi{};
+  api.acquire_shared = reinterpret_cast<int (*)(size_t, void **)>(
+    dlsym(handle, "rosidl_cuda_transport_pool_acquire_shared_v1"));
+  api.release_shared = reinterpret_cast<void (*)(void *)>(
+    dlsym(handle, "rosidl_cuda_transport_pool_release_shared_v1"));
+  // Half a protocol is no protocol; treat it as absent rather than calling
+  // acquire with no way to release.
+  if (!api.shared_valid()) {
+    api.acquire_shared = nullptr;
+    api.release_shared = nullptr;
   }
   decided.store(true, std::memory_order_release);
   return api;
@@ -157,35 +170,35 @@ inline const TransportPoolApi & transport_pool_api()
 
 }  // namespace detail
 
-/// \brief The transport's device-memory pool for \p rmw_publisher, or null.
+/// \brief The transport's participant-wide device-memory pool, or null.
 ///
 /// Null whenever the transport has nothing to offer: an RMW that does not
-/// implement the protocol, a publisher whose type carries no buffer field, no
-/// usable GPU, or no free slot right now. All ordinary answers -- allocate a
-/// normal buffer instead, which is what allocate_for_publisher() does.
+/// implement the protocol, no usable GPU, or nothing free right now. All
+/// ordinary answers -- allocate a normal buffer instead, which is what
+/// allocate_buffer() does.
 ///
-/// \param rmw_publisher an `rmw_publisher_t *`. Taken as `void *` so this
-///   header imposes no opinion about how the caller reached it; from rclcpp it
-///   is `rcl_publisher_get_rmw_handle(pub->get_publisher_handle().get())`.
-inline std::shared_ptr<ExternalMemoryPool> transport_pool_for_publisher(
-  const void * rmw_publisher)
+/// It names no writer, and that is what it is for: a call site which was never
+/// handed a publisher -- most of them -- can still put its payload where the
+/// transport can send it from.
+///
+/// \param size_hint Bytes the caller is about to allocate, so a provider that
+///   keeps several size classes can pick one. 0 asks it to choose for itself.
+///   Only ever a hint: the pool that comes back is not promised to fit.
+inline std::shared_ptr<ExternalMemoryPool> shared_transport_pool(size_t size_hint)
 {
-  if (rmw_publisher == nullptr) {
-    return nullptr;
-  }
   const detail::TransportPoolApi & api = detail::transport_pool_api();
-  if (!api.valid()) {
+  if (!api.shared_valid()) {
     return nullptr;
   }
   void * holder = nullptr;
-  if (api.acquire(rmw_publisher, &holder) != 0 || holder == nullptr) {
+  if (api.acquire_shared(size_hint, &holder) != 0 || holder == nullptr) {
     return nullptr;
   }
   auto * typed = static_cast<std::shared_ptr<ExternalMemoryPool> *>(holder);
   // Copied, not moved: the holder is the provider's to destroy, and it may be
   // handing out a reference to a pool it keeps.
   std::shared_ptr<ExternalMemoryPool> pool = *typed;
-  api.release(holder);
+  api.release_shared(holder);
   // A provider that reports success with an empty holder is buggy, but the
   // useful response is the same as "no pool": fall back. Returning the null
   // through would turn a provider's bug into an exception from the caller's
@@ -193,39 +206,14 @@ inline std::shared_ptr<ExternalMemoryPool> transport_pool_for_publisher(
   return pool ? pool : nullptr;
 }
 
-/// \brief Allocate \p count elements of device memory suited to \p rmw_publisher.
+/// \brief True when this process's RMW offers a participant-wide shared pool.
 ///
-/// Transport-owned when the transport offers it -- so publishing copies nothing
-/// -- and an ordinary pooled buffer otherwise. Identical to use either way.
-///
-/// Two caveats, both inherited from the transport pool and both irrelevant to
-/// the fallback:
-///   * A transport buffer is tied to the publisher's current slot. Allocate,
-///     fill and publish one message at a time, and allocate again for the next.
-///   * After publishing, a transport buffer names memory the transport owns.
-///     Do not write it, and do not expect it to stay valid indefinitely.
-///
-/// Falling back is never silent about being *wrong*, only about being ordinary:
-/// if the transport had a pool and it failed to satisfy the request, that
-/// throws rather than quietly costing a copy.
-template<typename T = uint8_t>
-rosidl::Buffer<T> allocate_for_publisher(const void * rmw_publisher, size_t count)
+/// For diagnostics and tests -- "is allocate_buffer() actually getting zero
+/// copy?" -- not for branching, since allocate_buffer() already handles both
+/// cases.
+inline bool shared_transport_pool_available()
 {
-  if (std::shared_ptr<ExternalMemoryPool> pool =
-    transport_pool_for_publisher(rmw_publisher))
-  {
-    return allocate_buffer_from<T>(std::move(pool), count);
-  }
-  return rosidl::Buffer<T>(std::make_unique<CudaBufferImpl<T>>(count));
-}
-
-/// \brief True when this process's RMW implements the transport-pool protocol.
-///
-/// For diagnostics and tests -- "am I actually getting zero copy?" -- not for
-/// branching, since allocate_for_publisher() already handles both cases.
-inline bool transport_pool_available()
-{
-  return detail::transport_pool_api().valid();
+  return detail::transport_pool_api().shared_valid();
 }
 
 }  // namespace cuda_buffer_backend

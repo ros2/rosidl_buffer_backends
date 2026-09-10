@@ -25,6 +25,19 @@ cc_library(
         "@ros2packages//rcutils:cc_lib",
         "@ros2packages//rmw:cc_lib",
         "@ros2packages//rosidl-buffer:cc_lib",
+        # rmw/rmw.h's own include chain. transport_pool.hpp includes it (for
+        # rmw_get_implementation_identifier), and cuda_buffer_api.hpp now
+        # includes transport_pool.hpp -- so every consumer of allocate_buffer()
+        # compiles this chain, not just the ones that use the transport pool
+        # deliberately. These deb-derived cc_libs do not carry each other's
+        # include paths transitively, so rmw:cc_lib alone leaves rmw.h unable
+        # to find rosidl_runtime_c/message_type_support_struct.h (via rmw.h
+        # directly) or rosidl_dynamic_typesupport/types.h (via
+        # rmw/dynamic_message_type_support.h). Listing them here rather than in
+        # each consumer is what keeps a target that merely allocates a buffer
+        # from having to know it linked an RMW.
+        "@ros2packages//rosidl-dynamic-typesupport:cc_lib",
+        "@ros2packages//rosidl-runtime-c:cc_lib",
         "@rules_cuda//cuda:runtime",
     ],
 )
