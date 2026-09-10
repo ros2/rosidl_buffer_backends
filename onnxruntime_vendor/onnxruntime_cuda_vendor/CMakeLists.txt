@@ -19,43 +19,89 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_vendor_package REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
-set(ONNXRUNTIME_CUDA_VENDOR_VERSION "1.23.2")
+# Held equal to onnxruntime_core_vendor and the Python wheel vendors so the
+# whole ONNX Runtime stack reports one version.
+set(ONNXRUNTIME_CUDA_VENDOR_VERSION "1.29.0" CACHE STRING
+  "ONNX Runtime version to download")
+set(ONNXRUNTIME_CUDA_VENDOR_SHA256 "" CACHE STRING
+  "SHA256 override for the selected official ONNX Runtime archive")
 
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(NOT _system_arch MATCHES "^(x86_64|amd64)$")
   message(FATAL_ERROR
-    "${PROJECT_NAME}: ONNX Runtime 1.23.2 GPU archives support x86_64 only")
+    "${PROJECT_NAME}: ONNX Runtime GPU archives support x86_64 only")
 endif()
-if(NOT CUDAToolkit_VERSION_MAJOR EQUAL 12)
+# Releases from 1.27.0 label both CUDA majors; earlier ones ship CUDA 12 as an
+# unsuffixed gpu build.
+if(CUDAToolkit_VERSION_MAJOR EQUAL 13 OR CUDAToolkit_VERSION_MAJOR EQUAL 12)
+  if(ONNXRUNTIME_CUDA_VENDOR_VERSION VERSION_LESS "1.27.0" AND
+      CUDAToolkit_VERSION_MAJOR EQUAL 12)
+    set(_archive_kind "gpu")
+  else()
+    set(_archive_kind "gpu_cuda${CUDAToolkit_VERSION_MAJOR}")
+  endif()
+else()
   message(FATAL_ERROR
-    "${PROJECT_NAME}: ONNX Runtime 1.23.2 requires CUDA 12 and cuDNN 9, "
-    "but found CUDA ${CUDAToolkit_VERSION}")
+    "${PROJECT_NAME}: ONNX Runtime ${ONNXRUNTIME_CUDA_VENDOR_VERSION} "
+    "publishes CUDA 12 and CUDA 13 archives, but found CUDA "
+    "${CUDAToolkit_VERSION}")
 endif()
 
-set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE_STEM
-  "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_CUDA_VENDOR_VERSION}")
 set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE
-  "${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE_STEM}.tgz")
+  "onnxruntime-linux-x64-${_archive_kind}-${ONNXRUNTIME_CUDA_VENDOR_VERSION}.tgz")
+
+# Same archives onnxruntime_core_vendor fetches, so the checksums are shared.
+if(ONNXRUNTIME_CUDA_VENDOR_VERSION STREQUAL "1.29.0" AND
+    ONNXRUNTIME_CUDA_VENDOR_SHA256 STREQUAL "")
+  if(_archive_kind STREQUAL "gpu_cuda12")
+    set(ONNXRUNTIME_CUDA_VENDOR_SHA256
+      "4ca594a0da83927befbd73fe020d7f569be151d70bb4fe9741ad405f4882e2ad")
+  else()
+    set(ONNXRUNTIME_CUDA_VENDOR_SHA256
+      "844c64acfc43ab9423215c26493055ea229268e28283146cc644ecef0bdae048")
+  endif()
+endif()
 set(ONNXRUNTIME_CUDA_VENDOR_URL
   "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_CUDA_VENDOR_VERSION}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
 
 set(_download_path
   "${CMAKE_CURRENT_BINARY_DIR}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
 set(_extract_path "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime_extracted")
-set(_onnxruntime_root
-  "${_extract_path}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE_STEM}")
+set(_root_glob "${_extract_path}/onnxruntime-linux-x64-*")
+
+# Releases disagree on whether the CUDA-major suffix survives into the
+# extracted directory name, so discovering the root keeps a version bump from
+# silently failing the required-file check below.
+file(GLOB _onnxruntime_root LIST_DIRECTORIES true "${_root_glob}")
 
 if(NOT EXISTS "${_onnxruntime_root}/lib/libonnxruntime.so")
+  set(_hash_args)
+  if(ONNXRUNTIME_CUDA_VENDOR_SHA256)
+    list(APPEND _hash_args
+      EXPECTED_HASH "SHA256=${ONNXRUNTIME_CUDA_VENDOR_SHA256}")
+  else()
+    message(WARNING
+      "${PROJECT_NAME}: no checksum is known for "
+      "${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
+  endif()
   file(DOWNLOAD "${ONNXRUNTIME_CUDA_VENDOR_URL}" "${_download_path}"
-    SHOW_PROGRESS STATUS _download_status)
+    ${_hash_args} SHOW_PROGRESS STATUS _download_status)
   list(GET _download_status 0 _download_code)
   if(NOT _download_code EQUAL 0)
     list(GET _download_status 1 _download_message)
     message(FATAL_ERROR
       "${PROJECT_NAME}: ONNX Runtime download failed: ${_download_message}")
   endif()
+  file(REMOVE_RECURSE "${_extract_path}")
   file(ARCHIVE_EXTRACT INPUT "${_download_path}" DESTINATION "${_extract_path}")
   file(REMOVE "${_download_path}")
+  file(GLOB _onnxruntime_root LIST_DIRECTORIES true "${_root_glob}")
+endif()
+
+list(LENGTH _onnxruntime_root _root_count)
+if(NOT _root_count EQUAL 1)
+  message(FATAL_ERROR
+    "${PROJECT_NAME}: expected one extracted archive root, found ${_root_count}")
 endif()
 
 set(_required_files

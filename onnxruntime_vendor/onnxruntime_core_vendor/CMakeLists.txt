@@ -18,9 +18,14 @@ project(onnxruntime_core_vendor)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_vendor_package REQUIRED)
 
-set(ONNXRUNTIME_CORE_VENDOR_VERSION "1.28.0" CACHE STRING
+# OrtValue.from_dlpack and __dlpack__ first ship in 1.26.0, which is the floor
+# for the Python adapter.
+set(ONNXRUNTIME_CORE_VENDOR_VERSION "1.29.0" CACHE STRING
   "ONNX Runtime version to download")
-set(ONNXRUNTIME_CORE_VENDOR_VARIANT "cuda12" CACHE STRING
+# Only decides which archive supplies the CUDA-neutral libraries this package
+# installs; the CUDA provider is left to onnxruntime_cuda_vendor. Defaulted to
+# cuda13 so the two stay byte-identical on the supported toolkit.
+set(ONNXRUNTIME_CORE_VENDOR_VARIANT "cuda13" CACHE STRING
   "Official x86_64 GPU archive variant: cuda12 or cuda13")
 set_property(
   CACHE ONNXRUNTIME_CORE_VENDOR_VARIANT PROPERTY STRINGS cuda12 cuda13)
@@ -34,8 +39,16 @@ if(_system_arch MATCHES "^(x86_64|amd64)$")
     message(FATAL_ERROR
       "${PROJECT_NAME}: ONNXRUNTIME_CORE_VENDOR_VARIANT must be cuda12 or cuda13")
   endif()
+  # Releases from 1.27.0 label both CUDA majors; earlier ones ship CUDA 12 as
+  # an unsuffixed gpu build.
+  if(ONNXRUNTIME_CORE_VENDOR_VERSION VERSION_LESS "1.27.0" AND
+      ONNXRUNTIME_CORE_VENDOR_VARIANT STREQUAL "cuda12")
+    set(_archive_kind "gpu")
+  else()
+    set(_archive_kind "gpu_${ONNXRUNTIME_CORE_VENDOR_VARIANT}")
+  endif()
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM
-    "onnxruntime-linux-x64-gpu_${ONNXRUNTIME_CORE_VENDOR_VARIANT}-${ONNXRUNTIME_CORE_VENDOR_VERSION}")
+    "onnxruntime-linux-x64-${_archive_kind}-${ONNXRUNTIME_CORE_VENDOR_VERSION}")
 elseif(_system_arch MATCHES "^(aarch64|arm64)$")
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND "aarch64_cpu")
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM
@@ -45,17 +58,17 @@ else()
     "${PROJECT_NAME}: unsupported architecture '${CMAKE_SYSTEM_PROCESSOR}'")
 endif()
 
-if(ONNXRUNTIME_CORE_VENDOR_VERSION STREQUAL "1.28.0" AND
+if(ONNXRUNTIME_CORE_VENDOR_VERSION STREQUAL "1.29.0" AND
     ONNXRUNTIME_CORE_VENDOR_SHA256 STREQUAL "")
   if(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND STREQUAL "aarch64_cpu")
     set(ONNXRUNTIME_CORE_VENDOR_SHA256
-      "e15ff8b5d85afe6c144d97c6fd432254bf76a219daaf17658087d6ecb3e8f0bb")
+      "e1799098ebc054b370f6176a450f158720f297818c613e5dc99b92e2ec82346f")
   elseif(ONNXRUNTIME_CORE_VENDOR_VARIANT STREQUAL "cuda12")
     set(ONNXRUNTIME_CORE_VENDOR_SHA256
-      "ea6bd2b65d7dfabbeb92c4af5dd8f12e5aed8601e544ad378d2f872275438b1a")
+      "4ca594a0da83927befbd73fe020d7f569be151d70bb4fe9741ad405f4882e2ad")
   else()
     set(ONNXRUNTIME_CORE_VENDOR_SHA256
-      "84d28f27589090b280d4312743efd3d450cd4ac7d1e1d75e7d9076d9637bf9de")
+      "844c64acfc43ab9423215c26493055ea229268e28283146cc644ecef0bdae048")
   endif()
 endif()
 

@@ -1,31 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
-project(python_onnxruntime_cuda_vendor)
+project(python_onnxruntime_vendor)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# onnxruntime-gpu publishes a separate wheel per CUDA major from 1.27 onward,
-# so the host toolkit decides which release is usable. 1.26.0 is the floor
-# either way, being the first with OrtValue.from_dlpack.
-set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION "" CACHE STRING
-  "ONNX Runtime CUDA Python wheel version. Auto-selected if empty.")
+# 1.26.0 is the release that added OrtValue.from_dlpack, __dlpack__ and
+# __dlpack_device__, which onnxruntime_conversions_py converts through, so it
+# is the floor. Held equal to the other vendors so the whole stack reports one
+# version. Ubuntu's python3-onnxruntime is 1.23.2 and predates the API.
+set(PYTHON_ONNXRUNTIME_VENDOR_VERSION "1.29.0" CACHE STRING
+  "ONNX Runtime CPU Python wheel version")
 
-find_package(CUDAToolkit REQUIRED)
-if(CUDAToolkit_VERSION_MAJOR EQUAL 13)
-  set(_default_version "1.29.0")
-elseif(CUDAToolkit_VERSION_MAJOR EQUAL 12)
-  set(_default_version "1.26.0")
-else()
-  message(FATAL_ERROR
-    "${PROJECT_NAME}: onnxruntime-gpu publishes CUDA 12 and CUDA 13 wheels, "
-    "but found CUDA ${CUDAToolkit_VERSION}")
-endif()
-if(NOT PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION)
-  set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION "${_default_version}")
-endif()
-
-set(_python_package "onnxruntime-gpu")
+set(_python_package "onnxruntime")
 set(_index_url "https://pypi.org/simple")
 
 ament_get_python_install_dir(PYTHON_INSTALL_DIR)
@@ -35,8 +22,7 @@ set(_python_stage "${_stage_root}/${PYTHON_INSTALL_DIR}")
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 string(CONCAT _stage_marker
   "${_stage_root}/.${_python_package}-"
-  "${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION}-"
-  "cuda${CUDAToolkit_VERSION_MAJOR}-bundled-"
+  "${PYTHON_ONNXRUNTIME_VENDOR_VERSION}-"
   "py${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}-${_system_arch}")
 
 if(NOT EXISTS "${_stage_marker}")
@@ -51,7 +37,7 @@ if(NOT EXISTS "${_stage_marker}")
       --only-binary=:all:
       --dest "${_wheel_dir}"
       --index-url "${_index_url}"
-      "${_python_package}==${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION}"
+      "${_python_package}==${PYTHON_ONNXRUNTIME_VENDOR_VERSION}"
     COMMAND_ERROR_IS_FATAL ANY)
 
   file(GLOB _onnxruntime_wheels "${_wheel_dir}/*.whl")
@@ -71,8 +57,6 @@ if(NOT EXISTS "${_stage_marker}")
       "${_onnxruntime_wheels}"
     COMMAND_ERROR_IS_FATAL ANY)
 
-  file(REMOVE
-    "${_python_stage}/onnxruntime/capi/libonnxruntime_providers_tensorrt.so")
   file(WRITE "${_stage_marker}" "")
 endif()
 
