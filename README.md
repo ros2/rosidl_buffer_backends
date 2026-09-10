@@ -68,9 +68,11 @@ without rebuilding it. Name a backend per call, or set
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- CUDA Toolkit 12.6-12.9 or 13.0 for CUDA buffer and conversion packages. CPU-only
-  Python PyTorch conversions use Ubuntu Resolute's `python3-torch` package and
-  do not require CUDA.
+- A CUDA Toolkit in the 12 or 13 series for the CUDA buffer and conversion
+  packages, declared through the `cuda-toolkit` rosdep key. The vendors read
+  only the major version, choosing a `cu126`, `cu128`, or `cu130` wheel.
+  CPU-only Python PyTorch conversions use Ubuntu Resolute's `python3-torch`
+  package and do not require CUDA.
 
 Per-package build, test, and run details live in each package's README:
 
