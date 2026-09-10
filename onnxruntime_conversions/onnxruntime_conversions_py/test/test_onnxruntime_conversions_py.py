@@ -35,14 +35,6 @@ import pytest
 from tensor_msgs.msg import ExperimentalTensor
 
 
-# Some distribution rebuilds of ONNX Runtime, including Ubuntu's
-# python3-onnxruntime, drop the DLPack entry points this package converts
-# through. Report that as a skip rather than as a wall of AttributeErrors.
-pytestmark = pytest.mark.skipif(
-    not hasattr(ort.OrtValue, 'from_dlpack'),
-    reason='this onnxruntime build exposes no DLPack support',
-)
-
 SUPPORTED_TYPES = [
     (TensorProto.FLOAT, np.float32),
     (TensorProto.UINT8, np.uint8),

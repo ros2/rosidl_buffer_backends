@@ -43,7 +43,13 @@ if(BUILD_TESTING)
   # The CUDA tests and component nodes drive the runtime API directly, so they
   # need the toolkit even though the adapter itself does not.
   find_package(CUDAToolkit QUIET)
+  # Either vendor defines onnxruntime::onnxruntime; the CUDA one is preferred
+  # because it is the superset. A plain find_package(onnxruntime) covers an
+  # externally provided SDK.
   find_package(onnxruntime_cuda_vendor QUIET)
+  if(NOT TARGET onnxruntime::onnxruntime)
+    find_package(onnxruntime_core_vendor QUIET)
+  endif()
   if(NOT TARGET onnxruntime::onnxruntime)
     find_package(onnxruntime REQUIRED)
   endif()

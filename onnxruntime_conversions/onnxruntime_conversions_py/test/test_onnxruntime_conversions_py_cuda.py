@@ -38,8 +38,8 @@ pytestmark = [
         reason='the CUDA storage plugin is unavailable',
     ),
     pytest.mark.skipif(
-        not hasattr(ort.OrtValue, 'from_dlpack'),
-        reason='this onnxruntime build exposes no DLPack support',
+        'CUDAExecutionProvider' not in ort.get_available_providers(),
+        reason='this onnxruntime build has no CUDA execution provider',
     ),
 ]
 
@@ -119,10 +119,10 @@ def test_views_describe_device_data_without_copying_it(
 
     with from_input_tensor_msg(msg, cuda_stream) as value:
         assert value.device_name().lower() == 'cuda'
-        # Reading device memory needs a session to stage the copy, so the
-        # data itself is checked through the buffer.
-        with pytest.raises(RuntimeError, match='non-CPU tensor'):
-            value.numpy()
+        assert value.data_ptr() != 0
+        # This file only runs where a CUDA provider exists, and such a build
+        # stages the device-to-host copy itself rather than refusing it.
+        assert np.array_equal(value.numpy(), source)
 
     assert np.array_equal(
         np.frombuffer(msg.data.to_bytes(), dtype=np.float32), source)
