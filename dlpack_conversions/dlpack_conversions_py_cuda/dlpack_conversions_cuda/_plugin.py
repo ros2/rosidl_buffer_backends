@@ -127,7 +127,8 @@ class CudaStoragePlugin:
 
 
 class _Lease:
-    """Holds a mapping open, and the buffer it maps, until DLPack is done.
+    """
+    Hold a mapping open, and the buffer it maps, until DLPack is done.
 
     A handle that outlives its buffer leaves a dangling mapping, so the
     handle is closed first and only then is the buffer released.

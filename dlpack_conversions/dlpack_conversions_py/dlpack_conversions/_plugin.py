@@ -75,7 +75,8 @@ class StoragePlugin(Protocol):
         source_backend: str,
         stream: Optional[int],
     ) -> None:
-        """Copy host or accelerator memory into message storage.
+        """
+        Copy host or accelerator memory into message storage.
 
         Accelerator plugins are also asked to copy into host-backed storage,
         because only they can read their own device memory.

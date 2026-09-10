@@ -49,7 +49,8 @@ def metadata(
     msg: ExperimentalTensor,
     dtype: Optional[DType] = None,
 ) -> TensorMetadata:
-    """Describe the view a message defines over its storage.
+    """
+    Describe the view a message defines over its storage.
 
     Pass ``dtype`` to describe the storage as an equally sized dtype, which
     frameworks need when they cannot consume the message dtype directly.
@@ -154,7 +155,8 @@ def to_tensor_msg(
     stream: Optional[int] = None,
     backend: Optional[str] = None,
 ) -> ExperimentalTensor:
-    """Copy a DLPack capsule into message storage and stamp its metadata.
+    """
+    Copy a DLPack capsule into message storage and stamp its metadata.
 
     Called with one argument, allocates a message on the backend that owns the
     capsule. Called with two, copies into the message given first. The capsule
