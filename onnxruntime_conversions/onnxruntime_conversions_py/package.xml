@@ -15,9 +15,6 @@
   <exec_depend>dlpack_conversions_py</exec_depend>
   <exec_depend>dlpack_conversions_py_cpu</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
-  <!-- The CPU wheel is the default; python_onnxruntime_cuda_vendor conflicts
-       with it and replaces it on GPU hosts, which is also what the CUDA test
-       suite needs to be installed against. -->
   <exec_depend>python_onnxruntime_vendor</exec_depend>
   <exec_depend>tensor_msgs</exec_depend>
 

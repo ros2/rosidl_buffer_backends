@@ -13,12 +13,6 @@
 
   <depend>dlpack_conversions</depend>
   <depend>tensor_msgs</depend>
-
-  <!-- Names one runtime only. onnxruntime_core_vendor covers both CPU and GPU
-       through its variant option, and every other provider conflicts with it,
-       so naming a second one here would make this package depend on two
-       packages that cannot be installed together. The build finds whichever
-       provider is present. -->
   <depend>onnxruntime_core_vendor</depend>
 
   <exec_depend>dlpack_conversions_cpu</exec_depend>
