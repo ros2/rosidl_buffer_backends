@@ -26,19 +26,26 @@ function(libtorch_vendor_validate_variant variant)
   endif()
 endfunction()
 
+# Selects a published archive, which is not the same as requiring that
+# toolkit: the archive carries its own CUDA runtime and resolves to it by
+# RPATH, so the host toolkit only has to be the same major. Within a major,
+# CUDA minor version compatibility lets an archive built against a later minor
+# run on an earlier driver, so toolkits outside the published minors fall
+# through to the nearest variant rather than failing.
 function(libtorch_vendor_variant_for_cuda cuda_version output_variable)
-  if(cuda_version VERSION_GREATER_EQUAL "13.1")
+  if(cuda_version VERSION_GREATER_EQUAL "14.0")
     message(FATAL_ERROR
-      "CUDA Toolkit ${cuda_version} is newer than the cu130 LibTorch runtime")
+      "CUDA Toolkit ${cuda_version} is a newer major than the cu130 LibTorch "
+      "runtime")
   elseif(cuda_version VERSION_GREATER_EQUAL "13.0")
     set(variant cu130)
   elseif(cuda_version VERSION_GREATER_EQUAL "12.8")
     set(variant cu128)
-  elseif(cuda_version VERSION_GREATER_EQUAL "12.6")
+  elseif(cuda_version VERSION_GREATER_EQUAL "12.0")
     set(variant cu126)
   else()
     message(FATAL_ERROR
-      "CUDA Toolkit ${cuda_version} is unsupported; CUDA 12.6 or newer is required")
+      "CUDA Toolkit ${cuda_version} is unsupported; CUDA 12.0 or newer is required")
   endif()
   set(${output_variable} "${variant}" PARENT_SCOPE)
 endfunction()
