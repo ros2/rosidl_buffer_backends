@@ -3,7 +3,7 @@
 <package format="3">
   <name>onnxruntime_cuda_vendor</name>
   <version>0.1.2</version>
-  <description>ONNX Runtime GPU 1.23.2 C++ distribution for CUDA 12 and cuDNN 9.</description>
+  <description>ONNX Runtime GPU C++ distribution matching the host CUDA major.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -13,10 +13,19 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
 
-  <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
-  <exec_depend version_gte="9" version_lt="10">nvidia-cudnn</exec_depend>
+  <depend version_gte="12" version_lt="14">cuda-toolkit</depend>
 
-  <conflict>libonnxruntime-dev</conflict>
+  <!-- cuDNN 9 is not declared: the CUDA execution provider dlopens
+       libcudnn.so only for conv-style operators, and Ubuntu packages cuDNN
+       for CUDA 12 alone, so a hard dependency would install a mismatched
+       build on CUDA 13 hosts. Install nvidia-cudnn-cu13 where it is
+       needed. -->
+
+  <!-- See onnxruntime_core_vendor: exactly one provider of
+       libonnxruntime.so.1 may be installed. This package is its superset,
+       adding libonnxruntime_providers_cuda.so. -->
+  <conflict>onnxruntime_core_vendor</conflict>
+  <conflict>onnxruntime_vendor</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>
   <test_depend>ament_lint_auto</test_depend>
