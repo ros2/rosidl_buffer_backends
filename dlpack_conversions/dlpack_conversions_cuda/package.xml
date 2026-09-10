@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>dlpack_conversions_cuda</name>
-  <version>0.1.0</version>
+  <version>0.1.2</version>
   <description>CUDA device memory storage plugin for DLPack tensor messages.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
@@ -13,11 +13,14 @@
 
   <depend>cuda_buffer</depend>
   <depend>dlpack_conversions</depend>
-  <depend version_gte="12.6" version_lt="13.1">nvidia-cuda</depend>
+  <depend version_gte="12" version_lt="14">cuda-toolkit</depend>
   <depend>pluginlib</depend>
 
+  <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <!-- The device-to-host copy test needs a host-backed destination. -->
+  <test_depend>dlpack_conversions_cpu</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
