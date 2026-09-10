@@ -34,7 +34,11 @@ from torch_conversions import from_input_tensor_msg
 from torch_conversions import set_stream
 
 
-CUDA_AVAILABLE = torch_conversions._plugin_available('cuda')
+# The node this test launches asks for CUDA storage explicitly, so it needs
+# both the storage plugin and a torch build with CUDA kernels.
+CUDA_AVAILABLE = (
+    torch_conversions._plugin_available('cuda') and torch.cuda.is_available()
+)
 TENSOR_SHAPE = (2, 3, 4)
 TENSOR_VALUES = (
     3, 17, 29, 43, 59, 71, 89, 101, 113, 127, 139, 149,

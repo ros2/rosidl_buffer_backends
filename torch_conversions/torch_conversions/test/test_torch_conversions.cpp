@@ -122,3 +122,16 @@ TEST(TorchConversions, ReportsInstalledBackends)
     std::find(backends.begin(), backends.end(), "cpu"), backends.end());
   EXPECT_FALSE(dlpack_conversions::default_backend().empty());
 }
+
+// An accelerator storage plugin can be installed next to a LibTorch built
+// without kernels for that device, so an allocation that names no device has
+// to stay usable rather than abort inside ATen on first touch.
+TEST(TorchConversions, DefaultAllocationsAreUsableByThisTorchBuild)
+{
+  auto msg = torch_conversions::allocate_tensor_msg({4}, at::kFloat);
+
+  at::Tensor tensor = torch_conversions::from_output_tensor_msg(*msg);
+
+  ASSERT_TRUE(tensor.defined());
+  EXPECT_NO_THROW(tensor.fill_(1.0f));
+}

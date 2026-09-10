@@ -184,6 +184,18 @@ def test_unsupported_device_is_rejected():
         allocate_tensor_msg((4,), torch.float32, 'meta')
 
 
+def test_default_allocation_is_usable_by_this_torch_build():
+    # An accelerator storage plugin can be installed next to a torch build
+    # without kernels for that device, so an allocation naming no device has to
+    # stay usable rather than raise on first touch.
+    msg = allocate_tensor_msg((4,), torch.float32)
+
+    tensor = from_output_tensor_msg(msg)
+
+    assert tensor is not None
+    tensor.fill_(1.0)
+
+
 @pytest.mark.skipif(CUDA_AVAILABLE, reason='CUDA support is available')
 def test_cpu_only_configuration_defaults_to_cpu_and_rejects_cuda():
     msg = allocate_tensor_msg((4,), torch.float32)

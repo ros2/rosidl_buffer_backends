@@ -98,6 +98,21 @@ inline uintptr_t stream_for(const TensorMsg & msg, const at::Tensor & source)
   return host_only ? 0 : current_stream();
 }
 
+// Storage plugins and the LibTorch build are installed independently, so an
+// accelerator plugin can be present alongside a LibTorch that has no kernels
+// for it. Handing that storage back would only fail later inside ATen, so an
+// unusable default falls back to host storage.
+inline std::string default_backend()
+{
+  const std::string backend = dlpack_conversions::default_backend();
+  const bool needs_accelerator = backend != "cpu";
+  if (!needs_accelerator || at::hasCUDA() || at::hasHIP()) {
+    return backend;
+  }
+  return dlpack_conversions::backend_available("cpu") ?
+         std::string{"cpu"} : backend;
+}
+
 }  // namespace detail
 
 inline std::unique_ptr<TensorMsg> allocate_tensor_msg(
@@ -106,7 +121,7 @@ inline std::unique_ptr<TensorMsg> allocate_tensor_msg(
   std::optional<c10::DeviceType> device = std::nullopt)
 {
   const std::string backend = device ?
-    detail::backend_for(c10::Device(*device, 0)) : std::string{};
+    detail::backend_for(c10::Device(*device, 0)) : detail::default_backend();
   return dlpack_conversions::allocate_tensor_msg(
     shape, detail::dl_dtype(dtype), backend);
 }

@@ -26,10 +26,16 @@ from torch_conversions import set_stream
 from torch_conversions import to_tensor_msg
 
 
-CUDA_AVAILABLE = torch_conversions._plugin_available('cuda')
+# The storage plugin and a CUDA-enabled Torch build are installed separately,
+# and Ubuntu ships a CPU-only python3-torch, so the plugin can be present while
+# Torch still cannot touch the device.
+CUDA_AVAILABLE = (
+    torch_conversions._plugin_available('cuda') and torch.cuda.is_available()
+)
 
 pytestmark = pytest.mark.skipif(
-    not CUDA_AVAILABLE, reason='CUDA support is unavailable'
+    not CUDA_AVAILABLE,
+    reason='the CUDA storage plugin or a CUDA-enabled torch is unavailable',
 )
 
 

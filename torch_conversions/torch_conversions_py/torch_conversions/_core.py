@@ -69,6 +69,21 @@ def _accelerator_available() -> bool:
     return torch.cuda.is_available() and _has_accelerator_backend()
 
 
+def _default_backend() -> Optional[str]:
+    """
+    Choose a default backend this torch build can actually use.
+
+    Storage plugins and the torch build are installed separately, so the core
+    default can name a device this build has no kernels for. Handing that
+    storage back would only fail later inside torch.
+    """
+    backend = dlpack_conversions.default_backend()
+    if backend == 'cpu' or _accelerator_available():
+        return backend
+    available = dlpack_conversions.available_backends()
+    return 'cpu' if 'cpu' in available else backend
+
+
 def _has_accelerator_backend() -> bool:
     return any(
         backend != 'cpu'
@@ -97,7 +112,7 @@ def allocate_tensor_msg(
 ) -> ExperimentalTensor:
     if dtype not in _DTYPE_TO_DLPACK:
         raise TypeError(f'Unsupported torch dtype {dtype}')
-    backend = None if device is None else _backend_for(device)
+    backend = _default_backend() if device is None else _backend_for(device)
     return dlpack_conversions.allocate_tensor_msg(
         shape, _DTYPE_TO_DLPACK[dtype], backend
     )
