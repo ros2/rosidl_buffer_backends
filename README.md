@@ -39,65 +39,6 @@ ONNX Runtime conversion libraries built on the same buffer infrastructure.
 - **torch_conversions_py_cpu** -- Python host-memory implementation.
 - **torch_conversions_py_cuda** -- Python CUDA implementation.
 
-### Torch provider model
-
-The C++ and Python conversion APIs are device-neutral within PyTorch, but they
-are not framework-ABI-neutral: the C++ API exposes `at::Tensor`, and the Python
-API imports `torch`. The conversion cores therefore depend on CPU Torch
-providers, while the optional CUDA plugins bring CUDA-capable provider
-overlays:
-
-| Consumer | CPU provider | Optional CUDA provider |
-| --- | --- | --- |
-| `torch_conversions` | `libtorch_vendor` | `libtorch_cuda_vendor` |
-| `torch_conversions_py` | `python3_torch_vendor` | `python3_torch_cuda_vendor` |
-
-All four providers use exactly PyTorch 2.9.1. The CPU providers contain the
-official CPU LibTorch archive and Python wheel and have no CUDA dependency.
-The CUDA providers are separate packages that depend on their corresponding
-CPU provider and on the supported CUDA dependency closure. Consequently,
-installing either core plus its CPU plugin does not install CUDA.
-
-Installing a CUDA conversion plugin later does not rebuild or replace the
-conversion core or CPU provider. Its CUDA provider is installed under a
-separate ROS-prefix directory, and ROS environment hooks place that directory
-ahead of the CPU provider for subsequently started processes. The process then
-loads one ABI-compatible set of Torch libraries, while both the CPU and CUDA
-conversion plugins remain selectable. Restart the process and source the ROS
-setup file after installing or removing a provider; already-loaded Torch
-libraries and plugin registries cannot be switched safely in-process.
-
-APT installs the providers transitively, so typical installations are:
-
-```bash
-# CPU-only C++ and Python conversions
-sudo apt install \
-  ros-$ROS_DISTRO-torch-conversions-cpu \
-  ros-$ROS_DISTRO-torch-conversions-py-cpu
-
-# Add CUDA later; this retains the CPU plugins
-sudo apt install \
-  ros-$ROS_DISTRO-torch-conversions-cuda \
-  ros-$ROS_DISTRO-torch-conversions-py-cuda
-```
-
-### ONNX Runtime provider model
-
-The C++ and Python conversion cores use the CUDA-capable ONNX Runtime 1.26.0
-providers. The CPU-only C++ and Python providers remain available for
-independent consumers and conflict with the corresponding CUDA-capable
-provider packages.
-
-| Consumer | Provider |
-| --- | --- |
-| `onnxruntime_conversions` | `onnxruntime_cuda_vendor` |
-| `onnxruntime_conversions_py` | `python_onnxruntime_cuda_vendor` |
-
-The conversion plugins are packaged separately from the cores. Host plugins
-have priority 0 and accelerator plugins have priority 100. Applications can
-select a backend per call or set `ROSIDL_TENSOR_BACKEND` before starting the
-process.
-
 ## Deb build status
 
 ### ROS 2 Lyrical (Ubuntu Resolute)
@@ -185,28 +126,6 @@ publisher->publish(std::move(msg));
 
 // Subscriber: independent tensor by default.
 at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
-```
-
-### ONNX Runtime tensor API (`onnxruntime_conversions`)
-
-```cpp
-#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
-#include "tensor_msgs/msg/experimental_tensor.hpp"
-
-auto msg = onnxruntime_conversions::allocate_tensor_msg(
-  {1080, 1920, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8, "cuda");
-{
-  auto output = onnxruntime_conversions::from_output_tensor_msg(*msg, stream);
-  my_pipeline(output.value());
-}
-publisher->publish(std::move(*msg));
-
-auto input = onnxruntime_conversions::from_input_tensor_msg(
-  received_msg, stream);
-use_tensor(input.value());
-
-onnxruntime_conversions::configure_session_options(
-  options, "cuda", /*device_id=*/0, stream);
 ```
 
 The message schema carries DLPack-aligned dtype, shape, stride, and offset

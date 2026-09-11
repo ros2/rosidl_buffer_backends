@@ -88,7 +88,7 @@ well as omitting the CUDA target:
 ```bash
 rosdep install --from-paths \
   tensor_msgs \
-  torch_vendor/libtorch_vendor \
+  libtorch_vendor \
   torch_conversions/torch_conversions \
   torch_conversions/torch_conversions_cpu \
   --ignore-src -y
@@ -183,23 +183,6 @@ Python uses Torch's current CUDA stream when no explicit `stream=` integer is
 provided. `to_tensor_msg(msg, tensor)` reuses preallocated message storage. The
 CUDA plugin uses a private capsule bridge only to construct Torch zero-copy
 views; it is not a public or framework-neutral conversion API.
-
-## Validation
-
-The release-like validation under `docker/resolute/debian/` builds every
-Debian without a GPU, driver, preinstalled CUDA, LibTorch, or Python Torch.
-A pristine consumer then installs only the cores and CPU plugins, builds the
-test sources separately, manually runs the CPU unit and launch tests, installs
-the CUDA plugins, verifies that the core files did not change, and reruns the
-C++ and Python unit and launch tests on a GPU.
-
-The validated upgrade sequence also checks that the CPU installation contains
-no `nvidia-cuda*` package, C++ linkage moves from `libtorch_vendor` to
-`libtorch_cuda_vendor`, Python imports move from `python3_torch_vendor` to
-`python3_torch_cuda_vendor`, and backend selection can run CPU, CUDA, then CPU
-again. See
-[`VALIDATION.md`](../docker/resolute/debian/reports/VALIDATION.md) for the
-summary.
 
 ## License
 
