@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CUDA device memory storage plugin for Torch tensor messages."""
+"""CUDA conversion plugin for Torch tensor messages."""
 
 from torch_conversions_cuda._plugin import CudaConversionPlugin
 from torch_conversions_cuda._plugin import register

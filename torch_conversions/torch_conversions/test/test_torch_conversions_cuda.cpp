@@ -15,8 +15,7 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-// This translation unit is compiled only against a CUDA LibTorch, so it can
-// reach for a real stream the way a GPU consumer of the adapter would.
+// CUDA stream APIs require a CUDA-enabled LibTorch provider.
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -85,9 +84,7 @@ TEST(TorchConversionsCuda, CopiesIntoStorageOnACallerSuppliedStream)
   EXPECT_FLOAT_EQ(readback.sum().item<float>(), 160.0f);
 }
 
-// A caller running off the default stream is the case the parameter exists
-// for: the storage plugin has to order against the stream that was passed,
-// not against whatever stream happens to be current inside the adapter.
+// Verify synchronization when the caller uses a non-default stream.
 TEST(TorchConversionsCuda, HonoursANonDefaultStream)
 {
   if (!torch::cuda::is_available()) {

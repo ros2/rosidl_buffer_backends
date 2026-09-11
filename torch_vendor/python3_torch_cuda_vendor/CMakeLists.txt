@@ -13,12 +13,12 @@ include(cmake/python3_torch_cuda_vendor_policy.cmake)
 set(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT "" CACHE STRING
   "CUDA wheel variant override (cu126, cu128, cu130).")
 option(FORCE_BUILD_PYTHON3_TORCH_CUDA_VENDOR_PKG
-  "Install the selected CUDA wheel even if compatible CUDA Python Torch is available"
+  "Disable reuse of the JetPack-provided Python Torch distribution"
   OFF)
 
 if(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL "cpu")
   message(FATAL_ERROR
-    "${PROJECT_NAME}: 'cpu' is not a valid CUDA variant; use python3-torch")
+    "${PROJECT_NAME}: 'cpu' is not a CUDA variant; use python3_torch_vendor")
 elseif(NOT PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL "")
   python3_torch_cuda_vendor_validate_variant(
     "${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT}")
@@ -40,32 +40,32 @@ else()
   set(_is_tegra FALSE)
 endif()
 
-set(_system_torch_query
-  "import torch
+set(_reuse_system_torch FALSE)
+if(_is_tegra)
+  set(_system_torch_query
+    "import torch
 cuda = torch.version.cuda
 variant = 'cpu'
 if cuda is not None:
   variant = 'cu' + cuda.replace('.', '')
 print(torch.__version__.split('+')[0] + ';' + variant)")
-execute_process(
-  COMMAND "${Python3_EXECUTABLE}" -c "${_system_torch_query}"
-  OUTPUT_VARIABLE _system_torch
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  RESULT_VARIABLE _system_torch_rc
-  ERROR_QUIET
-)
-set(_system_torch_compatible FALSE)
-if(_system_torch_rc EQUAL 0)
-  list(GET _system_torch 0 _system_torch_version)
-  list(GET _system_torch 1 _system_torch_variant)
-  python3_torch_cuda_vendor_can_reuse(
-    "${_system_torch_version}"
-    "${_system_torch_variant}"
-    _system_torch_compatible)
-endif()
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "${_system_torch_query}"
+    OUTPUT_VARIABLE _system_torch
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _system_torch_rc
+    ERROR_QUIET
+  )
+  set(_system_torch_compatible FALSE)
+  if(_system_torch_rc EQUAL 0)
+    list(GET _system_torch 0 _system_torch_version)
+    list(GET _system_torch 1 _system_torch_variant)
+    python3_torch_cuda_vendor_can_reuse(
+      "${_system_torch_version}"
+      "${_system_torch_variant}"
+      _system_torch_compatible)
+  endif()
 
-set(_reuse_system_torch FALSE)
-if(_is_tegra)
   if(FORCE_BUILD_PYTHON3_TORCH_CUDA_VENDOR_PKG)
     message(FATAL_ERROR
       "${PROJECT_NAME}: CUDA PyTorch wheels are not staged on Tegra; "
@@ -92,12 +92,6 @@ if(_is_tegra)
     set(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT "${_system_torch_variant}")
     set(_reuse_system_torch TRUE)
   endif()
-elseif(_system_torch_compatible AND
-    NOT FORCE_BUILD_PYTHON3_TORCH_CUDA_VENDOR_PKG AND
-    (PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL "" OR
-      PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL _system_torch_variant))
-  set(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT "${_system_torch_variant}")
-  set(_reuse_system_torch TRUE)
 endif()
 
 if(_reuse_system_torch)
@@ -105,11 +99,6 @@ if(_reuse_system_torch)
     "${PROJECT_NAME}: system CUDA Python Torch "
     "${PYTHON3_TORCH_CUDA_VENDOR_TORCH_VERSION}+${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT} "
     "found, skipping wheel installation")
-  if(_is_aarch64 AND NOT _is_tegra)
-    message(WARNING
-      "${PROJECT_NAME}: reusing Python Torch on a non-Tegra aarch64 platform. "
-      "This configuration has only been verified on NVIDIA Tegra.")
-  endif()
 else()
   if(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL "")
     find_package(CUDAToolkit QUIET)
@@ -242,9 +231,9 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
   endif()
 
   ament_get_python_install_dir(PYTHON_INSTALL_DIR)
-  _ament_cmake_python_register_environment_hook()
+  set(_vendor_python_dir "opt/${PROJECT_NAME}/${PYTHON_INSTALL_DIR}")
   install(DIRECTORY "${_stage_dir}/"
-    DESTINATION "${PYTHON_INSTALL_DIR}"
+    DESTINATION "${_vendor_python_dir}"
     PATTERN ".torch-*" EXCLUDE
   )
 
@@ -253,8 +242,8 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
   # debug sections into a ROS dbgsym package.
   install(CODE "
     file(GLOB_RECURSE _elfs
-      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${PYTHON_INSTALL_DIR}/*.so\"
-      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${PYTHON_INSTALL_DIR}/*.so.*\")
+      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_vendor_python_dir}/*.so\"
+      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_vendor_python_dir}/*.so.*\")
     foreach(_elf IN LISTS _elfs)
       if(EXISTS \"\${_elf}\" AND NOT IS_SYMLINK \"\${_elf}\")
         execute_process(
@@ -263,6 +252,9 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
       endif()
     endforeach()
   ")
+
+  configure_file(environment/pythonpath.dsv.in pythonpath.dsv @ONLY)
+  ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/pythonpath.dsv")
 endif()
 
 if(BUILD_TESTING)

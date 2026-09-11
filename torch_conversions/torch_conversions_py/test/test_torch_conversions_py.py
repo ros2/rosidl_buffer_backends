@@ -40,7 +40,7 @@ def test_adapter_uses_one_runtime_torch_provider():
     manifest = (root / 'package.xml').read_text()
 
     assert 'find_package(Torch' not in cmake
-    assert '<exec_depend>python3_torch_cuda_vendor</exec_depend>' in manifest
+    assert '<exec_depend>python3_torch_vendor</exec_depend>' in manifest
     assert '<exec_depend>cuda_buffer_py</exec_depend>' not in manifest
     assert 'dlpack_conversions' not in manifest
 
@@ -186,9 +186,6 @@ def test_unsupported_device_is_rejected():
 
 
 def test_default_allocation_is_usable_by_this_torch_build():
-    # An accelerator storage plugin can be installed next to a torch build
-    # without kernels for that device, so an allocation naming no device has to
-    # stay usable rather than raise on first touch.
     msg = allocate_tensor_msg((4,), torch.float32)
 
     tensor = from_output_tensor_msg(msg)

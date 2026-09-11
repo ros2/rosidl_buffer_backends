@@ -112,10 +112,10 @@ TEST(TorchConversions, EmptyDataReturnsUndefinedTensor)
   EXPECT_FALSE(torch_conversions::from_output_tensor_msg(msg).defined());
 }
 
-TEST(TorchConversions, RejectsDeviceWithoutStoragePlugin)
+TEST(TorchConversions, RejectsDeviceWithoutConversionPlugin)
 {
   if (torch_conversions::backend_available("cuda")) {
-    GTEST_SKIP() << "the CUDA storage plugin is installed";
+    GTEST_SKIP() << "the CUDA conversion plugin is installed";
   }
   EXPECT_THROW(
     torch_conversions::allocate_tensor_msg(
@@ -131,9 +131,6 @@ TEST(TorchConversions, ReportsInstalledBackends)
   EXPECT_FALSE(torch_conversions::default_backend().empty());
 }
 
-// An accelerator storage plugin can be installed next to a LibTorch built
-// without kernels for that device, so an allocation that names no device has
-// to stay usable rather than abort inside ATen on first touch.
 TEST(TorchConversions, DefaultAllocationsAreUsableByThisTorchBuild)
 {
   auto msg = torch_conversions::allocate_tensor_msg({4}, at::kFloat);

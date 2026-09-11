@@ -38,12 +38,8 @@ function(python3_torch_cuda_vendor_can_reuse version variant output_variable)
   set(${output_variable} "${can_reuse}" PARENT_SCOPE)
 endfunction()
 
-# Selects a published wheel, which is not the same as requiring that toolkit:
-# the wheel installs its own CUDA runtime under site-packages/nvidia and
-# resolves to it by RPATH, so the host toolkit only has to be the same major.
-# Within a major, CUDA minor version compatibility lets a wheel built against
-# a later minor run on an earlier driver, which is why toolkits below the
-# lowest published variant fall through to it rather than failing.
+# Map the installed toolkit to a PyTorch wheel published for that CUDA major
+# version. Runtime compatibility is checked when Torch initializes CUDA.
 function(python3_torch_cuda_vendor_variant_for_cuda cuda_version output_variable)
   if(cuda_version VERSION_GREATER_EQUAL "14.0")
     message(FATAL_ERROR

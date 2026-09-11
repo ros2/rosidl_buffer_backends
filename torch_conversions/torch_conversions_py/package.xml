@@ -16,7 +16,7 @@
   <build_depend>python3-dev</build_depend>
 
   <exec_depend>ament_index_python</exec_depend>
-  <exec_depend>python3_torch_cuda_vendor</exec_depend>
+  <exec_depend>python3_torch_vendor</exec_depend>
   <exec_depend>rosidl_buffer_py</exec_depend>
   <exec_depend>tensor_msgs</exec_depend>
 

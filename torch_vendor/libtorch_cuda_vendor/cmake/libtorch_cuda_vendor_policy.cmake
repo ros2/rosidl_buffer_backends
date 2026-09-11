@@ -12,27 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(LIBTORCH_VENDOR_VERSION "2.9.1")
-set(LIBTORCH_VENDOR_SUPPORTED_VARIANTS
+set(LIBTORCH_CUDA_VENDOR_VERSION "2.9.1")
+set(LIBTORCH_CUDA_VENDOR_SUPPORTED_VARIANTS
   cu126 cu128 cu130)
 
-function(libtorch_vendor_validate_variant variant)
-  list(FIND LIBTORCH_VENDOR_SUPPORTED_VARIANTS
+function(libtorch_cuda_vendor_validate_variant variant)
+  list(FIND LIBTORCH_CUDA_VENDOR_SUPPORTED_VARIANTS
     "${variant}" variant_index)
   if(variant_index EQUAL -1)
     message(FATAL_ERROR
       "Unsupported CUDA LibTorch variant '${variant}'. Supported variants: "
-      "${LIBTORCH_VENDOR_SUPPORTED_VARIANTS}")
+      "${LIBTORCH_CUDA_VENDOR_SUPPORTED_VARIANTS}")
   endif()
 endfunction()
 
-# Selects a published archive, which is not the same as requiring that
-# toolkit: the archive carries its own CUDA runtime and resolves to it by
-# RPATH, so the host toolkit only has to be the same major. Within a major,
-# CUDA minor version compatibility lets an archive built against a later minor
-# run on an earlier driver, so toolkits outside the published minors fall
-# through to the nearest variant rather than failing.
-function(libtorch_vendor_variant_for_cuda cuda_version output_variable)
+# Map the installed toolkit to a LibTorch variant published for that CUDA
+# major version. Runtime compatibility is checked when the CUDA plugin loads.
+function(libtorch_cuda_vendor_variant_for_cuda cuda_version output_variable)
   if(cuda_version VERSION_GREATER_EQUAL "14.0")
     message(FATAL_ERROR
       "CUDA Toolkit ${cuda_version} is a newer major than the cu130 LibTorch "

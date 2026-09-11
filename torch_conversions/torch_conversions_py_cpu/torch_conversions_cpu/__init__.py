@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Host memory storage plugin for Torch tensor messages."""
+"""CPU conversion plugin for Torch tensor messages."""
 
 from torch_conversions_cpu._plugin import CpuConversionPlugin
 from torch_conversions_cpu._plugin import register

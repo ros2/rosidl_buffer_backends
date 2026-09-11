@@ -12,5 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-include("${CMAKE_CURRENT_LIST_DIR}/../cmake/libtorch_vendor_policy.cmake")
-libtorch_vendor_validate_variant("cu132")
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/libtorch_cuda_vendor_policy.cmake")
+libtorch_cuda_vendor_validate_variant("cu132")

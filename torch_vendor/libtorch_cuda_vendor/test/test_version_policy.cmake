@@ -12,25 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-include("${CMAKE_CURRENT_LIST_DIR}/../cmake/libtorch_vendor_policy.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/libtorch_cuda_vendor_policy.cmake")
 
-if(NOT LIBTORCH_VENDOR_VERSION STREQUAL "2.9.1")
+if(NOT LIBTORCH_CUDA_VENDOR_VERSION STREQUAL "2.9.1")
   message(FATAL_ERROR "Expected LibTorch 2.9.1")
 endif()
 
 foreach(variant IN ITEMS cu126 cu128 cu130)
-  libtorch_vendor_validate_variant("${variant}")
+  libtorch_cuda_vendor_validate_variant("${variant}")
 endforeach()
 
-libtorch_vendor_variant_for_cuda("12.6" selected)
+libtorch_cuda_vendor_variant_for_cuda("12.6" selected)
 if(NOT selected STREQUAL "cu126")
   message(FATAL_ERROR "CUDA 12.6 must select cu126")
 endif()
-libtorch_vendor_variant_for_cuda("12.9" selected)
+libtorch_cuda_vendor_variant_for_cuda("12.9" selected)
 if(NOT selected STREQUAL "cu128")
   message(FATAL_ERROR "CUDA 12.9 must select cu128")
 endif()
-libtorch_vendor_variant_for_cuda("13.0" selected)
+libtorch_cuda_vendor_variant_for_cuda("13.0" selected)
 if(NOT selected STREQUAL "cu130")
   message(FATAL_ERROR "CUDA 13.0 must select cu130")
 endif()

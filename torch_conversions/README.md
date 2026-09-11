@@ -19,16 +19,42 @@ a Debian is installed must be restarted.
 ## Torch provider boundary
 
 The C++ API exposes `at::Tensor`, so the core and both plugins necessarily
-share LibTorch's C++ ABI. They all depend on the single `libtorch_vendor`
-provider built from the CUDA-enabled LibTorch 2.9.1 distribution. Likewise,
-the Python core depends on the single `python3_torch_cuda_vendor` provider.
-The CPU and CUDA plugins never load different Torch distributions into one
-process.
+share LibTorch's C++ ABI. A CPU installation uses `libtorch_vendor`, which
+installs the official CPU LibTorch 2.9.1 distribution. The CUDA plugin depends
+on `libtorch_cuda_vendor`, which installs a matching CUDA LibTorch 2.9.1 tree
+and places it ahead of the system libraries for newly started ROS processes.
+Only one set of LibTorch SONAMEs is loaded in a process.
 
-This means a CPU-only installation still installs the CUDA-capable provider
-and its user-space toolkit libraries, although it does not require a GPU or
-host driver. Adding the CUDA plugins later changes only which implementations
-are discoverable. It does not exchange the provider.
+Python follows the same layout: `python3_torch_vendor` installs the official
+CPU Torch wheel, while the CUDA plugin installs `python3_torch_cuda_vendor` as a
+higher-priority ROS-prefix overlay. After the CUDA overlay is installed, both
+CPU and CUDA conversion plugins use that CUDA-capable Torch distribution.
+
+Consequently, CPU-only installations pull no CUDA dependencies. Adding the
+CUDA plugins later changes the active provider and plugin discovery for new
+processes without rebuilding or replacing either conversion core.
+
+The dependency boundary is:
+
+| Package | Required framework package | CUDA dependency |
+| --- | --- | --- |
+| `torch_conversions` | `libtorch_vendor` | No |
+| `torch_conversions_cpu` | inherited from `torch_conversions` | No |
+| `torch_conversions_cuda` | `libtorch_cuda_vendor` | Yes |
+| `torch_conversions_py` | `python3_torch_vendor` | No |
+| `torch_conversions_py_cpu` | inherited from `torch_conversions_py` | No |
+| `torch_conversions_py_cuda` | `python3_torch_cuda_vendor` | Yes |
+
+The CUDA providers depend on their CPU counterparts so both package sets can
+coexist, but they do not link the two Torch distributions into one process.
+ROS environment hooks prepend the CUDA provider directories after the CUDA
+packages are installed. The exact shared-library ABI and Python package
+version are pinned to 2.9.1 on both sides of the overlay.
+
+Provider selection happens before Torch or the conversion registry is first
+loaded. After changing the installed provider set, start a new process and
+source `/opt/ros/$ROS_DISTRO/setup.bash`. Installing a Debian cannot replace
+Torch safely inside an already-running process.
 
 ## C++
 
@@ -45,11 +71,28 @@ Add CUDA later:
 sudo apt install ros-$ROS_DISTRO-torch-conversions-cuda
 ```
 
+The explicit core package in the first command is optional because APT also
+installs it transitively from `torch_conversions_cpu`.
+
 Source build:
 
 ```bash
+rosdep install --from-paths . --ignore-src -y
 colcon build --merge-install --packages-up-to \
   torch_conversions_cpu torch_conversions_cuda
+```
+
+For a CPU-only source build, restrict rosdep to the CPU source packages as
+well as omitting the CUDA target:
+
+```bash
+rosdep install --from-paths \
+  tensor_msgs \
+  torch_vendor/libtorch_vendor \
+  torch_conversions/torch_conversions \
+  torch_conversions/torch_conversions_cpu \
+  --ignore-src -y
+colcon build --merge-install --packages-up-to torch_conversions_cpu
 ```
 
 ### Publisher
@@ -96,11 +139,27 @@ Add CUDA later:
 sudo apt install ros-$ROS_DISTRO-torch-conversions-py-cuda
 ```
 
+As with C++, the explicit Python core package is optional when installing its
+CPU plugin.
+
 Source build:
 
 ```bash
+rosdep install --from-paths . --ignore-src -y
 colcon build --merge-install --packages-up-to \
   torch_conversions_py_cpu torch_conversions_py_cuda
+```
+
+For a Python CPU-only source build, restrict both commands to the CPU stack:
+
+```bash
+rosdep install --from-paths \
+  tensor_msgs \
+  torch_vendor/python3_torch_vendor \
+  torch_conversions/torch_conversions_py \
+  torch_conversions/torch_conversions_py_cpu \
+  --ignore-src -y
+colcon build --merge-install --packages-up-to torch_conversions_py_cpu
 ```
 
 ```python
@@ -133,6 +192,14 @@ A pristine consumer then installs only the cores and CPU plugins, builds the
 test sources separately, manually runs the CPU unit and launch tests, installs
 the CUDA plugins, verifies that the core files did not change, and reruns the
 C++ and Python unit and launch tests on a GPU.
+
+The validated upgrade sequence also checks that the CPU installation contains
+no `nvidia-cuda*` package, C++ linkage moves from `libtorch_vendor` to
+`libtorch_cuda_vendor`, Python imports move from `python3_torch_vendor` to
+`python3_torch_cuda_vendor`, and backend selection can run CPU, CUDA, then CPU
+again. See
+[`VALIDATION.md`](../docker/resolute/debian/reports/VALIDATION.md) for the
+summary.
 
 ## License
 
