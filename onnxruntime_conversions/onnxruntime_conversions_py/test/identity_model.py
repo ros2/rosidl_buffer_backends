@@ -12,14 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Build the tiny models the tests run, without the onnx package.
-
-The onnx and onnxruntime Debian packages both register onnx/onnx-ml.proto with
-protobuf, so importing them together aborts the process, and ONNX Runtime
-itself cannot author models. A ModelProto is plain protobuf, so the handful of
-fields an Identity graph needs are encoded here instead.
-"""
+"""Encode Identity models without loading ONNX's duplicate protobuf descriptors."""
 
 from typing import Sequence
 

@@ -213,10 +213,7 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     file(WRITE "${_marker}" "")
   endif()
 
-  # These optional NVSHMEM and cuFile plugins require external HPC stacks
-  # (RDMA, libfabric, UCX, MPI, PMIx, or OpenSHMEM). torch_conversions does
-  # not use them, and rosdep cannot provide that optional closure on Ubuntu
-  # Resolute. Keep the core NVSHMEM host/device libraries and CUDA transports.
+  # Omit optional HPC transports; retain NVSHMEM core and CUDA libraries.
   file(GLOB _unused_transport_plugins
     "${_stage_dir}/nvidia/cufile/lib/libcufile_rdma*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_transport_ib*"
@@ -237,9 +234,7 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     PATTERN ".torch-*" EXCLUDE
   )
 
-  # Wheel binaries already carry their final ABI. Strip them before debhelper
-  # scans the package so dh_strip does not try to split thousands of upstream
-  # debug sections into a ROS dbgsym package.
+  # Strip upstream debug sections before debhelper generates dbgsym packages.
   install(CODE "
     file(GLOB_RECURSE _elfs
       \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_vendor_python_dir}/*.so\"

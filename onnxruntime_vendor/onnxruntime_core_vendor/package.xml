@@ -13,13 +13,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
 
-  <!-- Every provider of libonnxruntime.so.1 puts its own lib directory on
-       LD_LIBRARY_PATH, so a consumer would be served by whichever comes
-       first. Exactly one runtime may be installed. onnxruntime_cuda_vendor
-       is the superset of this package and replaces it on GPU hosts.
-       Ubuntu's libonnxruntime1.23 cannot be declared here because bloom
-       resolves every conflict through rosdep and no key names it; its
-       SONAME is version-qualified, so it does not collide anyway. -->
+  <!-- These providers install competing copies of libonnxruntime.so.1. -->
   <conflict>onnxruntime_cuda_vendor</conflict>
   <conflict>onnxruntime_vendor</conflict>
 

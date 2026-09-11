@@ -5,7 +5,6 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# Pin the CPU provider independently from the CUDA wheel matrix below.
 set(PYTHON_ONNXRUNTIME_VENDOR_VERSION "1.26.0" CACHE STRING
   "ONNX Runtime CPU Python wheel version")
 

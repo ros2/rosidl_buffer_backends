@@ -30,7 +30,7 @@ namespace
 
 using onnxruntime_conversions::TensorMsg;
 using onnxruntime_conversions::allocate_tensor_msg;
-using onnxruntime_conversions::available_backends;
+using onnxruntime_conversions::backend_available;
 using onnxruntime_conversions::configure_session_options;
 using onnxruntime_conversions::from_input_tensor_msg;
 using onnxruntime_conversions::from_output_tensor_msg;
@@ -49,8 +49,7 @@ class CudaConversions : public ::testing::Test
 protected:
   void SetUp() override
   {
-    const auto backends = available_backends();
-    if (std::find(backends.begin(), backends.end(), "cuda") == backends.end()) {
+    if (!backend_available("cuda")) {
       GTEST_SKIP() << "the CUDA conversion plugin is unavailable";
     }
     ASSERT_EQ(cudaStreamCreate(&stream_), cudaSuccess);
@@ -184,18 +183,12 @@ TEST_F(CudaConversions, CopiesDeviceOrtValueIntoHostStorage)
   EXPECT_EQ(result[3], 6.0F);
 }
 
-/// The conversion plugin and execution provider are independent: device
-/// memory can be shared even when the linked ONNX Runtime has no CUDA
-/// provider, so inference is the only part that needs one.
 TEST_F(CudaConversions, ConfiguresTheProviderAndRunsInferenceOnDeviceStorage)
 {
   const auto providers = Ort::GetAvailableProviders();
-  if (std::find(
-      providers.begin(), providers.end(),
-      "CUDAExecutionProvider") == providers.end())
-  {
-    GTEST_SKIP() << "this ONNX Runtime build has no CUDA execution provider";
-  }
+  ASSERT_NE(
+    std::find(providers.begin(), providers.end(), "CUDAExecutionProvider"),
+    providers.end());
 
   Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_conversions_cuda_test");
   Ort::SessionOptions session_options;

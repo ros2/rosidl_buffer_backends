@@ -14,7 +14,7 @@
 
 import ctypes
 
-from identity_model import ElementType as TensorProto
+from identity_model import ElementType
 from identity_model import identity_model
 
 import numpy as np
@@ -90,12 +90,12 @@ def test_views_report_cuda_device_memory(cuda_stream):
     with from_output_tensor_msg(msg, cuda_stream) as value:
         assert value.device_name().lower() == 'cuda'
         assert value.shape() == [2, 3]
-        assert value.element_type() == TensorProto.FLOAT
+        assert value.element_type() == ElementType.FLOAT
         assert value.data_ptr() != 0
 
 
 def test_views_alias_the_device_pointer(cuda_buffer, cuda_stream):
-    msg = allocate_tensor_msg((8,), TensorProto.BOOL, 'cuda')
+    msg = allocate_tensor_msg((8,), ElementType.BOOL, 'cuda')
     msg.data = cuda_buffer.from_cpu(bytes([0, 1] * 4))
 
     with cuda_buffer.from_input_buffer(msg.data, cuda_stream) as handle:
@@ -103,7 +103,7 @@ def test_views_alias_the_device_pointer(cuda_buffer, cuda_stream):
 
     with from_input_tensor_msg(msg, cuda_stream) as value:
         assert value.data_ptr() == expected_pointer
-        assert value.element_type() == TensorProto.BOOL
+        assert value.element_type() == ElementType.BOOL
         ortvalue = getattr(value, '_ortvalue', value)
         assert ortvalue.__dlpack_device__() == (2, 0)
 

@@ -9,45 +9,40 @@ tensors. The public packages are framework-specific and device-neutral:
 | CPU implementation | `onnxruntime_conversions_cpu` | `onnxruntime_conversions_py_cpu` |
 | CUDA implementation | `onnxruntime_conversions_cuda` | `onnxruntime_conversions_py_cuda` |
 
-The core discovers implementations through pluginlib in C++ and an ament
-resource index in Python. Installing the CUDA plugin later does not replace or
-rebuild the core Debian. A newly started process sees both plugins and can
-select CPU or CUDA per call; set `ROSIDL_TENSOR_BACKEND=cpu` or `cuda` to
-choose the default. Discovery happens the first time a process uses the
-registry, so restart a process that was already running while a plugin Debian
-was installed.
+Install a CPU or CUDA plugin Debian to choose the available implementations
+without changing application code or rebuilding the core. C++ discovers plugins
+on first registry use; Python discovers them when the module is imported.
+Restart the application after installing a plugin or provider and source the
+ROS environment before starting it.
+
+Default allocation and session setup use the available plugin with the highest
+priority: CPU is 0 and CUDA is 100. Set `ROSIDL_TENSOR_BACKEND=cpu` or `cuda` to
+override that default, or pass a backend explicitly. Views use the message's
+storage backend; copies into a new message use the source tensor's device
+unless the Python caller specifies a destination backend.
 
 ## ONNX Runtime provider boundary
 
-The C++ API exposes `Ort::Value`, so the core and both plugins must use one
-process-wide ONNX Runtime ABI. They all depend on the CUDA-capable
-`onnxruntime_cuda_vendor`. The Python core similarly depends on the single
-`python_onnxruntime_cuda_vendor`. CPU and CUDA plugins never load competing
-ONNX Runtime distributions into one process.
+All four providers use ONNX Runtime 1.26.0. The accelerator providers require
+CUDA 12 and cuDNN 9.
 
-A CPU-only installation therefore includes the CUDA-capable provider and its
-user-space CUDA libraries, but it needs no GPU or host driver. The shared CUDA
-provider declares Resolute's `nvidia-cudnn` rosdep package for both C++ and
-Python consumers. Adding conversion plugins later changes device discovery,
-not the framework provider.
+The C++ core and both plugins depend on `onnxruntime_cuda_vendor`; the Python
+core depends on `python_onnxruntime_cuda_vendor`. Installing only the CPU
+conversion plugin therefore still includes CUDA user-space dependencies,
+although CPU execution needs no GPU or host driver. Adding the CUDA plugin
+enables device conversions using the same framework provider.
 
-All four provider packages are pinned to ONNX Runtime 1.26.0 and support CUDA
-12. Version 1.26 is the first release with the DLPack methods used internally
-by the Python conversion plugins and the last stable PyPI release for CUDA 12.
+The CPU-only providers, `onnxruntime_core_vendor` and
+`python_onnxruntime_vendor`, serve independent consumers. Each conflicts with
+its corresponding CUDA provider and is not used by these conversion cores.
 
-### Why the Ubuntu package is not used
+## Storage lifetime
 
-Ubuntu Resolute provides ONNX Runtime 1.23.2. Its Python `OrtValue` lacks
-`from_dlpack`, `__dlpack__`, and `__dlpack_device__`, and its runtime has no
-CUDA execution provider. The Python zero-copy conversion and CUDA plugins
-therefore require the pinned upstream 1.26.0 distributions. The Ubuntu C++
-development package is suitable for CPU-only consumers, but using it in the
-conversion core would give the CPU and CUDA plugins different process-wide
-ONNX Runtime ABIs.
-
-The repository retains the existing CPU-only vendor packages for independent
-consumers. They are not alternative providers for these conversion cores and
-must not be installed alongside their conflicting CUDA-capable provider.
+C++ CPU views borrow message storage: keep the message alive and do not resize
+its buffer while a view exists. CUDA views retain a buffer access handle.
+Release output views before publishing so their write handles can record
+completion on the execution stream. Python views retain their backing storage;
+use a context manager to release the view after use.
 
 ## C++
 
@@ -67,6 +62,7 @@ sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-cuda
 Build from source:
 
 ```bash
+rosdep install --from-paths . --ignore-src -y
 colcon build --merge-install --packages-up-to \
   onnxruntime_conversions_cpu onnxruntime_conversions_cuda
 ```
@@ -108,8 +104,7 @@ onnxruntime_conversions::configure_session_options(
 Ort::Session session(env, model, model_size, options);
 ```
 
-ONNX Runtime has no public C++ DLPack importer. The C++ CUDA plugin constructs
-an `Ort::Value` directly over the leased device pointer with
+The C++ plugin constructs an `Ort::Value` over the storage pointer with
 `Ort::Value::CreateTensor`.
 
 ## Python
@@ -125,6 +120,7 @@ sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cuda
 Build from source:
 
 ```bash
+rosdep install --from-paths . --ignore-src -y
 colcon build --merge-install --packages-up-to \
   onnxruntime_conversions_py_cpu onnxruntime_conversions_py_cuda
 ```
@@ -149,10 +145,8 @@ session = ort.InferenceSession(
     model, providers=session_providers('cuda', 0, stream))
 ```
 
-The Python CUDA plugin uses a private capsule helper because
-`OrtValue.from_dlpack` is ONNX Runtime's Python device-pointer importer. This
-is an implementation detail of the ONNX adapter, not a public/shared DLPack
-package or cross-framework ABI.
+Python plugins use `OrtValue.from_dlpack` with a private capsule helper that
+retains the storage and its access handle.
 
 ## License
 

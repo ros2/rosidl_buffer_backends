@@ -15,7 +15,7 @@
 from array import array
 import gc
 
-from identity_model import ElementType as TensorProto
+from identity_model import ElementType
 from identity_model import identity_model
 
 import numpy as np
@@ -36,18 +36,18 @@ from tensor_msgs.msg import ExperimentalTensor
 
 
 SUPPORTED_TYPES = [
-    (TensorProto.FLOAT, np.float32),
-    (TensorProto.UINT8, np.uint8),
-    (TensorProto.INT8, np.int8),
-    (TensorProto.UINT16, np.uint16),
-    (TensorProto.INT16, np.int16),
-    (TensorProto.INT32, np.int32),
-    (TensorProto.INT64, np.int64),
-    (TensorProto.BOOL, np.bool_),
-    (TensorProto.FLOAT16, np.float16),
-    (TensorProto.DOUBLE, np.float64),
-    (TensorProto.UINT32, np.uint32),
-    (TensorProto.UINT64, np.uint64),
+    (ElementType.FLOAT, np.float32),
+    (ElementType.UINT8, np.uint8),
+    (ElementType.INT8, np.int8),
+    (ElementType.UINT16, np.uint16),
+    (ElementType.INT16, np.int16),
+    (ElementType.INT32, np.int32),
+    (ElementType.INT64, np.int64),
+    (ElementType.BOOL, np.bool_),
+    (ElementType.FLOAT16, np.float16),
+    (ElementType.DOUBLE, np.float64),
+    (ElementType.UINT32, np.uint32),
+    (ElementType.UINT64, np.uint64),
 ]
 
 
@@ -86,11 +86,11 @@ def test_numpy_dtypes_name_the_same_element_types(element_type, numpy_type):
 
 
 def test_bfloat16_survives_the_round_trip():
-    msg = allocate_tensor_msg((4,), TensorProto.BFLOAT16, 'cpu')
+    msg = allocate_tensor_msg((4,), ElementType.BFLOAT16, 'cpu')
     np.frombuffer(msg.data, dtype=np.uint16)[:] = np.arange(4)
 
     with from_input_tensor_msg(msg) as value:
-        assert value.element_type() == TensorProto.BFLOAT16
+        assert value.element_type() == ElementType.BFLOAT16
         assert value.shape() == [4]
 
 

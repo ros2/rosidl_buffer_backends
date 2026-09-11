@@ -15,9 +15,7 @@
 
   <build_depend>python3-pip</build_depend>
 
-  <!-- Ubuntu's python3-onnxruntime installs the same top-level onnxruntime
-       module, so whichever comes first on sys.path would win. Exactly one
-       provider of the module may be installed. -->
+  <!-- These packages install the same onnxruntime Python module. -->
   <conflict>python3-onnxruntime</conflict>
   <conflict>python_onnxruntime_cuda_vendor</conflict>
 

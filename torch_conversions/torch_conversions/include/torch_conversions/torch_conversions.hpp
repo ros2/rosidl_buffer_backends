@@ -51,10 +51,12 @@ TORCH_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> allocate_tensor_msg(
   at::ScalarType dtype,
   std::optional<c10::DeviceType> device = std::nullopt);
 
+/// CPU views borrow msg storage. Release output views before publishing msg.
 TORCH_CONVERSIONS_PUBLIC at::Tensor from_output_tensor_msg(
   TensorMsg & msg,
   void * execution_stream = nullptr);
 
+/// With clone=false, CPU storage must remain alive and unchanged in size.
 TORCH_CONVERSIONS_PUBLIC at::Tensor from_input_tensor_msg(
   const TensorMsg & msg,
   bool clone = true,

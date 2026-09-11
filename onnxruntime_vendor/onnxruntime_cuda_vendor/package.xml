@@ -19,9 +19,7 @@
   <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
   <depend version_gte="9" version_lt="10">nvidia-cudnn</depend>
 
-  <!-- See onnxruntime_core_vendor: exactly one provider of
-       libonnxruntime.so.1 may be installed. This package is its superset,
-       adding libonnxruntime_providers_cuda.so. -->
+  <!-- These providers install competing copies of libonnxruntime.so.1. -->
   <conflict>onnxruntime_core_vendor</conflict>
   <conflict>onnxruntime_vendor</conflict>
 

@@ -120,8 +120,10 @@ auto msg = torch_conversions::allocate_tensor_msg(
 // Wrap as at::Tensor without copying and write into it. On an accelerator,
 // pass the stream your kernels run on as a trailing argument so the conversion
 // plugin orders its access against them.
-at::Tensor t_out = torch_conversions::from_output_tensor_msg(*msg);
-my_pipeline(t_out);
+{
+  at::Tensor t_out = torch_conversions::from_output_tensor_msg(*msg);
+  my_pipeline(t_out);
+}
 publisher->publish(std::move(msg));
 
 // Subscriber: independent tensor by default.

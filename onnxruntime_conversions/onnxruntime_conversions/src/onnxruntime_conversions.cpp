@@ -138,7 +138,6 @@ private:
         }
         if (backends_.emplace(plugin->backend(), plugin).second) {
           devices_.emplace(plugin->device_type(), plugin);
-          plugins_.push_back(std::move(plugin));
         }
       } catch (const std::exception &) {
         // Independently installed accelerator plugins may lack their runtime.
@@ -156,7 +155,6 @@ private:
   }
 
   pluginlib::ClassLoader<ConversionPlugin> loader_;
-  std::vector<std::shared_ptr<ConversionPlugin>> plugins_;
   std::map<std::string, std::shared_ptr<ConversionPlugin>> backends_;
   std::map<OrtMemoryInfoDeviceType, std::shared_ptr<ConversionPlugin>> devices_;
 };

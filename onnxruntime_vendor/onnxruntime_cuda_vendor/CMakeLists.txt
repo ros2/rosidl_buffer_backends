@@ -39,11 +39,7 @@ set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE
 set(ONNXRUNTIME_CUDA_VENDOR_URL
   "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_CUDA_VENDOR_VERSION}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
 
-# ONNX Runtime's CUDA 12 release is built with CUDA 12.8. NVIDIA's minor
-# version compatibility covers the installed driver, but it does not add new
-# entry points to an older libcudart (Ubuntu Resolute currently ships 12.4).
-# Keep that ABI detail inside the exclusive runtime provider instead of making
-# every conversion plugin know which CUDA minor built ONNX Runtime.
+# Bundle libcudart 12.8 when the system runtime lacks the symbols ORT requires.
 set(_cuda_runtime_root "")
 if(CUDAToolkit_VERSION VERSION_LESS "12.8")
   set(_cuda_runtime_version "12.8.90")
@@ -85,9 +81,7 @@ set(_download_path
 set(_extract_path "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime_extracted")
 set(_root_glob "${_extract_path}/onnxruntime-linux-x64-*")
 
-# Releases disagree on whether the CUDA-major suffix survives into the
-# extracted directory name, so discovering the root keeps a version bump from
-# silently failing the required-file check below.
+# The archive's top-level directory can differ from its filename.
 file(GLOB _onnxruntime_root LIST_DIRECTORIES true "${_root_glob}")
 
 if(NOT EXISTS "${_onnxruntime_root}/lib/libonnxruntime.so")

@@ -29,7 +29,7 @@ namespace onnxruntime_conversions
 
 using TensorMsg = tensor_msgs::msg::ExperimentalTensor;
 
-/// An Ort::Value over tensor message storage with its storage lease.
+/// An Ort::Value over message storage. CPU storage must outlive the view.
 class ONNXRUNTIME_CONVERSIONS_PUBLIC OrtTensorView
 {
 public:

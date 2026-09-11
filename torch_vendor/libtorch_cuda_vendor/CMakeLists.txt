@@ -32,11 +32,7 @@ if(LIBTORCH_CUDA_VENDOR_VARIANT AND
 endif()
 set(LIBTORCH_CUDA_VENDOR_VARIANT "${_detected_variant}")
 
-# PyTorch publishes pre-built LibTorch archives for x86_64 only. For aarch64,
-# this vendor package has only been verified on the NVIDIA Tegra platform
-# (Jetson), where PyTorch/LibTorch ships with JetPack and must be reused rather
-# than downloaded. Tegra is identified by the kernel device-tree rather than by
-# aarch64 alone, since not all aarch64 systems are Tegra.
+# On aarch64, reuse JetPack's LibTorch and identify Tegra from the device tree.
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(_system_arch MATCHES "aarch64|arm64")
   set(_is_aarch64 TRUE)
@@ -117,9 +113,7 @@ else()
     message(STATUS "${PROJECT_NAME}: using cached LibTorch at ${_torch_root}")
   endif()
 
-  # The shared LibTorch archive carries the optional GPUDirect Storage RDMA
-  # transport. It is not used by torch_conversions, and retaining it makes
-  # Debian's shlib scanner require an otherwise unrelated librdmacm package.
+  # Omit the optional GPUDirect Storage RDMA transport and its RDMA dependencies.
   file(GLOB _unused_cufile_rdma "${_torch_root}/lib/libcufile_rdma*")
   if(_unused_cufile_rdma)
     file(REMOVE ${_unused_cufile_rdma})
@@ -145,8 +139,7 @@ else()
     USE_SOURCE_PERMISSIONS
   )
 
-  # Pre-strip vendored ELF files so dh_strip's objcopy does not rewrite
-  # PyTorch CUDA binaries (libtorch_cpu.so, libtorch_cuda.so, and friends).
+  # Strip upstream debug sections before debhelper generates dbgsym packages.
   install(CODE "
     file(GLOB_RECURSE _elfs
       \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/*.so\"
@@ -162,8 +155,6 @@ else()
 
   ament_index_register_resource("vendor_packages" CONTENT "opt/${PROJECT_NAME}")
 
-  # Install environment hooks so downstream binaries can locate the vendored
-  # shared libraries at runtime (LD_LIBRARY_PATH / PATH).
   if(APPLE)
     set(_LIBDIR_VAR_NAME "DYLD_LIBRARY_PATH")
   elseif(WIN32)

@@ -15,12 +15,10 @@
 #include <gtest/gtest.h>
 #include <onnxruntime_cxx_api.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
@@ -30,17 +28,11 @@ namespace
 
 using onnxruntime_conversions::TensorMsg;
 using onnxruntime_conversions::allocate_tensor_msg;
-using onnxruntime_conversions::available_backends;
+using onnxruntime_conversions::backend_available;
 using onnxruntime_conversions::configure_session_options;
 using onnxruntime_conversions::from_input_tensor_msg;
 using onnxruntime_conversions::from_output_tensor_msg;
 using onnxruntime_conversions::to_tensor_msg;
-
-bool installed(const std::string & backend)
-{
-  const auto backends = available_backends();
-  return std::find(backends.begin(), backends.end(), backend) != backends.end();
-}
 
 Ort::Value host_value(
   std::vector<float> & data, const std::vector<int64_t> & shape)
@@ -61,7 +53,7 @@ const uint8_t identity_model[] = {
 
 TEST(OnnxRuntimeConversions, AllocatePopulatesMetadata)
 {
-  EXPECT_TRUE(installed("cpu"));
+  EXPECT_TRUE(backend_available("cpu"));
   auto msg = allocate_tensor_msg(
     {2, 3, 4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
 
@@ -83,7 +75,7 @@ TEST(OnnxRuntimeConversions, AllocatePopulatesMetadata)
 
 TEST(OnnxRuntimeConversions, UnavailableBackendThrows)
 {
-  if (installed("cuda")) {
+  if (backend_available("cuda")) {
     GTEST_SKIP() << "the CUDA conversion plugin is installed";
   }
   EXPECT_THROW(

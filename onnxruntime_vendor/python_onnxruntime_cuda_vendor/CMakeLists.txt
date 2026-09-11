@@ -5,8 +5,6 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# Version 1.26 is the first release with the DLPack methods required by the
-# Python conversion plugin and the last stable PyPI release for CUDA 12.
 set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION "1.26.0" CACHE STRING
   "ONNX Runtime CUDA Python wheel version")
 
