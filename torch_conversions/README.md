@@ -88,7 +88,7 @@ well as omitting the CUDA target:
 ```bash
 rosdep install --from-paths \
   tensor_msgs \
-  libtorch_vendor \
+  torch_vendor/libtorch_vendor \
   torch_conversions/torch_conversions \
   torch_conversions/torch_conversions_cpu \
   --ignore-src -y
