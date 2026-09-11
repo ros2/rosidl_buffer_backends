@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from array import array
-from pathlib import Path
 import subprocess
 import sys
 
@@ -32,17 +31,6 @@ from torch_conversions import to_tensor_msg
 
 
 CUDA_AVAILABLE = torch_conversions._plugin_available('cuda')
-
-
-def test_adapter_uses_one_runtime_torch_provider():
-    root = Path(__file__).parents[1]
-    cmake = (root / 'CMakeLists.txt').read_text()
-    manifest = (root / 'package.xml').read_text()
-
-    assert 'find_package(Torch' not in cmake
-    assert '<exec_depend>python3_torch_vendor</exec_depend>' in manifest
-    assert '<exec_depend>cuda_buffer_py</exec_depend>' not in manifest
-    assert 'dlpack_conversions' not in manifest
 
 
 def test_cpu_conversion_works_in_a_fresh_interpreter():

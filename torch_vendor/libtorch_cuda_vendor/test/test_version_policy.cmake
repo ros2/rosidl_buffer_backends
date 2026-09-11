@@ -14,6 +14,11 @@
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/libtorch_cuda_vendor_policy.cmake")
 
+if(DEFINED TEST_VARIANT)
+  libtorch_cuda_vendor_validate_variant("${TEST_VARIANT}")
+  return()
+endif()
+
 if(NOT LIBTORCH_CUDA_VENDOR_VERSION STREQUAL "2.9.1")
   message(FATAL_ERROR "Expected LibTorch 2.9.1")
 endif()
@@ -36,8 +41,8 @@ if(NOT selected STREQUAL "cu130")
 endif()
 
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -P
-    "${CMAKE_CURRENT_LIST_DIR}/unsupported_variant.cmake"
+  COMMAND "${CMAKE_COMMAND}" -DTEST_VARIANT=cu132 -P
+    "${CMAKE_CURRENT_LIST_FILE}"
   RESULT_VARIABLE unsupported_result
   OUTPUT_QUIET
   ERROR_QUIET
