@@ -28,48 +28,6 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
 - **torch_conversions_py_cpu** -- Python host-memory implementation.
 - **torch_conversions_py_cuda** -- Python CUDA implementation.
 
-### Torch provider model
-
-The C++ and Python conversion APIs are device-neutral within PyTorch, but they
-are not framework-ABI-neutral: the C++ API exposes `at::Tensor`, and the Python
-API imports `torch`. The conversion cores therefore depend on CPU Torch
-providers, while the optional CUDA plugins bring CUDA-capable provider
-overlays:
-
-| Consumer | CPU provider | Optional CUDA provider |
-| --- | --- | --- |
-| `torch_conversions` | `libtorch_vendor` | `libtorch_cuda_vendor` |
-| `torch_conversions_py` | `python3_torch_vendor` | `python3_torch_cuda_vendor` |
-
-All four providers use exactly PyTorch 2.9.1. The CPU providers contain the
-official CPU LibTorch archive and Python wheel and have no CUDA dependency.
-The CUDA providers are separate packages that depend on their corresponding
-CPU provider and on the supported CUDA dependency closure. Consequently,
-installing either core plus its CPU plugin does not install CUDA.
-
-Installing a CUDA conversion plugin later does not rebuild or replace the
-conversion core or CPU provider. Its CUDA provider is installed under a
-separate ROS-prefix directory, and ROS environment hooks place that directory
-ahead of the CPU provider for subsequently started processes. The process then
-loads one ABI-compatible set of Torch libraries, while both the CPU and CUDA
-conversion plugins remain selectable. Restart the process and source the ROS
-setup file after installing or removing a provider; already-loaded Torch
-libraries and plugin registries cannot be switched safely in-process.
-
-APT installs the providers transitively, so typical installations are:
-
-```bash
-# CPU-only C++ and Python conversions
-sudo apt install \
-  ros-$ROS_DISTRO-torch-conversions-cpu \
-  ros-$ROS_DISTRO-torch-conversions-py-cpu
-
-# Add CUDA later; this retains the CPU plugins
-sudo apt install \
-  ros-$ROS_DISTRO-torch-conversions-cuda \
-  ros-$ROS_DISTRO-torch-conversions-py-cuda
-```
-
 ## Deb build status
 
 ### ROS 2 Lyrical (Ubuntu Resolute)
