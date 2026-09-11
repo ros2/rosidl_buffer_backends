@@ -160,5 +160,5 @@ class TestTorchTensorMultiSubFastRTPSShutdown(unittest.TestCase):
     def test_exit_codes(self, proc_info):
         launch_testing.asserts.assertExitCodes(
             proc_info,
-            allowable_exit_codes=[0, 1, -2, -6, -9, -11, -15],
+            allowable_exit_codes=[0, -2, -15],
         )

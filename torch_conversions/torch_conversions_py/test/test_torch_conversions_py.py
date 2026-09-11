@@ -30,7 +30,7 @@ from torch_conversions import from_output_tensor_msg
 from torch_conversions import to_tensor_msg
 
 
-CUDA_AVAILABLE = torch_conversions._plugin_available('cuda')
+CUDA_AVAILABLE = torch_conversions.backend_available('cuda')
 
 
 def test_cpu_conversion_works_in_a_fresh_interpreter():

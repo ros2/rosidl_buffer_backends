@@ -15,7 +15,6 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-// CUDA stream APIs require a CUDA-enabled LibTorch provider.
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -84,7 +83,6 @@ TEST(TorchConversionsCuda, CopiesIntoStorageOnACallerSuppliedStream)
   EXPECT_FLOAT_EQ(readback.sum().item<float>(), 160.0f);
 }
 
-// Verify synchronization when the caller uses a non-default stream.
 TEST(TorchConversionsCuda, HonoursANonDefaultStream)
 {
   if (!torch::cuda::is_available()) {

@@ -84,11 +84,6 @@ def backend_available(backend: str) -> bool:
     return backend in _REGISTRY.backends()
 
 
-def _plugin_available(device: Device) -> bool:
-    normalized = torch.device(device).type
-    return _REGISTRY.backend_for_device(normalized) is not None
-
-
 def backend_for_device(device: Device) -> Optional[str]:
     device_type = torch.device(device).type
     if device_type not in ('cpu', 'cuda'):

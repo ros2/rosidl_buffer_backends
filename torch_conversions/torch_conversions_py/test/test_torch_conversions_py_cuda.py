@@ -27,7 +27,7 @@ from torch_conversions import to_tensor_msg
 
 
 CUDA_AVAILABLE = (
-    torch_conversions._plugin_available('cuda') and torch.cuda.is_available()
+    torch_conversions.backend_available('cuda') and torch.cuda.is_available()
 )
 
 pytestmark = pytest.mark.skipif(
