@@ -93,64 +93,41 @@ void expect_device_values(
   EXPECT_EQ(actual, expected);
 }
 
-TEST_F(CudaConversions, CudaIsPreferredOverHostMemory)
+TEST_F(CudaConversions, PrefersCudaAndKeepsHostStorageAvailable)
 {
   EXPECT_EQ(onnxruntime_conversions::default_backend(), "cuda");
 
-  auto msg = allocate_tensor_msg({4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
-
-  EXPECT_EQ(msg->data.get_backend_type(), "cuda");
-}
-
-TEST_F(CudaConversions, HostStorageStaysAvailableAlongsideCuda)
-{
-  auto msg = allocate_tensor_msg(
+  auto default_msg = allocate_tensor_msg(
+    {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
+  auto host_msg = allocate_tensor_msg(
     {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
 
-  EXPECT_EQ(msg->data.get_backend_type(), "cpu");
+  EXPECT_EQ(default_msg->data.get_backend_type(), "cuda");
+  EXPECT_EQ(host_msg->data.get_backend_type(), "cpu");
 }
 
-TEST_F(CudaConversions, ViewsCarryTheCudaAllocatorAndDevicePointer)
-{
-  auto msg = allocate_tensor_msg(
-    {6}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
-
-  auto output = from_output_tensor_msg(*msg, stream());
-  const auto info = output.value().GetTensorMemoryInfo();
-
-  EXPECT_EQ(info.GetDeviceType(), OrtMemoryInfoDeviceType_GPU);
-  EXPECT_EQ(info.GetAllocatorName(), "Cuda");
-
-  cudaPointerAttributes attributes{};
-  ASSERT_EQ(
-    cudaPointerGetAttributes(
-      &attributes, output.value().GetTensorMutableData<float>()),
-    cudaSuccess);
-  EXPECT_EQ(attributes.type, cudaMemoryTypeDevice);
-  EXPECT_EQ(attributes.device, info.GetDeviceId());
-}
-
-TEST_F(CudaConversions, InputAndOutputViewsAliasTheSameDeviceStorage)
-{
-  auto msg = allocate_tensor_msg(
-    {6}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
-
-  auto output = from_output_tensor_msg(*msg, stream());
-  auto * device_pointer = output.value().GetTensorMutableData<float>();
-  auto input = from_input_tensor_msg(*msg, stream());
-
-  EXPECT_EQ(input.value().GetTensorData<float>(), device_pointer);
-}
-
-TEST_F(CudaConversions, RoundTripsThroughDeviceMemory)
+TEST_F(CudaConversions, ViewsAliasCudaDeviceStorage)
 {
   const std::vector<float> source{1.0F, 2.0F, 3.0F, 4.0F};
   auto msg = allocate_tensor_msg(
     {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
 
   auto output = from_output_tensor_msg(*msg, stream());
+  const auto info = output.value().GetTensorMemoryInfo();
+  EXPECT_EQ(info.GetDeviceType(), OrtMemoryInfoDeviceType_GPU);
+  EXPECT_EQ(info.GetAllocatorName(), "Cuda");
+
+  auto * device_pointer = output.value().GetTensorMutableData<float>();
+  cudaPointerAttributes attributes{};
+  ASSERT_EQ(
+    cudaPointerGetAttributes(&attributes, device_pointer),
+    cudaSuccess);
+  EXPECT_EQ(attributes.type, cudaMemoryTypeDevice);
+  EXPECT_EQ(attributes.device, info.GetDeviceId());
+
   copy_to_device(output.value(), source, stream_);
   auto input = from_input_tensor_msg(*msg, stream());
+  EXPECT_EQ(input.value().GetTensorData<float>(), device_pointer);
   expect_device_values(input.value(), source, stream_);
 }
 

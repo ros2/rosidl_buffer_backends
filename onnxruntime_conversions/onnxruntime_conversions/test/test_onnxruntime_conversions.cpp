@@ -59,14 +59,9 @@ const uint8_t identity_model[] = {
   2, 8, 3, 98, 24, 10, 6, 111, 117, 116, 112, 117, 116, 18, 14, 10,
   12, 8, 1, 18, 8, 10, 2, 8, 2, 10, 2, 8, 3, 66, 4, 10, 0, 16, 18};
 
-TEST(OnnxRuntimeConversions, HostStorageIsAlwaysInstalled)
-{
-  EXPECT_TRUE(installed("cpu"));
-  EXPECT_FALSE(onnxruntime_conversions::default_backend().empty());
-}
-
 TEST(OnnxRuntimeConversions, AllocatePopulatesMetadata)
 {
+  EXPECT_TRUE(installed("cpu"));
   auto msg = allocate_tensor_msg(
     {2, 3, 4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
 
@@ -78,14 +73,12 @@ TEST(OnnxRuntimeConversions, AllocatePopulatesMetadata)
   EXPECT_EQ(msg->byte_offset, 0u);
   EXPECT_EQ(msg->data.size(), 24u * sizeof(float));
   EXPECT_EQ(msg->data.get_backend_type(), "cpu");
-}
 
-TEST(OnnxRuntimeConversions, DefaultBackendAllocatesWithoutBeingNamed)
-{
-  auto msg = allocate_tensor_msg({4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
-
+  auto default_msg = allocate_tensor_msg(
+    {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
   EXPECT_EQ(
-    msg->data.get_backend_type(), onnxruntime_conversions::default_backend());
+    default_msg->data.get_backend_type(),
+    onnxruntime_conversions::default_backend());
 }
 
 TEST(OnnxRuntimeConversions, UnavailableBackendThrows)
@@ -113,15 +106,6 @@ TEST(OnnxRuntimeConversions, OutputViewAliasesMessageStorage)
     reinterpret_cast<const int32_t *>(msg->data.data());
   EXPECT_EQ(message_data[0], 10);
   EXPECT_EQ(message_data[3], 40);
-}
-
-/// The conversion plugin decides where the tensor lives, so the caller can no
-/// longer hand over an Ort::MemoryInfo that disagrees with it.
-TEST(OnnxRuntimeConversions, MemoryInfoFollowsTheStorageDevice)
-{
-  auto msg = allocate_tensor_msg(
-    {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
-  auto view = from_output_tensor_msg(*msg);
 
   const auto info = view.value().GetTensorMemoryInfo();
   EXPECT_EQ(info.GetDeviceType(), OrtMemoryInfoDeviceType_CPU);
@@ -160,18 +144,12 @@ TEST(OnnxRuntimeConversions, SupportsScalarShapes)
   EXPECT_TRUE(static_cast<bool>(view));
   EXPECT_EQ(view.value().GetTensorTypeAndShapeInfo().GetElementCount(), 1u);
   EXPECT_TRUE(view.value().GetTensorTypeAndShapeInfo().GetShape().empty());
-}
 
-/// Zero-element shapes carry no storage, so there is nothing to expose. The
-/// view converts to false rather than wrapping a zero-length allocation.
-TEST(OnnxRuntimeConversions, ZeroSizedShapesProduceNoView)
-{
-  auto msg = allocate_tensor_msg(
+  auto empty = allocate_tensor_msg(
     {2, 0, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
-
-  EXPECT_EQ(msg->data.size(), 0u);
-  EXPECT_FALSE(static_cast<bool>(from_output_tensor_msg(*msg)));
-  EXPECT_FALSE(static_cast<bool>(from_input_tensor_msg(*msg)));
+  EXPECT_EQ(empty->data.size(), 0u);
+  EXPECT_FALSE(static_cast<bool>(from_output_tensor_msg(*empty)));
+  EXPECT_FALSE(static_cast<bool>(from_input_tensor_msg(*empty)));
 }
 
 TEST(OnnxRuntimeConversions, RejectsNonContiguousStrides)
@@ -207,40 +185,28 @@ TEST(OnnxRuntimeConversions, RejectsDtypesOnnxRuntimeCannotRepresent)
   EXPECT_THROW(from_output_tensor_msg(*msg), std::invalid_argument);
 }
 
-TEST(OnnxRuntimeConversions, CopiesHostOrtValueIntoNewMessage)
+TEST(OnnxRuntimeConversions, CopiesHostOrtValueIntoNewAndExistingMessages)
 {
   std::vector<float> source{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
   const std::vector<int64_t> shape{2, 3};
   auto value = host_value(source, shape);
 
-  auto msg = to_tensor_msg(value);
-
-  EXPECT_EQ(msg->shape, shape);
-  EXPECT_EQ(msg->strides, (std::vector<int64_t>{3, 1}));
-  EXPECT_EQ(msg->dtype_code, 2);
-  EXPECT_EQ(msg->dtype_bits, 32);
-  EXPECT_EQ(msg->data.get_backend_type(), "cpu");
-  const auto * result = reinterpret_cast<const float *>(msg->data.data());
-  EXPECT_EQ(result[0], 1.0F);
-  EXPECT_EQ(result[5], 6.0F);
-}
-
-TEST(OnnxRuntimeConversions, CopiesHostOrtValueIntoExistingMessage)
-{
-  std::vector<float> source{7.0F, 8.0F};
-  const std::vector<int64_t> shape{2};
-  auto value = host_value(source, shape);
-  auto msg = allocate_tensor_msg(
+  auto created = to_tensor_msg(value);
+  auto existing = allocate_tensor_msg(
     {16}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
+  to_tensor_msg(*existing, value);
 
-  to_tensor_msg(*msg, value);
-
-  EXPECT_EQ(msg->shape, shape);
-  EXPECT_EQ(msg->strides, (std::vector<int64_t>{1}));
-  EXPECT_EQ(msg->byte_offset, 0u);
-  const auto * result = reinterpret_cast<const float *>(msg->data.data());
-  EXPECT_EQ(result[0], 7.0F);
-  EXPECT_EQ(result[1], 8.0F);
+  for (const auto * msg : {created.get(), existing.get()}) {
+    EXPECT_EQ(msg->shape, shape);
+    EXPECT_EQ(msg->strides, (std::vector<int64_t>{3, 1}));
+    EXPECT_EQ(msg->dtype_code, 2);
+    EXPECT_EQ(msg->dtype_bits, 32);
+    EXPECT_EQ(msg->byte_offset, 0u);
+    EXPECT_EQ(msg->data.get_backend_type(), "cpu");
+    const auto * result = reinterpret_cast<const float *>(msg->data.data());
+    EXPECT_EQ(result[0], 1.0F);
+    EXPECT_EQ(result[5], 6.0F);
+  }
 }
 
 TEST(OnnxRuntimeConversions, RejectsOrtValuesLargerThanTheDestination)
@@ -294,7 +260,7 @@ TEST(OnnxRuntimeConversions, RunsInferenceWithPreallocatedMessageBuffers)
   }
 }
 
-TEST(OnnxRuntimeConversions, HostSessionsTakeNoExecutionStream)
+TEST(OnnxRuntimeConversions, ValidatesSessionProviderArguments)
 {
   Ort::SessionOptions session_options;
 
@@ -303,20 +269,8 @@ TEST(OnnxRuntimeConversions, HostSessionsTakeNoExecutionStream)
     configure_session_options(
       session_options, "cpu", 0, reinterpret_cast<void *>(1)),
     std::invalid_argument);
-}
-
-TEST(OnnxRuntimeConversions, AcceleratorSessionsRequireAnExecutionStream)
-{
-  Ort::SessionOptions session_options;
-
   EXPECT_THROW(
     configure_session_options(session_options, "cuda"), std::invalid_argument);
-}
-
-TEST(OnnxRuntimeConversions, UnknownBackendsHaveNoExecutionProvider)
-{
-  Ort::SessionOptions session_options;
-
   EXPECT_THROW(
     configure_session_options(
       session_options, "trainium", 0, reinterpret_cast<void *>(1)),
