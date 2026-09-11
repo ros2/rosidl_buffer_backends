@@ -49,9 +49,9 @@ source checkout against the installed Debians, then invokes its binaries and
 launch file manually. It:
 
 1. checks CPU-only plugin discovery and runs the C++ and Python CPU tests;
-2. hashes the installed C++ and Python core files;
+2. snapshots the installed C++ and Python core files;
 3. installs only the independently built C++ and Python CUDA plugins;
-4. verifies both core hashes are unchanged;
+4. verifies the installed files are byte-for-byte unchanged;
 5. runs CUDA discovery, C++/Python CUDA tests, the C++ launch test, and the
    Python Fast RTPS process-boundary test on the GPU; and
 6. selects CPU, CUDA, then CPU again within one Python process.

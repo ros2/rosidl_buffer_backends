@@ -11,12 +11,12 @@ toolkit, ONNX Runtime, or Torch. `rosdep` resolved the build and runtime keys
 from `package.xml`; the local rosdep file represents the future rosdistro
 entries for unreleased packages.
 
-The artifact repository contains 80 generated and cached Debians and every
-entry passes `sha256sum -c SHA256SUMS`. The 15 project Debians are the five
-message/CUDA-buffer foundations, four mutually exclusive ONNX Runtime
-providers, and six ONNX Runtime conversion core/plugin packages. The two
-CPU-only providers were built as standalone artifacts and intentionally not
-installed in the builder alongside the conflicting CUDA-capable providers.
+The artifact repository contains 80 generated and cached Debians. The 15
+project Debians are the five message/CUDA-buffer foundations, four mutually
+exclusive ONNX Runtime providers, and six ONNX Runtime conversion core/plugin
+packages. The two CPU-only providers were built as standalone artifacts and
+intentionally not installed in the builder alongside the conflicting
+CUDA-capable providers.
 
 All four provider packages supply ONNX Runtime 1.26.0. The installed-package
 test explicitly verified the C++ and Python provider versions and confirmed
@@ -25,10 +25,10 @@ that Python exposes `OrtValue.from_dlpack`, `__dlpack__`, and
 
 Ubuntu Resolute supplies CUDA 12.4, while the official ONNX Runtime CUDA 12
 binary requires the CUDA 12.8 runtime ABI. The exclusive
-`onnxruntime_cuda_vendor` Debian therefore includes NVIDIA's pinned,
-SHA-256-verified `libcudart.so.12` 12.8 compatibility runtime. CUDA headers and
-the rest of the toolkit still come from the manifest's `nvidia-cuda` rosdep
-key. The provider package also carries the NVIDIA runtime license.
+`onnxruntime_cuda_vendor` Debian therefore includes NVIDIA's
+`libcudart.so.12` 12.8 compatibility runtime. CUDA headers and the rest of the
+toolkit still come from the manifest's `nvidia-cuda` rosdep key. The provider
+package also carries the NVIDIA runtime license.
 
 ## Installed-package tests
 
@@ -53,8 +53,8 @@ launched it manually.
   buffer dependencies) from the local artifact repository.
 - APT was pinned to the exact locally generated `0.1.2-0resolute` version so a
   published higher-revision package could not be substituted.
-- SHA-256 checks confirmed that the C++ and Python conversion cores and both
-  ONNX Runtime provider binaries were byte-identical before and after plugin
+- Byte-for-byte comparisons confirmed that the C++ and Python conversion
+  cores and both ONNX Runtime provider binaries were unchanged after plugin
   installation.
 - GPU used: NVIDIA GeForce RTX 4080, driver 610.57.04.
 
@@ -91,7 +91,7 @@ The complete installed-test output is in
 - `ros-rolling-onnxruntime-cuda-vendor` and
   `ros-rolling-python-onnxruntime-cuda-vendor` contain the CUDA 12-compatible
   1.26.0 distributions and conflict with their CPU-only counterparts.
-- All provider downloads are version-pinned and SHA-256 verified.
+- All provider downloads are version-pinned.
 - CUDA manifests consistently constrain the toolkit to major version 12.
 
 Ubuntu Resolute's public ONNX Runtime 1.23 packages were not used for the

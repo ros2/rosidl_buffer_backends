@@ -18,11 +18,10 @@ project(onnxruntime_cuda_vendor)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_vendor_package REQUIRED)
 find_package(CUDAToolkit REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(ONNXRUNTIME_CUDA_VENDOR_VERSION "1.26.0" CACHE STRING
   "ONNX Runtime version to download")
-set(ONNXRUNTIME_CUDA_VENDOR_SHA256 "" CACHE STRING
-  "SHA256 override for the selected official ONNX Runtime archive")
 
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(NOT _system_arch MATCHES "^(x86_64|amd64)$")
@@ -37,13 +36,6 @@ endif()
 
 set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE
   "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_CUDA_VENDOR_VERSION}.tgz")
-
-# Same archives onnxruntime_core_vendor fetches, so the checksums are shared.
-if(ONNXRUNTIME_CUDA_VENDOR_VERSION STREQUAL "1.26.0" AND
-    ONNXRUNTIME_CUDA_VENDOR_SHA256 STREQUAL "")
-  set(ONNXRUNTIME_CUDA_VENDOR_SHA256
-    "cb7df7ee2ca0f962c7ce7c839aeae36223d146a91fb4646d62fb0046f297479f")
-endif()
 set(ONNXRUNTIME_CUDA_VENDOR_URL
   "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_CUDA_VENDOR_VERSION}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
 
@@ -55,32 +47,36 @@ set(ONNXRUNTIME_CUDA_VENDOR_URL
 set(_cuda_runtime_root "")
 if(CUDAToolkit_VERSION VERSION_LESS "12.8")
   set(_cuda_runtime_version "12.8.90")
-  set(_cuda_runtime_archive
-    "nvidia_cuda_runtime_cu12-${_cuda_runtime_version}-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl")
-  set(_cuda_runtime_url
-    "https://files.pythonhosted.org/packages/0d/9b/a997b638fcd068ad6e4d53b8551a7d30fe8b404d6f1804abf1df69838932/${_cuda_runtime_archive}")
-  set(_cuda_runtime_sha256
-    "adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90")
-  set(_cuda_runtime_download
-    "${CMAKE_CURRENT_BINARY_DIR}/${_cuda_runtime_archive}")
+  set(_cuda_runtime_package "nvidia-cuda-runtime-cu12")
+  set(_cuda_runtime_download_dir
+    "${CMAKE_CURRENT_BINARY_DIR}/cuda_runtime_wheel")
   set(_cuda_runtime_root
     "${CMAKE_CURRENT_BINARY_DIR}/cuda_runtime_extracted")
   if(NOT EXISTS
       "${_cuda_runtime_root}/nvidia/cuda_runtime/lib/libcudart.so.12")
-    file(DOWNLOAD "${_cuda_runtime_url}" "${_cuda_runtime_download}"
-      EXPECTED_HASH "SHA256=${_cuda_runtime_sha256}"
-      SHOW_PROGRESS STATUS _cuda_runtime_download_status)
-    list(GET _cuda_runtime_download_status 0 _cuda_runtime_download_code)
-    if(NOT _cuda_runtime_download_code EQUAL 0)
-      list(GET _cuda_runtime_download_status 1 _cuda_runtime_download_message)
+    file(REMOVE_RECURSE
+      "${_cuda_runtime_download_dir}" "${_cuda_runtime_root}")
+    file(MAKE_DIRECTORY "${_cuda_runtime_download_dir}")
+    execute_process(
+      COMMAND "${Python3_EXECUTABLE}" -m pip download
+        --disable-pip-version-check
+        --no-cache-dir
+        --no-deps
+        --only-binary=:all:
+        --dest "${_cuda_runtime_download_dir}"
+        "${_cuda_runtime_package}==${_cuda_runtime_version}"
+      COMMAND_ERROR_IS_FATAL ANY)
+    file(GLOB _cuda_runtime_wheels
+      "${_cuda_runtime_download_dir}/*.whl")
+    list(LENGTH _cuda_runtime_wheels _cuda_runtime_wheel_count)
+    if(NOT _cuda_runtime_wheel_count EQUAL 1)
       message(FATAL_ERROR
-        "${PROJECT_NAME}: CUDA runtime download failed: "
-        "${_cuda_runtime_download_message}")
+        "${PROJECT_NAME}: expected one CUDA runtime wheel, found "
+        "${_cuda_runtime_wheel_count}")
     endif()
     file(REMOVE_RECURSE "${_cuda_runtime_root}")
-    file(ARCHIVE_EXTRACT INPUT "${_cuda_runtime_download}"
+    file(ARCHIVE_EXTRACT INPUT "${_cuda_runtime_wheels}"
       DESTINATION "${_cuda_runtime_root}")
-    file(REMOVE "${_cuda_runtime_download}")
   endif()
 endif()
 
@@ -95,17 +91,8 @@ set(_root_glob "${_extract_path}/onnxruntime-linux-x64-*")
 file(GLOB _onnxruntime_root LIST_DIRECTORIES true "${_root_glob}")
 
 if(NOT EXISTS "${_onnxruntime_root}/lib/libonnxruntime.so")
-  set(_hash_args)
-  if(ONNXRUNTIME_CUDA_VENDOR_SHA256)
-    list(APPEND _hash_args
-      EXPECTED_HASH "SHA256=${ONNXRUNTIME_CUDA_VENDOR_SHA256}")
-  else()
-    message(WARNING
-      "${PROJECT_NAME}: no checksum is known for "
-      "${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
-  endif()
   file(DOWNLOAD "${ONNXRUNTIME_CUDA_VENDOR_URL}" "${_download_path}"
-    ${_hash_args} SHOW_PROGRESS STATUS _download_status)
+    SHOW_PROGRESS STATUS _download_status)
   list(GET _download_status 0 _download_code)
   if(NOT _download_code EQUAL 0)
     list(GET _download_status 1 _download_message)

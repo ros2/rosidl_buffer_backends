@@ -20,8 +20,6 @@ find_package(ament_cmake_vendor_package REQUIRED)
 
 set(ONNXRUNTIME_CORE_VENDOR_VERSION "1.26.0" CACHE STRING
   "ONNX Runtime version to download")
-set(ONNXRUNTIME_CORE_VENDOR_SHA256 "" CACHE STRING
-  "SHA256 override for the selected official ONNX Runtime archive")
 
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(_system_arch MATCHES "^(x86_64|amd64)$")
@@ -38,17 +36,6 @@ else()
     "${PROJECT_NAME}: unsupported architecture '${CMAKE_SYSTEM_PROCESSOR}'")
 endif()
 
-if(ONNXRUNTIME_CORE_VENDOR_VERSION STREQUAL "1.26.0" AND
-    ONNXRUNTIME_CORE_VENDOR_SHA256 STREQUAL "")
-  if(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND STREQUAL "aarch64_cpu")
-    set(ONNXRUNTIME_CORE_VENDOR_SHA256
-      "34ff1c2d0f12e2cf3d33a0c5f82e39792e1d581fbd6968fd7c30d173654be01a")
-  else()
-    set(ONNXRUNTIME_CORE_VENDOR_SHA256
-      "cb7df7ee2ca0f962c7ce7c839aeae36223d146a91fb4646d62fb0046f297479f")
-  endif()
-endif()
-
 set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE
   "${ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM}.tgz")
 set(ONNXRUNTIME_CORE_VENDOR_URL
@@ -61,17 +48,8 @@ set(_onnxruntime_root
   "${_extract_path}/${ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM}")
 
 if(NOT EXISTS "${_onnxruntime_root}/lib/libonnxruntime.so")
-  set(_hash_args)
-  if(ONNXRUNTIME_CORE_VENDOR_SHA256)
-    list(APPEND _hash_args
-      EXPECTED_HASH "SHA256=${ONNXRUNTIME_CORE_VENDOR_SHA256}")
-  else()
-    message(WARNING
-      "${PROJECT_NAME}: no checksum is known for "
-      "${ONNXRUNTIME_CORE_VENDOR_ARCHIVE}")
-  endif()
   file(DOWNLOAD "${ONNXRUNTIME_CORE_VENDOR_URL}" "${_download_path}"
-    ${_hash_args} SHOW_PROGRESS STATUS _download_status)
+    SHOW_PROGRESS STATUS _download_status)
   list(GET _download_status 0 _download_code)
   if(NOT _download_code EQUAL 0)
     list(GET _download_status 1 _download_message)

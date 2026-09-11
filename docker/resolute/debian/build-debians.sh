@@ -118,7 +118,6 @@ cp -a /root/.ros/rosdep/sources.cache "${artifact_dir}/rosdep-sources-cache"
 pushd "${artifact_dir}"
 dpkg-scanpackages . /dev/null > Packages
 gzip -9cn Packages > Packages.gz
-sha256sum ./*.deb > SHA256SUMS
 : > MANIFEST.tsv
 for debian in ./*.deb; do
   dpkg-deb --showformat='${Package}\t${Version}\t${Architecture}\n' \

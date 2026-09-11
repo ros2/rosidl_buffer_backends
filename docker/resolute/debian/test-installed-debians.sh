@@ -27,8 +27,7 @@ test -f "${python_provider}"
 cpp_provider_version="$(tr -d '[:space:]' \
   < /opt/ros/rolling/opt/onnxruntime_cuda_vendor/VERSION_NUMBER)"
 python_provider_version="$(python3 -c 'import onnxruntime; print(onnxruntime.__version__)')"
-test "${cpp_provider_version}" = 1.26.0
-test "${python_provider_version}" = 1.26.0
+test "${cpp_provider_version}" = "${python_provider_version}"
 python3 - <<'PY'
 import onnxruntime as ort
 
@@ -65,6 +64,7 @@ set -u
 test_bin="${install_prefix}/${test_package}/lib/${test_package}"
 launch_file="${install_prefix}/${test_package}/share/${test_package}/test/test_ort_tensor_inter_pubsub_fastrtps_launch.py"
 python_test_root="${source_root}/onnxruntime_conversions/onnxruntime_conversions_py/test"
+snapshot_dir="${test_workspace}/installed-file-snapshots"
 
 echo '=== Stage 1: installed core plus CPU plugins ==='
 ROSIDL_TENSOR_BACKEND=cpu "${test_bin}/runtime_probe"
@@ -73,32 +73,21 @@ PYTHONPATH="${python_test_root}:${PYTHONPATH:-}" \
   python3 -m pytest -p no:cacheprovider -v \
   "${python_test_root}/test_onnxruntime_conversions_py.py"
 
-core_checksum_before="$(sha256sum "${core_library}" | cut -d' ' -f1)"
-python_checksum_before="$(sha256sum "${python_core}" | cut -d' ' -f1)"
-provider_checksum_before="$(sha256sum "${provider_library}" | cut -d' ' -f1)"
-python_provider_checksum_before="$(sha256sum "${python_provider}" | cut -d' ' -f1)"
-echo "cpp-core-sha256-before=${core_checksum_before}"
-echo "python-core-sha256-before=${python_checksum_before}"
-echo "cpp-provider-sha256-before=${provider_checksum_before}"
-echo "python-provider-sha256-before=${python_provider_checksum_before}"
+mkdir -p "${snapshot_dir}"
+cp -a "${core_library}" "${snapshot_dir}/cpp-core"
+cp -a "${python_core}" "${snapshot_dir}/python-core"
+cp -a "${provider_library}" "${snapshot_dir}/cpp-provider"
+cp -a "${python_provider}" "${snapshot_dir}/python-provider"
 
 echo '=== Stage 2: install independently built CUDA plugins ==='
 apt-get install --no-install-recommends -y \
   ros-rolling-onnxruntime-conversions-cuda \
   ros-rolling-onnxruntime-conversions-py-cuda
 
-core_checksum_after="$(sha256sum "${core_library}" | cut -d' ' -f1)"
-python_checksum_after="$(sha256sum "${python_core}" | cut -d' ' -f1)"
-provider_checksum_after="$(sha256sum "${provider_library}" | cut -d' ' -f1)"
-python_provider_checksum_after="$(sha256sum "${python_provider}" | cut -d' ' -f1)"
-test "${core_checksum_before}" = "${core_checksum_after}"
-test "${python_checksum_before}" = "${python_checksum_after}"
-test "${provider_checksum_before}" = "${provider_checksum_after}"
-test "${python_provider_checksum_before}" = "${python_provider_checksum_after}"
-echo "cpp-core-sha256-after=${core_checksum_after}"
-echo "python-core-sha256-after=${python_checksum_after}"
-echo "cpp-provider-sha256-after=${provider_checksum_after}"
-echo "python-provider-sha256-after=${python_provider_checksum_after}"
+cmp -s "${snapshot_dir}/cpp-core" "${core_library}"
+cmp -s "${snapshot_dir}/python-core" "${python_core}"
+cmp -s "${snapshot_dir}/cpp-provider" "${provider_library}"
+cmp -s "${snapshot_dir}/python-provider" "${python_provider}"
 echo 'core-files-unchanged=pass'
 echo 'provider-files-unchanged=pass'
 

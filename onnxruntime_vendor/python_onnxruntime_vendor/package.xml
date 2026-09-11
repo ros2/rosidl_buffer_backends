@@ -3,7 +3,7 @@
 <package format="3">
   <name>python_onnxruntime_vendor</name>
   <version>0.1.2</version>
-  <description>ONNX Runtime 1.26.0 CPU Python wheel.</description>
+  <description>ONNX Runtime CPU Python wheel.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>

@@ -3,7 +3,7 @@
 <package format="3">
   <name>onnxruntime_cuda_vendor</name>
   <version>0.1.2</version>
-  <description>ONNX Runtime 1.26.0 GPU C++ distribution for CUDA 12.</description>
+  <description>ONNX Runtime GPU C++ distribution.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -13,6 +13,8 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
+
+  <build_depend>python3-pip</build_depend>
 
   <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
   <depend version_gte="9" version_lt="10">nvidia-cudnn</depend>
