@@ -41,6 +41,27 @@ class TensorMetadata:
     byte_offset: int
 
 
+class DLPackProducer:
+
+    def __init__(
+        self, capsule: object, dtype: object, device: tuple[int, int]
+    ) -> None:
+        self._capsule = capsule
+        self._device = device
+        self.dtype = dtype
+
+    def __dlpack__(self, stream: Optional[int] = None, **kwargs: object) -> object:
+        del stream, kwargs
+        capsule = self._capsule
+        if capsule is None:
+            raise RuntimeError('DLPack tensor has already been consumed')
+        self._capsule = None
+        return capsule
+
+    def __dlpack_device__(self) -> tuple[int, int]:
+        return self._device
+
+
 class ConversionPlugin(Protocol):
     """ONNX Runtime conversion implementation for one device type."""
 

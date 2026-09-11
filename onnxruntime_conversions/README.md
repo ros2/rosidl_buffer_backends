@@ -154,15 +154,6 @@ The Python CUDA plugin uses a private capsule helper because
 is an implementation detail of the ONNX adapter, not a public/shared DLPack
 package or cross-framework ABI.
 
-## Validation
-
-The release-like pipeline under `docker/resolute/debian/` builds production
-Debians without a GPU, driver, preinstalled CUDA, ONNX Runtime, or Python
-ONNX Runtime. A pristine consumer installs the core and CPU plugins, builds
-the unshipped test sources externally and runs them manually, installs only
-the CUDA conversion plugins, verifies the core files are unchanged, and runs
-the C++/Python CUDA unit and process-boundary tests on a GPU.
-
 ## License
 
 Apache-2.0

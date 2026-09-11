@@ -20,6 +20,7 @@ import onnxruntime as ort
 
 from onnxruntime_conversions._ort_bridge import make_dlpack_capsule
 from onnxruntime_conversions._plugin import ConversionRegistry
+from onnxruntime_conversions._plugin import DLPackProducer
 from onnxruntime_conversions._plugin import TensorMetadata
 
 
@@ -42,25 +43,6 @@ _DEVICE_TO_DEVICE = 3
 def _check(result: int, operation: str) -> None:
     if result != 0:
         raise RuntimeError(f'{operation} failed with CUDA error {result}')
-
-
-class _Producer:
-
-    def __init__(self, capsule: object, dtype: object, device_id: int) -> None:
-        self._capsule = capsule
-        self._device_id = device_id
-        self.dtype = dtype
-
-    def __dlpack__(self, stream: Optional[int] = None, **kwargs: object) -> object:
-        del stream, kwargs
-        capsule = self._capsule
-        if capsule is None:
-            raise RuntimeError('DLPack tensor has already been consumed')
-        self._capsule = None
-        return capsule
-
-    def __dlpack_device__(self) -> tuple[int, int]:
-        return (2, self._device_id)
 
 
 class _Lease:
@@ -111,7 +93,8 @@ class CudaConversionPlugin:
             0,
             lease,
         )
-        producer = _Producer(capsule, metadata.numpy_dtype, handle.device_id)
+        producer = DLPackProducer(
+            capsule, metadata.numpy_dtype, (2, handle.device_id))
         return ort.OrtValue.from_dlpack(producer), data
 
     def from_input(

@@ -20,25 +20,8 @@ import onnxruntime as ort
 
 from onnxruntime_conversions._ort_bridge import make_dlpack_capsule
 from onnxruntime_conversions._plugin import ConversionRegistry
+from onnxruntime_conversions._plugin import DLPackProducer
 from onnxruntime_conversions._plugin import TensorMetadata
-
-
-class _Producer:
-
-    def __init__(self, capsule: object, dtype: object) -> None:
-        self._capsule = capsule
-        self.dtype = dtype
-
-    def __dlpack__(self, stream: Optional[int] = None, **kwargs: object) -> object:
-        del stream, kwargs
-        capsule = self._capsule
-        if capsule is None:
-            raise RuntimeError('DLPack tensor has already been consumed')
-        self._capsule = None
-        return capsule
-
-    def __dlpack_device__(self) -> tuple[int, int]:
-        return (1, 0)
 
 
 class CpuConversionPlugin:
@@ -91,7 +74,7 @@ class CpuConversionPlugin:
             view,
         )
         return ort.OrtValue.from_dlpack(
-            _Producer(capsule, metadata.numpy_dtype)), view
+            DLPackProducer(capsule, metadata.numpy_dtype, (1, 0))), view
 
     def from_output(
         self, data: object, metadata: TensorMetadata, stream: Optional[int]
