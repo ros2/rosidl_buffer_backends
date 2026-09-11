@@ -1,0 +1,327 @@
+cpp-provider-version=1.26.0
+python-provider-version=1.26.0
+python-dlpack-api=pass
+/usr/bin/rosdep:6: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+  from pkg_resources import load_entry_point
+#All required rosdeps installed successfully
+Starting >>> onnxruntime_conversions_installed_tests
+--- stderr: onnxruntime_conversions_installed_tests
+CMake Warning at /opt/ros/rolling/share/ament_cmake_gtest/cmake/ament_add_gtest_executable.cmake:50 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_onnxruntime_conversions_cuda because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libcudart.so.12] in /usr/lib/x86_64-linux-gnu may be hidden by files in:
+      /opt/ros/rolling/opt/onnxruntime_cuda_vendor/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  /opt/ros/rolling/share/ament_cmake_gtest/cmake/ament_add_gtest_executable.cmake:37 (_ament_add_gtest_executable)
+  /opt/ros/rolling/share/ament_cmake_gtest/cmake/ament_add_gtest.cmake:68 (ament_add_gtest_executable)
+  CMakeLists.txt:36 (ament_add_gtest)
+
+
+CMake Warning at CMakeLists.txt:44 (add_library):
+  Cannot generate a safe runtime search path for target
+  ort_tensor_publisher_component because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libcudart.so.12] in /usr/lib/x86_64-linux-gnu may be hidden by files in:
+      /opt/ros/rolling/opt/onnxruntime_cuda_vendor/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at CMakeLists.txt:52 (add_library):
+  Cannot generate a safe runtime search path for target
+  ort_tensor_subscriber_component because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libcudart.so.12] in /usr/lib/x86_64-linux-gnu may be hidden by files in:
+      /opt/ros/rolling/opt/onnxruntime_cuda_vendor/lib
+
+  Some of these libraries may not be found correctly.
+
+
+---
+Finished <<< onnxruntime_conversions_installed_tests [12.9s]
+
+Summary: 1 package finished [13.0s]
+  1 package had stderr output: onnxruntime_conversions_installed_tests
+=== Stage 1: installed core plus CPU plugins ===
+available=cpu, default=cpu
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 20 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 20 tests from OnnxRuntimeConversions
+[ RUN      ] OnnxRuntimeConversions.HostStorageIsAlwaysInstalled
+[       OK ] OnnxRuntimeConversions.HostStorageIsAlwaysInstalled (0 ms)
+[ RUN      ] OnnxRuntimeConversions.AllocatePopulatesMetadata
+[       OK ] OnnxRuntimeConversions.AllocatePopulatesMetadata (0 ms)
+[ RUN      ] OnnxRuntimeConversions.DefaultBackendAllocatesWithoutBeingNamed
+[       OK ] OnnxRuntimeConversions.DefaultBackendAllocatesWithoutBeingNamed (0 ms)
+[ RUN      ] OnnxRuntimeConversions.UnavailableBackendThrows
+[       OK ] OnnxRuntimeConversions.UnavailableBackendThrows (0 ms)
+[ RUN      ] OnnxRuntimeConversions.OutputViewAliasesMessageStorage
+[       OK ] OnnxRuntimeConversions.OutputViewAliasesMessageStorage (0 ms)
+[ RUN      ] OnnxRuntimeConversions.MemoryInfoFollowsTheStorageDevice
+[       OK ] OnnxRuntimeConversions.MemoryInfoFollowsTheStorageDevice (0 ms)
+[ RUN      ] OnnxRuntimeConversions.InputViewAliasesMessageStorageAtByteOffset
+[       OK ] OnnxRuntimeConversions.InputViewAliasesMessageStorageAtByteOffset (0 ms)
+[ RUN      ] OnnxRuntimeConversions.SupportsScalarShapes
+[       OK ] OnnxRuntimeConversions.SupportsScalarShapes (0 ms)
+[ RUN      ] OnnxRuntimeConversions.ZeroSizedShapesProduceNoView
+[       OK ] OnnxRuntimeConversions.ZeroSizedShapesProduceNoView (0 ms)
+[ RUN      ] OnnxRuntimeConversions.RejectsNonContiguousStrides
+[       OK ] OnnxRuntimeConversions.RejectsNonContiguousStrides (0 ms)
+[ RUN      ] OnnxRuntimeConversions.RejectsOutOfBoundsView
+[       OK ] OnnxRuntimeConversions.RejectsOutOfBoundsView (0 ms)
+[ RUN      ] OnnxRuntimeConversions.RejectsDtypesOnnxRuntimeCannotRepresent
+[       OK ] OnnxRuntimeConversions.RejectsDtypesOnnxRuntimeCannotRepresent (0 ms)
+[ RUN      ] OnnxRuntimeConversions.CopiesHostOrtValueIntoNewMessage
+[       OK ] OnnxRuntimeConversions.CopiesHostOrtValueIntoNewMessage (0 ms)
+[ RUN      ] OnnxRuntimeConversions.CopiesHostOrtValueIntoExistingMessage
+[       OK ] OnnxRuntimeConversions.CopiesHostOrtValueIntoExistingMessage (0 ms)
+[ RUN      ] OnnxRuntimeConversions.RejectsOrtValuesLargerThanTheDestination
+[       OK ] OnnxRuntimeConversions.RejectsOrtValuesLargerThanTheDestination (0 ms)
+[ RUN      ] OnnxRuntimeConversions.RejectsShapeArithmeticOverflow
+[       OK ] OnnxRuntimeConversions.RejectsShapeArithmeticOverflow (0 ms)
+[ RUN      ] OnnxRuntimeConversions.RunsInferenceWithPreallocatedMessageBuffers
+[       OK ] OnnxRuntimeConversions.RunsInferenceWithPreallocatedMessageBuffers (18 ms)
+[ RUN      ] OnnxRuntimeConversions.HostSessionsTakeNoExecutionStream
+[       OK ] OnnxRuntimeConversions.HostSessionsTakeNoExecutionStream (0 ms)
+[ RUN      ] OnnxRuntimeConversions.AcceleratorSessionsRequireAnExecutionStream
+[       OK ] OnnxRuntimeConversions.AcceleratorSessionsRequireAnExecutionStream (0 ms)
+[ RUN      ] OnnxRuntimeConversions.UnknownBackendsHaveNoExecutionProvider
+[       OK ] OnnxRuntimeConversions.UnknownBackendsHaveNoExecutionProvider (0 ms)
+[----------] 20 tests from OnnxRuntimeConversions (19 ms total)
+
+[----------] Global test environment tear-down
+[==========] 20 tests from 1 test suite ran. (19 ms total)
+[  PASSED  ] 20 tests.
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+rootdir: /source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test
+plugins: ament_copyright-0.21.1, ament_mypy-0.21.1, ament_pep257-0.21.1, ament_xmllint-0.21.1, ament_flake8-0.21.1, launch_testing-3.10.0, ament_lint-0.21.1, launch_testing_ros-0.30.1, typeguard-4.4.4, colcon-core-0.21.1
+collecting ... collected 45 items
+
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[1-float32] PASSED [  2%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[2-uint8] PASSED [  4%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[3-int8] PASSED [  6%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[4-uint16] PASSED [  8%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[5-int16] PASSED [ 11%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[6-int32] PASSED [ 13%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[7-int64] PASSED [ 15%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[9-bool] PASSED [ 17%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[10-float16] PASSED [ 20%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[11-float64] PASSED [ 22%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[12-uint32] PASSED [ 24%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_allocation_and_aliasing[13-uint64] PASSED [ 26%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[1-float32] PASSED [ 28%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[2-uint8] PASSED [ 31%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[3-int8] PASSED [ 33%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[4-uint16] PASSED [ 35%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[5-int16] PASSED [ 37%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[6-int32] PASSED [ 40%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[7-int64] PASSED [ 42%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[9-bool] PASSED [ 44%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[10-float16] PASSED [ 46%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[11-float64] PASSED [ 48%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[12-uint32] PASSED [ 51%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_numpy_dtypes_name_the_same_element_types[13-uint64] PASSED [ 53%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_bfloat16_survives_the_round_trip PASSED [ 55%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_input_and_output_views_alias_the_same_storage PASSED [ 57%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_scalar_and_zero_element_shapes PASSED [ 60%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_byte_offset_aliases_a_subview PASSED [ 62%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_context_manager_and_close_are_deterministic PASSED [ 64%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_view_keeps_message_storage_alive PASSED [ 66%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_invalid_metadata_is_rejected[<lambda>-ValueError-dtype_lanes] PASSED [ 68%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_invalid_metadata_is_rejected[<lambda>-ValueError-unsupported by ONNX Runtime] PASSED [ 71%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_invalid_metadata_is_rejected[<lambda>-error2-nonnegative] PASSED [ 73%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_invalid_metadata_is_rejected[<lambda>-ValueError-contiguous] PASSED [ 75%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_invalid_metadata_is_rejected[<lambda>-ValueError-buffer has 3] PASSED [ 77%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_noncontiguous_strides_are_rejected PASSED [ 80%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_unsupported_element_types_are_rejected PASSED [ 82%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_host_storage_is_always_available PASSED [ 84%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_to_tensor_msg_new_and_existing_destination PASSED [ 86%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_to_tensor_msg_rejects_a_small_destination PASSED [ 88%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_to_tensor_msg_rejects_non_tensor_arguments PASSED [ 91%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_shape_overflow_is_rejected PASSED [ 93%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_session_providers_for_host_memory PASSED [ 95%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_identity_inference_writes_directly_to_the_message PASSED [ 97%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py.py::test_identity_inference_reads_directly_from_the_message PASSED [100%]
+
+============================== 45 passed in 0.16s ==============================
+cpp-core-sha256-before=05ec3a1699615e5d3a8871393a5a5485656e69ed06e4e526c0bfa893f50e1bba
+python-core-sha256-before=df5d5a712e651b3c6e22b001618c020df553895b345c0cfe49d4a8c576e3dac3
+cpp-provider-sha256-before=e6556dfa6cf2037f9ac2de7fee09007db15f1cf54fff0cbf4a906614cd26b053
+python-provider-sha256-before=07fce528367fd14118510bc319df43419bd01e83c842eafe2bbed43e8d205740
+=== Stage 2: install independently built CUDA plugins ===
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Solving dependencies...
+The following additional packages will be installed:
+  ros-rolling-cuda-buffer ros-rolling-cuda-buffer-backend
+  ros-rolling-cuda-buffer-backend-msgs ros-rolling-cuda-buffer-py
+The following NEW packages will be installed:
+  ros-rolling-cuda-buffer ros-rolling-cuda-buffer-backend
+  ros-rolling-cuda-buffer-backend-msgs ros-rolling-cuda-buffer-py
+  ros-rolling-onnxruntime-conversions-cuda
+  ros-rolling-onnxruntime-conversions-py-cuda
+0 upgraded, 6 newly installed, 0 to remove and 9 not upgraded.
+Need to get 0 B/297 kB of archives.
+After this operation, 1448 kB of additional disk space will be used.
+Get:1 file:/var/local/ros-debs ./ ros-rolling-cuda-buffer-backend-msgs 0.1.2-0resolute [54.9 kB]
+Get:2 file:/var/local/ros-debs ./ ros-rolling-cuda-buffer 0.1.2-0resolute [58.3 kB]
+Get:3 file:/var/local/ros-debs ./ ros-rolling-cuda-buffer-backend 0.1.2-0resolute [35.9 kB]
+Get:4 file:/var/local/ros-debs ./ ros-rolling-cuda-buffer-py 0.1.2-0resolute [108 kB]
+Get:5 file:/var/local/ros-debs ./ ros-rolling-onnxruntime-conversions-cuda 0.1.2-0resolute [31.8 kB]
+Get:6 file:/var/local/ros-debs ./ ros-rolling-onnxruntime-conversions-py-cuda 0.1.2-0resolute [8238 B]
+Selecting previously unselected package ros-rolling-cuda-buffer-backend-msgs.
+(Reading database ...
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 51324 files and directories currently installed.)
+Preparing to unpack .../0-ros-rolling-cuda-buffer-backend-msgs_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-cuda-buffer-backend-msgs (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-cuda-buffer.
+Preparing to unpack .../1-ros-rolling-cuda-buffer_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-cuda-buffer (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-cuda-buffer-backend.
+Preparing to unpack .../2-ros-rolling-cuda-buffer-backend_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-cuda-buffer-backend (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-cuda-buffer-py.
+Preparing to unpack .../3-ros-rolling-cuda-buffer-py_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-cuda-buffer-py (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-onnxruntime-conversions-cuda.
+Preparing to unpack .../4-ros-rolling-onnxruntime-conversions-cuda_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-onnxruntime-conversions-cuda (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-onnxruntime-conversions-py-cuda.
+Preparing to unpack .../5-ros-rolling-onnxruntime-conversions-py-cuda_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-onnxruntime-conversions-py-cuda (0.1.2-0resolute) ...
+Setting up ros-rolling-cuda-buffer-backend-msgs (0.1.2-0resolute) ...
+Setting up ros-rolling-cuda-buffer (0.1.2-0resolute) ...
+Setting up ros-rolling-cuda-buffer-backend (0.1.2-0resolute) ...
+Setting up ros-rolling-onnxruntime-conversions-cuda (0.1.2-0resolute) ...
+Setting up ros-rolling-cuda-buffer-py (0.1.2-0resolute) ...
+Setting up ros-rolling-onnxruntime-conversions-py-cuda (0.1.2-0resolute) ...
+cpp-core-sha256-after=05ec3a1699615e5d3a8871393a5a5485656e69ed06e4e526c0bfa893f50e1bba
+python-core-sha256-after=df5d5a712e651b3c6e22b001618c020df553895b345c0cfe49d4a8c576e3dac3
+cpp-provider-sha256-after=e6556dfa6cf2037f9ac2de7fee09007db15f1cf54fff0cbf4a906614cd26b053
+python-provider-sha256-after=07fce528367fd14118510bc319df43419bd01e83c842eafe2bbed43e8d205740
+core-files-unchanged=pass
+provider-files-unchanged=pass
+NVIDIA GeForce RTX 4080, 610.57.04
+=== Stage 3: CUDA default plus CPU/CUDA runtime selection ===
+available=cpu,cuda, default=cuda
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 9 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 9 tests from CudaConversions
+[ RUN      ] CudaConversions.CudaIsPreferredOverHostMemory
+[       OK ] CudaConversions.CudaIsPreferredOverHostMemory (169 ms)
+[ RUN      ] CudaConversions.HostStorageStaysAvailableAlongsideCuda
+[       OK ] CudaConversions.HostStorageStaysAvailableAlongsideCuda (0 ms)
+[ RUN      ] CudaConversions.ViewsCarryTheCudaAllocatorAndDevicePointer
+[       OK ] CudaConversions.ViewsCarryTheCudaAllocatorAndDevicePointer (0 ms)
+[ RUN      ] CudaConversions.InputAndOutputViewsAliasTheSameDeviceStorage
+[       OK ] CudaConversions.InputAndOutputViewsAliasTheSameDeviceStorage (0 ms)
+[ RUN      ] CudaConversions.RoundTripsThroughDeviceMemory
+[       OK ] CudaConversions.RoundTripsThroughDeviceMemory (0 ms)
+[ RUN      ] CudaConversions.LeaseOutlivesTheAcquiringScope
+[       OK ] CudaConversions.LeaseOutlivesTheAcquiringScope (0 ms)
+[ RUN      ] CudaConversions.CopiesDeviceOrtValueWithoutHostStaging
+[       OK ] CudaConversions.CopiesDeviceOrtValueWithoutHostStaging (0 ms)
+[ RUN      ] CudaConversions.CopiesDeviceOrtValueIntoHostStorage
+[       OK ] CudaConversions.CopiesDeviceOrtValueIntoHostStorage (0 ms)
+[ RUN      ] CudaConversions.ConfiguresTheProviderAndRunsInferenceOnDeviceStorage
+[       OK ] CudaConversions.ConfiguresTheProviderAndRunsInferenceOnDeviceStorage (87 ms)
+[----------] 9 tests from CudaConversions (257 ms total)
+
+[----------] Global test environment tear-down
+[==========] 9 tests from 1 test suite ran. (257 ms total)
+[  PASSED  ] 9 tests.
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+rootdir: /source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test
+plugins: ament_copyright-0.21.1, ament_mypy-0.21.1, ament_pep257-0.21.1, ament_xmllint-0.21.1, ament_flake8-0.21.1, launch_testing-3.10.0, ament_lint-0.21.1, launch_testing_ros-0.30.1, typeguard-4.4.4, colcon-core-0.21.1
+collecting ... collected 13 items
+
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_cuda_is_preferred_over_host_memory PASSED [  7%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_host_storage_stays_available_alongside_cuda PASSED [ 15%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_views_report_cuda_device_memory PASSED [ 23%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_views_alias_the_device_pointer PASSED [ 30%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_input_and_output_views_alias_the_same_storage PASSED [ 38%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_views_describe_device_data_without_copying_it PASSED [ 46%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_the_default_stream_is_accepted PASSED [ 53%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_session_providers_binds_the_compute_stream PASSED [ 61%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_identity_inference_on_device_storage PASSED [ 69%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_to_tensor_msg_copies_host_values_onto_the_device PASSED [ 76%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_to_tensor_msg_copies_device_values_without_staging_on_the_host PASSED [ 84%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_to_tensor_msg_allocates_on_the_device_that_owns_the_value PASSED [ 92%]
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_conversions_py_cuda.py::test_to_tensor_msg_copies_device_values_into_host_storage PASSED [100%]
+
+============================== 13 passed in 0.34s ==============================
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-19-26-08-569835-56bf72c78b57-1750
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [ort_tensor_subscriber_node-1]: process started with pid [1757]
+[ort_tensor_subscriber_node-1] [INFO] [1789154768.818602664] [host_endpoint_manager]: Initialized shared memory registry for domain 0 on host 56bf72c78b57
+test_received_cuda_inference_output (test_ort_tensor_inter_pubsub_fastrtps_launch.TestCudaTensorInterProcessInference.test_received_cuda_inference_output) ... [INFO] [ort_tensor_publisher_node-2]: process started with pid [1789]
+[ort_tensor_publisher_node-2] [INFO] [1789154771.061182994] [host_endpoint_manager]: Attached to existing shared memory registry for domain 0
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.969s
+
+OK
+[INFO] [ort_tensor_publisher_node-2]: sending signal 'SIGINT' to process[ort_tensor_publisher_node-2]
+[INFO] [ort_tensor_subscriber_node-1]: sending signal 'SIGINT' to process[ort_tensor_subscriber_node-1]
+[ort_tensor_publisher_node-2] [INFO] [1789154771.566813290] [rclcpp]: signal_handler(signum=2)
+[ort_tensor_subscriber_node-1] [INFO] [1789154771.567101450] [rclcpp]: signal_handler(signum=2)
+[INFO] [ort_tensor_subscriber_node-1]: process has finished cleanly [pid 1757]
+[INFO] [ort_tensor_publisher_node-2]: process has finished cleanly [pid 1789]
+test_exit_codes (test_ort_tensor_inter_pubsub_fastrtps_launch.TestCudaTensorInterProcessShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+rootdir: /source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test
+plugins: ament_copyright-0.21.1, ament_mypy-0.21.1, ament_pep257-0.21.1, ament_xmllint-0.21.1, ament_flake8-0.21.1, launch_testing-3.10.0, ament_lint-0.21.1, launch_testing_ros-0.30.1, typeguard-4.4.4, colcon-core-0.21.1
+collecting ... collected 1 item
+
+source/rosidl_buffer_backends/onnxruntime_conversions/onnxruntime_conversions_py/test/test_onnxruntime_tensor_inter_pubsub_fastrtps.py::test_cuda_onnx_inference_crosses_fastrtps_process_boundary PASSED [100%]
+
+============================== 1 passed in 2.91s ===============================
+python-runtime-switch=pass
+=== Installed package versions ===
+ros-rolling-onnxruntime-conversions	0.1.2-0resolute
+ros-rolling-onnxruntime-conversions-cpu	0.1.2-0resolute
+ros-rolling-onnxruntime-conversions-cuda	0.1.2-0resolute
+ros-rolling-onnxruntime-conversions-py	0.1.2-0resolute
+ros-rolling-onnxruntime-conversions-py-cpu	0.1.2-0resolute
+ros-rolling-onnxruntime-conversions-py-cuda	0.1.2-0resolute
+ros-rolling-onnxruntime-cuda-vendor	0.1.2-0resolute
+ros-rolling-python-onnxruntime-cuda-vendor	0.1.2-0resolute
+staged-debian-installed-source-tests=pass

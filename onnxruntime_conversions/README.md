@@ -1,43 +1,77 @@
 # ONNX Runtime conversions
 
-Zero-copy conversions between `tensor_msgs/msg/ExperimentalTensor` and ONNX
-Runtime.
+Conversions between `tensor_msgs/msg/ExperimentalTensor` and ONNX Runtime
+tensors. The public packages are framework-specific and device-neutral:
 
-`onnxruntime_conversions` translates between ONNX Runtime tensors and DLPack,
-and [`dlpack_conversions`](../dlpack_conversions/README.md) owns the message
-storage behind it. Which memory a tensor lands in is decided by the storage
-plugin installed alongside the adapter, so the same code runs on the host or
-on a GPU depending on what is installed. Pass a backend name to choose among
-several, or set `ROSIDL_TENSOR_BACKEND` to pick one for the whole process.
-
-| Device | C++ plugin | Python plugin |
+| Role | C++ | Python |
 | --- | --- | --- |
-| Host | `dlpack_conversions_cpu` | `dlpack_conversions_py_cpu` |
-| CUDA | `dlpack_conversions_cuda` | `dlpack_conversions_py_cuda` |
+| Public API and plugin registry | `onnxruntime_conversions` | `onnxruntime_conversions_py` |
+| CPU implementation | `onnxruntime_conversions_cpu` | `onnxruntime_conversions_py_cpu` |
+| CUDA implementation | `onnxruntime_conversions_cuda` | `onnxruntime_conversions_py_cuda` |
 
-The conversions never ask for an `Ort::MemoryInfo`, because the plugin that
-allocated the storage already knows where it lives.
+The core discovers implementations through pluginlib in C++ and an ament
+resource index in Python. Installing the CUDA plugin later does not replace or
+rebuild the core Debian. A newly started process sees both plugins and can
+select CPU or CUDA per call; set `ROSIDL_TENSOR_BACKEND=cpu` or `cuda` to
+choose the default. Discovery happens the first time a process uses the
+registry, so restart a process that was already running while a plugin Debian
+was installed.
+
+## ONNX Runtime provider boundary
+
+The C++ API exposes `Ort::Value`, so the core and both plugins must use one
+process-wide ONNX Runtime ABI. They all depend on the CUDA-capable
+`onnxruntime_cuda_vendor`. The Python core similarly depends on the single
+`python_onnxruntime_cuda_vendor`. CPU and CUDA plugins never load competing
+ONNX Runtime distributions into one process.
+
+A CPU-only installation therefore includes the CUDA-capable provider and its
+user-space CUDA libraries, but it needs no GPU or host driver. The shared CUDA
+provider declares Resolute's `nvidia-cudnn` rosdep package for both C++ and
+Python consumers. Adding conversion plugins later changes device discovery,
+not the framework provider.
+
+All four provider packages are pinned to ONNX Runtime 1.26.0 and support CUDA
+12. Version 1.26 is the first release with the DLPack methods used internally
+by the Python conversion plugins and the last stable PyPI release for CUDA 12.
+
+### Why the Ubuntu package is not used
+
+Ubuntu Resolute provides ONNX Runtime 1.23.2. Its Python `OrtValue` lacks
+`from_dlpack`, `__dlpack__`, and `__dlpack_device__`, and its runtime has no
+CUDA execution provider. The Python zero-copy conversion and CUDA plugins
+therefore require the pinned upstream 1.26.0 distributions. The Ubuntu C++
+development package is suitable for CPU-only consumers, but using it in the
+conversion core would give the CPU and CUDA plugins different process-wide
+ONNX Runtime ABIs.
+
+The repository retains the existing CPU-only vendor packages for independent
+consumers. They are not alternative providers for these conversion cores and
+must not be installed alongside their conflicting CUDA-capable provider.
 
 ## C++
 
-The adapter is header-only and compiles against whichever ONNX Runtime the
-consumer already resolved, so it does not pin a runtime version.
-
-Debian:
+Install CPU support:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions \
-  ros-$ROS_DISTRO-dlpack-conversions-cuda
+  ros-$ROS_DISTRO-onnxruntime-conversions-cpu
 ```
 
-Source:
+Add CUDA support later:
 
 ```bash
-colcon build --merge-install --packages-up-to onnxruntime_conversions \
-  dlpack_conversions_cuda
+sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-cuda
 ```
 
-### Publisher
+Build from source:
+
+```bash
+colcon build --merge-install --packages-up-to \
+  onnxruntime_conversions_cpu onnxruntime_conversions_cuda
+```
+
+Create and wrap message storage without copying:
 
 ```cpp
 #include <cuda_runtime.h>
@@ -49,37 +83,23 @@ cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
 auto msg = onnxruntime_conversions::allocate_tensor_msg(
   {480, 640, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
 {
-  // The view holds the storage lease, so keep it alive while ONNX Runtime
-  // reads from or writes to the value.
   auto output = onnxruntime_conversions::from_output_tensor_msg(*msg, stream);
   my_pipeline(output.value());
-}
+}  // releases the storage lease
 publisher->publish(std::move(*msg));
 ```
 
-### Subscriber
+For received messages and existing values:
 
 ```cpp
-void callback(const onnxruntime_conversions::TensorMsg & received)
-{
-  auto input = onnxruntime_conversions::from_input_tensor_msg(
-    received, stream);
-  my_pipeline(input.value());
-}
+auto input = onnxruntime_conversions::from_input_tensor_msg(received, stream);
+my_pipeline(input.value());
+
+auto outgoing = onnxruntime_conversions::to_tensor_msg(ort_value, stream);
+onnxruntime_conversions::to_tensor_msg(*preallocated, ort_value, stream);
 ```
 
-### Existing tensor
-
-```cpp
-auto msg = onnxruntime_conversions::to_tensor_msg(ort_value, stream);
-publisher->publish(std::move(*msg));
-```
-
-`to_tensor_msg(*msg, ort_value, stream)` reuses a pre-sized message. The copy
-is performed by the plugin that owns the memory, so a device value never
-stages through the host.
-
-### CUDA session
+Bind ONNX Runtime's CUDA execution provider to the same application stream:
 
 ```cpp
 Ort::SessionOptions options;
@@ -88,92 +108,60 @@ onnxruntime_conversions::configure_session_options(
 Ort::Session session(env, model, model_size, options);
 ```
 
-This appends the execution provider that runs where the named backend
-allocates, so the session reads message storage in place. Backends ONNX
-Runtime ships no provider for are rejected rather than silently run on the
-host; append your own provider in that case.
+ONNX Runtime has no public C++ DLPack importer. The C++ CUDA plugin constructs
+an `Ort::Value` directly over the leased device pointer with
+`Ort::Value::CreateTensor`.
 
 ## Python
 
-Debian:
+Install CPU support, then optionally add CUDA:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py \
-  ros-$ROS_DISTRO-dlpack-conversions-py-cuda
+  ros-$ROS_DISTRO-onnxruntime-conversions-py-cpu
+sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cuda
 ```
 
-Source:
+Build from source:
 
 ```bash
-colcon build --merge-install --packages-up-to onnxruntime_conversions_py \
-  dlpack_conversions_py_cuda
+colcon build --merge-install --packages-up-to \
+  onnxruntime_conversions_py_cpu onnxruntime_conversions_py_cuda
 ```
 
-### Publisher
-
 ```python
-import numpy as np
+import onnxruntime as ort
 from onnxruntime_conversions import allocate_tensor_msg
-from onnxruntime_conversions import from_output_tensor_msg
-
-msg = allocate_tensor_msg((480, 640, 3), np.float32, 'cuda')
-with from_output_tensor_msg(msg, stream) as output:
-    my_pipeline(output)
-publisher.publish(msg)
-```
-
-### Subscriber
-
-```python
 from onnxruntime_conversions import from_input_tensor_msg
-
-def callback(received):
-    with from_input_tensor_msg(received, stream) as value:
-        my_pipeline(value)
-```
-
-Both conversions return `None` when the message carries no storage.
-
-### Existing tensor
-
-```python
+from onnxruntime_conversions import from_output_tensor_msg
+from onnxruntime_conversions import session_providers
 from onnxruntime_conversions import to_tensor_msg
 
-msg = to_tensor_msg(ort_value, stream=stream)
-publisher.publish(msg)
-```
+msg = allocate_tensor_msg((480, 640, 3), 1, 'cuda')
+with from_output_tensor_msg(msg, stream) as output:
+    my_pipeline(output)
 
-`to_tensor_msg(msg, ort_value, stream)` reuses a pre-sized message.
+with from_input_tensor_msg(msg, stream) as value:
+    consume(value)
 
-### Session providers
-
-```python
-from onnxruntime_conversions import session_providers
-
+outgoing = to_tensor_msg(ort_value, stream=stream)
 session = ort.InferenceSession(
     model, providers=session_providers('cuda', 0, stream))
 ```
 
-## Version
+The Python CUDA plugin uses a private capsule helper because
+`OrtValue.from_dlpack` is ONNX Runtime's Python device-pointer importer. This
+is an implementation detail of the ONNX adapter, not a public/shared DLPack
+package or cross-framework ABI.
 
-The C++ adapter is header-only and pins nothing. The Python adapter needs
-1.26.0 or newer, the first release where `OrtValue.from_dlpack` and
-`__dlpack__` ship.
+## Validation
 
-The vendor packages supply 1.29.0 on both sides:
-`onnxruntime_core_vendor` for the CPU and CUDA-neutral C++ runtime,
-`onnxruntime_cuda_vendor` for the GPU C++ runtime matching the host CUDA
-major, and `python_onnxruntime_vendor` or `python_onnxruntime_cuda_vendor`
-for the wheel. Exactly one provider of each may be installed, which the
-packages enforce by declared conflict.
-
-cuDNN is not a declared dependency. The CUDA execution provider dlopens it
-only for conv-style operators, and Ubuntu packages cuDNN for CUDA 12 alone,
-so install `nvidia-cudnn-cu13` yourself on a CUDA 13 host that runs those
-models.
-
-Only one ONNX Runtime may be reachable at a time. Remove other copies from
-`/usr/local`, pip, Conda, or `PYTHONPATH` if they take precedence.
+The release-like pipeline under `docker/resolute/debian/` builds production
+Debians without a GPU, driver, preinstalled CUDA, ONNX Runtime, or Python
+ONNX Runtime. A pristine consumer installs the core and CPU plugins, builds
+the unshipped test sources externally and runs them manually, installs only
+the CUDA conversion plugins, verifies the core files are unchanged, and runs
+the C++/Python CUDA unit and process-boundary tests on a GPU.
 
 ## License
 

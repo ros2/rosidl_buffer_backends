@@ -1,8 +1,0 @@
-<library path="dlpack_conversions_cpu">
-  <class
-    name="cpu"
-    type="dlpack_conversions_cpu::CpuStoragePlugin"
-    base_class_type="dlpack_conversions::StoragePlugin">
-    <description>Host memory storage for DLPack tensor messages.</description>
-  </class>
-</library>

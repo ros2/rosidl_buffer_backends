@@ -5,11 +5,8 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# 1.26.0 is the release that added OrtValue.from_dlpack, __dlpack__ and
-# __dlpack_device__, which onnxruntime_conversions_py converts through, so it
-# is the floor. Held equal to the other vendors so the whole stack reports one
-# version. Ubuntu's python3-onnxruntime is 1.23.2 and predates the API.
-set(PYTHON_ONNXRUNTIME_VENDOR_VERSION "1.29.0" CACHE STRING
+# Pin the CPU provider independently from the CUDA wheel matrix below.
+set(PYTHON_ONNXRUNTIME_VENDOR_VERSION "1.26.0" CACHE STRING
   "ONNX Runtime CPU Python wheel version")
 
 set(_python_package "onnxruntime")

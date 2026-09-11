@@ -1,0 +1,75 @@
+cuda_buffer_backend:
+  ubuntu:
+    resolute: [ros-rolling-cuda-buffer-backend]
+cuda_buffer_backend_msgs:
+  ubuntu:
+    resolute: [ros-rolling-cuda-buffer-backend-msgs]
+cuda_buffer:
+  ubuntu:
+    resolute: [ros-rolling-cuda-buffer]
+cuda_buffer_py:
+  ubuntu:
+    resolute: [ros-rolling-cuda-buffer-py]
+libtorch_vendor:
+  ubuntu:
+    resolute: [ros-rolling-libtorch-vendor]
+python3_torch_cuda_vendor:
+  ubuntu:
+    resolute: [ros-rolling-python3-torch-cuda-vendor]
+tensor_msgs:
+  ubuntu:
+    resolute: [ros-rolling-tensor-msgs]
+torch_conversions:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions]
+torch_conversions_cpu:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-cpu]
+torch_conversions_cuda:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-cuda]
+torch_conversions_py:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-py]
+torch_conversions_py_cpu:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-py-cpu]
+torch_conversions_py_cuda:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-py-cuda]
+onnxruntime_cuda_vendor:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-cuda-vendor]
+onnxruntime_core_vendor:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-core-vendor]
+onnxruntime_vendor:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-vendor]
+python_onnxruntime_cuda_vendor:
+  ubuntu:
+    resolute: [ros-rolling-python-onnxruntime-cuda-vendor]
+python_onnxruntime_vendor:
+  ubuntu:
+    resolute: [ros-rolling-python-onnxruntime-vendor]
+python3-onnxruntime:
+  ubuntu:
+    resolute: [python3-onnxruntime]
+onnxruntime_conversions:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-conversions]
+onnxruntime_conversions_cpu:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-conversions-cpu]
+onnxruntime_conversions_cuda:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-conversions-cuda]
+onnxruntime_conversions_py:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-conversions-py]
+onnxruntime_conversions_py_cpu:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-conversions-py-cpu]
+onnxruntime_conversions_py_cuda:
+  ubuntu:
+    resolute: [ros-rolling-onnxruntime-conversions-py-cuda]

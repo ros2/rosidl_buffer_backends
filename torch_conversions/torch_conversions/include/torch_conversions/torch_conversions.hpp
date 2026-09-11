@@ -15,174 +15,59 @@
 #ifndef TORCH_CONVERSIONS__TORCH_CONVERSIONS_HPP_
 #define TORCH_CONVERSIONS__TORCH_CONVERSIONS_HPP_
 
-#include <ATen/DLConvertor.h>
-#include <ATen/dlpack.h>
 #include <torch/torch.h>
 
-#include <cstdint>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
-// ATen/dlpack.h above wins the shared DLPACK_DLPACK_H_ include guard, so this
-// translation unit and the core agree on DLManagedTensor. dlpack_conversions.hpp
-// static_asserts the layout, which fails the build on a real version skew.
-#include "dlpack_conversions/dlpack_conversions.hpp"
+#include "tensor_msgs/msg/experimental_tensor.hpp"
+#include "torch_conversions/visibility_control.hpp"
 
 namespace torch_conversions
 {
 
-using TensorMsg = dlpack_conversions::TensorMsg;
+using TensorMsg = tensor_msgs::msg::ExperimentalTensor;
 
-namespace detail
-{
+TORCH_CONVERSIONS_PUBLIC std::vector<std::string> available_backends();
 
-inline DLDataType dl_dtype(at::ScalarType type)
-{
-  switch (type) {
-    case at::kByte: return {kDLUInt, 8, 1};
-    case at::kChar: return {kDLInt, 8, 1};
-    case at::kShort: return {kDLInt, 16, 1};
-    case at::kInt: return {kDLInt, 32, 1};
-    case at::kLong: return {kDLInt, 64, 1};
-    case at::kHalf: return {kDLFloat, 16, 1};
-    case at::kBFloat16: return {kDLBfloat, 16, 1};
-    case at::kFloat: return {kDLFloat, 32, 1};
-    case at::kDouble: return {kDLFloat, 64, 1};
-    case at::kBool: return {kDLBool, 8, 1};
-    default:
-      throw std::runtime_error("torch_conversions: unsupported scalar type");
-  }
-}
+TORCH_CONVERSIONS_PUBLIC bool backend_available(
+  const std::string & backend);
 
-// at::torchDeviceToDLDevice resolves the accelerator flavour of the LibTorch
-// build, so a ROCm build reports kDLROCM even though its tensors are kCUDA.
-inline std::string backend_for(c10::Device device)
-{
-  const auto dl_device = at::torchDeviceToDLDevice(device);
-  std::string backend = dlpack_conversions::backend_for_device(
-    static_cast<int32_t>(dl_device.device_type));
-  if (backend.empty()) {
-    throw std::runtime_error(
-            "torch_conversions: no storage plugin serves device '" +
-            device.str() + "'");
-  }
-  return backend;
-}
+TORCH_CONVERSIONS_PUBLIC std::string backend_for_device(
+  c10::DeviceType device_type);
 
-inline DLTensor as_dl_tensor(const at::Tensor & tensor)
-{
-  DLTensor source{};
-  source.data = tensor.data_ptr();
-  source.device = at::torchDeviceToDLDevice(tensor.device());
-  source.ndim = static_cast<int32_t>(tensor.dim());
-  source.dtype = dl_dtype(tensor.scalar_type());
-  source.shape = const_cast<int64_t *>(tensor.sizes().data());
-  source.strides = const_cast<int64_t *>(tensor.strides().data());
-  source.byte_offset = 0;
-  return source;
-}
+TORCH_CONVERSIONS_PUBLIC std::string default_backend();
 
-// Storage plugins and the LibTorch build are installed independently, so an
-// accelerator plugin can be present alongside a LibTorch that has no kernels
-// for it. Handing that storage back would only fail later inside ATen, so an
-// unusable default falls back to host storage.
-inline std::string default_backend()
-{
-  const std::string backend = dlpack_conversions::default_backend();
-  const bool needs_accelerator = backend != "cpu";
-  if (!needs_accelerator || at::hasCUDA() || at::hasHIP()) {
-    return backend;
-  }
-  return dlpack_conversions::backend_available("cpu") ?
-         std::string{"cpu"} : backend;
-}
+TORCH_CONVERSIONS_PUBLIC at::ScalarType scalar_type(
+  const TensorMsg & msg);
 
-}  // namespace detail
+TORCH_CONVERSIONS_PUBLIC std::vector<int64_t> normalized_strides(
+  const TensorMsg & msg);
 
-inline std::unique_ptr<TensorMsg> allocate_tensor_msg(
+TORCH_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   at::ScalarType dtype,
-  std::optional<c10::DeviceType> device = std::nullopt)
-{
-  const std::string backend = device ?
-    detail::backend_for(c10::Device(*device, 0)) : detail::default_backend();
-  return dlpack_conversions::allocate_tensor_msg(
-    shape, detail::dl_dtype(dtype), backend);
-}
+  std::optional<c10::DeviceType> device = std::nullopt);
 
-/// Exposes message storage for torch to write into.
-///
-/// On an accelerator, pass the stream your kernels run on so the storage
-/// plugin orders access against it. at::cuda::getCurrentCUDAStream().stream()
-/// is the usual value. Leaving it unset names the default stream, which is
-/// only safe if that is where the work happens.
-inline at::Tensor from_output_tensor_msg(
+TORCH_CONVERSIONS_PUBLIC at::Tensor from_output_tensor_msg(
   TensorMsg & msg,
-  void * execution_stream = nullptr)
-{
-  auto managed = dlpack_conversions::from_output_tensor_msg(
-    msg, reinterpret_cast<uintptr_t>(execution_stream));
-  if (!managed) {
-    return {};
-  }
-  return at::fromDLPack(managed.release());
-}
+  void * execution_stream = nullptr);
 
-/// Reads message storage without copying, cloning by default so the result
-/// outlives the storage lease.
-///
-/// Takes an execution stream on the same terms as from_output_tensor_msg().
-inline at::Tensor from_input_tensor_msg(
+TORCH_CONVERSIONS_PUBLIC at::Tensor from_input_tensor_msg(
   const TensorMsg & msg,
   bool clone = true,
-  void * execution_stream = nullptr)
-{
-  auto managed = dlpack_conversions::from_input_tensor_msg(
-    msg, reinterpret_cast<uintptr_t>(execution_stream));
-  if (!managed) {
-    return {};
-  }
-  auto tensor = at::fromDLPack(managed.release());
-  return clone ? tensor.clone() : tensor;
-}
+  void * execution_stream = nullptr);
 
-/// Copies a tensor into existing message storage and stamps its metadata.
-///
-/// Takes an execution stream on the same terms as from_output_tensor_msg().
-inline void to_tensor_msg(
+TORCH_CONVERSIONS_PUBLIC void to_tensor_msg(
   TensorMsg & msg,
   const at::Tensor & tensor,
-  void * execution_stream = nullptr)
-{
-  if (!tensor.defined() || tensor.numel() == 0) {
-    return;
-  }
-  const auto contiguous = tensor.contiguous();
-  dlpack_conversions::to_tensor_msg(
-    msg,
-    detail::as_dl_tensor(contiguous),
-    reinterpret_cast<uintptr_t>(execution_stream));
-}
+  void * execution_stream = nullptr);
 
-/// Allocates a message on the backend matching the tensor's device, then
-/// copies.
-///
-/// Takes an execution stream on the same terms as from_output_tensor_msg().
-inline std::unique_ptr<TensorMsg> to_tensor_msg(
+TORCH_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> to_tensor_msg(
   const at::Tensor & tensor,
-  void * execution_stream = nullptr)
-{
-  if (!tensor.defined() || tensor.numel() == 0) {
-    return std::make_unique<TensorMsg>();
-  }
-  const auto contiguous = tensor.contiguous();
-  return dlpack_conversions::to_tensor_msg(
-    detail::as_dl_tensor(contiguous),
-    reinterpret_cast<uintptr_t>(execution_stream));
-}
+  void * execution_stream = nullptr);
 
 }  // namespace torch_conversions
 

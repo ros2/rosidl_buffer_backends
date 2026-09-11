@@ -3,7 +3,7 @@
 <package format="3">
   <name>onnxruntime_conversions_py</name>
   <version>0.1.2</version>
-  <description>Python adapter between ONNX Runtime OrtValue and DLPack tensor messages.</description>
+  <description>Runtime-pluggable Python conversions between OrtValue and tensor messages.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -12,22 +12,19 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <exec_depend>dlpack_conversions_py</exec_depend>
-  <exec_depend>dlpack_conversions_py_cpu</exec_depend>
-  <exec_depend>python3-numpy</exec_depend>
-  <exec_depend>tensor_msgs</exec_depend>
+  <build_depend>pybind11-dev</build_depend>
+  <build_depend>python3-dev</build_depend>
 
-  <!-- No wheel provider is named. Every provider conflicts with the others,
-       so depending on one would stop apt swapping it for another without
-       removing this package, which is the CPU to GPU upgrade. bloom emits no
-       Provides, so no virtual package can bridge them either. -->
-  <test_depend>python_onnxruntime_vendor</test_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python_onnxruntime_cuda_vendor</exec_depend>
+  <exec_depend>rosidl_buffer_py</exec_depend>
+  <exec_depend>tensor_msgs</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
   <test_depend>cuda_buffer_py</test_depend>
-  <test_depend>dlpack_conversions_py_cuda</test_depend>
   <test_depend>rclpy</test_depend>
   <test_depend>rmw_fastrtps_cpp</test_depend>
 

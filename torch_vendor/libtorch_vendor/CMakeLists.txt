@@ -130,6 +130,14 @@ else()
     message(STATUS "${PROJECT_NAME}: using cached LibTorch at ${_torch_root}")
   endif()
 
+  # The shared LibTorch archive carries the optional GPUDirect Storage RDMA
+  # transport. It is not used by torch_conversions, and retaining it makes
+  # Debian's shlib scanner require an otherwise unrelated librdmacm package.
+  file(GLOB _unused_cufile_rdma "${_torch_root}/lib/libcufile_rdma*")
+  if(_unused_cufile_rdma)
+    file(REMOVE ${_unused_cufile_rdma})
+  endif()
+
   install(DIRECTORY "${_torch_root}/"
     DESTINATION "opt/${PROJECT_NAME}"
     USE_SOURCE_PERMISSIONS

@@ -12,12 +12,8 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
 
-  <depend version_gte="12" version_lt="14">cuda-toolkit</depend>
+  <depend version_gte="12" version_lt="14">nvidia-cuda</depend>
 
-  <!-- Ubuntu's libtorch-dev ships unversioned SONAMEs (libtorch.so,
-       libc10.so), so a consumer could otherwise link half of this vendor
-       against half of the distro build. -->
-  <conflict>libtorch-dev</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>
   <test_depend>ament_lint_auto</test_depend>

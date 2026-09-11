@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -81,7 +82,7 @@ TEST(OnnxRuntimeConversions, DefaultBackendAllocatesWithoutBeingNamed)
 TEST(OnnxRuntimeConversions, UnavailableBackendThrows)
 {
   if (installed("cuda")) {
-    GTEST_SKIP() << "the CUDA storage plugin is installed";
+    GTEST_SKIP() << "the CUDA conversion plugin is installed";
   }
   EXPECT_THROW(
     allocate_tensor_msg({1}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda"),
@@ -105,7 +106,7 @@ TEST(OnnxRuntimeConversions, OutputViewAliasesMessageStorage)
   EXPECT_EQ(message_data[3], 40);
 }
 
-/// The storage plugin decides where the tensor lives, so the caller can no
+/// The conversion plugin decides where the tensor lives, so the caller can no
 /// longer hand over an Ort::MemoryInfo that disagrees with it.
 TEST(OnnxRuntimeConversions, MemoryInfoFollowsTheStorageDevice)
 {
@@ -251,6 +252,15 @@ TEST(OnnxRuntimeConversions, RejectsOrtValuesLargerThanTheDestination)
     {1}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
 
   EXPECT_THROW(to_tensor_msg(*msg, value), std::runtime_error);
+}
+
+TEST(OnnxRuntimeConversions, RejectsShapeArithmeticOverflow)
+{
+  EXPECT_THROW(
+    allocate_tensor_msg(
+      {std::numeric_limits<int64_t>::max(), 2},
+      ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8, "cpu"),
+    std::overflow_error);
 }
 
 TEST(OnnxRuntimeConversions, RunsInferenceWithPreallocatedMessageBuffers)

@@ -3,7 +3,7 @@
 <package format="3">
   <name>python_onnxruntime_cuda_vendor</name>
   <version>0.1.2</version>
-  <description>ONNX Runtime GPU Python wheel matching the host CUDA major.</description>
+  <description>ONNX Runtime 1.26.0 GPU Python wheel for CUDA 12.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -15,16 +15,17 @@
 
   <build_depend>python3-pip</build_depend>
 
+  <!-- Supplies the pinned CUDA runtime minor used by the wheel as well as the
+       independently consumable C++ ONNX Runtime provider. -->
+  <exec_depend>onnxruntime_cuda_vendor</exec_depend>
+
   <!-- See python_onnxruntime_vendor: Ubuntu's python3-onnxruntime installs
        the same top-level onnxruntime module and shadows this wheel. -->
   <conflict>python3-onnxruntime</conflict>
   <conflict>python_onnxruntime_vendor</conflict>
 
-  <depend version_gte="12" version_lt="14">cuda-toolkit</depend>
+  <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
 
-  <!-- cuDNN 9 is left to the user: the wheel loads it lazily and Ubuntu
-       packages cuDNN for CUDA 12 alone. Install nvidia-cudnn-cu13 on CUDA 13
-       hosts that run conv-style models. -->
   <exec_depend>python3-flatbuffers</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-packaging</exec_depend>

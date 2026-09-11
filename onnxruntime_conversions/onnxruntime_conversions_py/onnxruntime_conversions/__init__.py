@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ONNX Runtime views over DLPack tensor messages."""
+"""ONNX Runtime views over tensor message storage."""
 
 from onnxruntime_conversions._core import allocate_tensor_msg
 from onnxruntime_conversions._core import available_backends

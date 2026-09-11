@@ -224,15 +224,21 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     file(WRITE "${_marker}" "")
   endif()
 
-  file(GLOB _nvshmem_optional
+  # These optional NVSHMEM and cuFile plugins require external HPC stacks
+  # (RDMA, libfabric, UCX, MPI, PMIx, or OpenSHMEM). torch_conversions does
+  # not use them, and rosdep cannot provide that optional closure on Ubuntu
+  # Resolute. Keep the core NVSHMEM host/device libraries and CUDA transports.
+  file(GLOB _unused_transport_plugins
+    "${_stage_dir}/nvidia/cufile/lib/libcufile_rdma*"
+    "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_transport_ib*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_transport_libfabric*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_transport_ucx*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_bootstrap_mpi*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_bootstrap_pmix*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_bootstrap_shmem*"
   )
-  if(_nvshmem_optional)
-    file(REMOVE ${_nvshmem_optional})
+  if(_unused_transport_plugins)
+    file(REMOVE ${_unused_transport_plugins})
   endif()
 
   ament_get_python_install_dir(PYTHON_INSTALL_DIR)
@@ -241,8 +247,10 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     DESTINATION "${PYTHON_INSTALL_DIR}"
     PATTERN ".torch-*" EXCLUDE
   )
-  # Pre-strip vendored ELF files so dh_strip's objcopy does not rewrite
-  # torch/_C*.so, libtorch_cuda.so, and other CUDA wheel binaries.
+
+  # Wheel binaries already carry their final ABI. Strip them before debhelper
+  # scans the package so dh_strip does not try to split thousands of upstream
+  # debug sections into a ROS dbgsym package.
   install(CODE "
     file(GLOB_RECURSE _elfs
       \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${PYTHON_INSTALL_DIR}/*.so\"
@@ -250,8 +258,8 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     foreach(_elf IN LISTS _elfs)
       if(EXISTS \"\${_elf}\" AND NOT IS_SYMLINK \"\${_elf}\")
         execute_process(
-          COMMAND strip --strip-unneeded \"\${_elf}\"
-          OUTPUT_QUIET ERROR_QUIET)
+          COMMAND \"${CMAKE_STRIP}\" --strip-unneeded \"\${_elf}\"
+          COMMAND_ERROR_IS_FATAL ANY)
       endif()
     endforeach()
   ")

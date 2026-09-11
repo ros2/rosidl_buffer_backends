@@ -1,0 +1,8 @@
+<library path="torch_conversions_cuda">
+  <class
+    name="cuda"
+    type="torch_conversions_cuda::CudaConversionPlugin"
+    base_class_type="torch_conversions::ConversionPlugin">
+    <description>Direct at::Tensor conversion for CUDA-backed messages.</description>
+  </class>
+</library>

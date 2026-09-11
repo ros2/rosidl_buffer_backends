@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>torch_conversions_cuda</name>
+  <version>0.1.2</version>
+  <description>CUDA plugin for the Torch conversion registry.</description>
+  <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
+  <license>Apache-2.0</license>
+  <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>cuda_buffer</depend>
+  <depend version_gte="12" version_lt="14">nvidia-cuda</depend>
+  <depend>libtorch_vendor</depend>
+  <depend>pluginlib</depend>
+  <depend>torch_conversions</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

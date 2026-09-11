@@ -21,39 +21,33 @@ conversion libraries that build on the same buffer infrastructure.
   `cu130` wheel from the detected CUDA Toolkit; JetPack provides the
   required installation on Tegra.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **onnxruntime_core_vendor** -- ONNX Runtime 1.29.0 CPU and CUDA-neutral C++
-  distribution.
-- **onnxruntime_cuda_vendor** -- ONNX Runtime GPU 1.29.0 C++ distribution
-  matching the host CUDA major.
-- **python_onnxruntime_vendor** -- ONNX Runtime 1.29.0 CPU Python wheel
-  packaged for ROS.
-- **python_onnxruntime_cuda_vendor** -- Unmodified CUDA Python ONNX Runtime
-  wheel packaged for ROS.
-- **[dlpack_conversions](dlpack_conversions/README.md)** -- Framework-free C++
-  core. Allocates message storage, hands out DLPack tensors over it, and loads
-  storage plugins.
-- **dlpack_conversions_cpu** -- Host memory storage plugin.
-- **dlpack_conversions_cuda** -- CUDA device memory storage plugin, backed by
-  `cuda_buffer`.
-- **dlpack_conversions_py** -- Framework-free Python core and plugin registry.
-- **dlpack_conversions_py_cpu** -- Host memory storage plugin for Python.
-- **dlpack_conversions_py_cuda** -- CUDA storage plugin for Python.
-- **[onnxruntime_conversions](onnxruntime_conversions/README.md)** --
-  Header-only C++ adapter between ONNX Runtime `Ort::Value` tensors and the
-  DLPack core.
-- **onnxruntime_conversions_py** -- Python adapter between ONNX Runtime
-  `OrtValue` tensors and the DLPack core.
-- **[torch_conversions](torch_conversions/README.md)** -- Header-only C++
-  adapter between PyTorch tensors and the DLPack core.
-- **torch_conversions_py** -- Python adapter between PyTorch tensors and the
-  DLPack core.
+- **onnxruntime_cuda_vendor** -- Exclusive CUDA-capable ONNX Runtime 1.26.0
+  C++ provider used by the conversion core on CPU and CUDA machines.
+- **python_onnxruntime_cuda_vendor** -- Exclusive CUDA-capable Python ONNX
+  Runtime 1.26.0 provider used by the Python conversion core.
+- **onnxruntime_core_vendor** and **python_onnxruntime_vendor** -- Existing
+  CPU-only providers retained for independent consumers; they conflict with
+  the CUDA-capable providers and are not used by the conversion cores.
+- **[onnxruntime_conversions](onnxruntime_conversions/README.md)** -- C++
+  `Ort::Value` API and runtime plugin registry.
+- **onnxruntime_conversions_cpu** / **onnxruntime_conversions_cuda** -- C++
+  host and CUDA implementations.
+- **onnxruntime_conversions_py** -- Python `OrtValue` API and plugin registry.
+- **onnxruntime_conversions_py_cpu** / **onnxruntime_conversions_py_cuda** --
+  Python host and CUDA implementations.
+- **[torch_conversions](torch_conversions/README.md)** -- C++ `at::Tensor` API
+  and runtime plugin registry.
+- **torch_conversions_cpu** / **torch_conversions_cuda** -- C++ host and CUDA
+  implementations.
+- **torch_conversions_py** -- Python `torch.Tensor` API and plugin registry.
+- **torch_conversions_py_cpu** / **torch_conversions_py_cuda** -- Python host
+  and CUDA implementations.
 
-Storage lives behind a plugin interface that speaks only DLPack, so the
-adapters carry no device code and no framework pins a device. Install an
-adapter with whichever storage plugins the machine should support; adding
-`dlpack_conversions_cuda` later moves existing code onto the GPU without
-rebuilding it. Name a backend per call, or set `ROSIDL_TENSOR_BACKEND` to
-choose one for the whole process.
+Each framework owns a device-neutral conversion ABI and its CPU/CUDA plugins.
+All packages for one framework use one exclusive, CUDA-capable framework
+provider, so installing a CUDA plugin later changes runtime discovery without
+replacing either the core or its framework ABI. Name a backend per call, or
+set `ROSIDL_TENSOR_BACKEND` before starting the process.
 
 ## Deb build status
 
@@ -83,17 +77,10 @@ choose one for the whole process.
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- A CUDA Toolkit in the 12 or 13 series for the CUDA buffer, Torch, and ONNX
-  Runtime packages, declared through the `cuda-toolkit` rosdep key. The
-  vendors read only the major version, choosing `cu126`, `cu128`, or `cu130`
-  wheels and CUDA 12 or CUDA 13 ONNX Runtime archives. CPU-only conversions
-  do not require CUDA.
-
-Torch conversions use Ubuntu Resolute's `libtorch-dev` and `python3-torch` on
-CPU, and `libtorch_vendor` and `python3_torch_cuda_vendor` on CUDA; each
-vendor conflicts with the distro package it replaces. ONNX Runtime is
-vendored at 1.29.0 on both paths, because Ubuntu ships 1.23.2, which predates
-the `OrtValue.from_dlpack` the Python adapter needs.
+- A CUDA 12 Toolkit, declared through the upstream `nvidia-cuda` rosdep key.
+  The ONNX Runtime CUDA provider also declares `nvidia-cudnn`. CPU conversion
+  plugins need no GPU or host driver, but intentionally use the same
+  CUDA-capable providers as their CUDA peers.
 
 ## API overview
 
@@ -133,7 +120,7 @@ auto msg = torch_conversions::allocate_tensor_msg(
 
 // Wrap as at::Tensor without copying and write into it. On an accelerator,
 // pass the stream your kernels run on as a trailing argument so the storage
-// plugin orders its access against them, the same way
+// conversion plugin orders its access against them, the same way
 // onnxruntime_conversions takes an execution stream.
 at::Tensor t_out = torch_conversions::from_output_tensor_msg(*msg);
 my_pipeline(t_out);
@@ -150,7 +137,7 @@ at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
 // Publisher: allocate a Tensor message and write through an Ort::Value view.
-// The storage plugin decides where the memory lives, so no Ort::MemoryInfo
+// The conversion plugin decides where the memory lives, so no Ort::MemoryInfo
 // is needed here.
 auto msg = onnxruntime_conversions::allocate_tensor_msg(
   {1080, 1920, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8, "cuda");
@@ -170,10 +157,12 @@ onnxruntime_conversions::configure_session_options(
   options, "cuda", /*device_id=*/0, stream);
 ```
 
-The message schema carries DLPack-compatible dtype, shape, stride, and offset
-metadata, while device placement follows the storage plugin that allocated the
-message. ONNX Runtime has no public `from_dlpack` C++ API; the conversion
-wraps the message pointer with `Ort::Value::CreateTensor`.
+The message schema carries DLPack-aligned dtype, shape, stride, and offset
+metadata, while device placement follows the underlying `rosidl::Buffer`
+backend. Each framework adapter owns its plugin ABI; the shared
+`dlpack_conversions` package has been removed. ONNX Runtime has no public
+`from_dlpack` C++ API, so its C++ plugin wraps the leased pointer directly
+with `Ort::Value::CreateTensor`.
 
 ## License
 

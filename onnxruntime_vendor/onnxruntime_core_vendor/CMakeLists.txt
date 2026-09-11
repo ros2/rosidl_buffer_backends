@@ -18,37 +18,17 @@ project(onnxruntime_core_vendor)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_vendor_package REQUIRED)
 
-# OrtValue.from_dlpack and __dlpack__ first ship in 1.26.0, which is the floor
-# for the Python adapter.
-set(ONNXRUNTIME_CORE_VENDOR_VERSION "1.29.0" CACHE STRING
+set(ONNXRUNTIME_CORE_VENDOR_VERSION "1.26.0" CACHE STRING
   "ONNX Runtime version to download")
-# Only decides which archive supplies the CUDA-neutral libraries this package
-# installs; the CUDA provider is left to onnxruntime_cuda_vendor. Defaulted to
-# cuda13 so the two stay byte-identical on the supported toolkit.
-set(ONNXRUNTIME_CORE_VENDOR_VARIANT "cuda13" CACHE STRING
-  "Official x86_64 GPU archive variant: cuda12 or cuda13")
-set_property(
-  CACHE ONNXRUNTIME_CORE_VENDOR_VARIANT PROPERTY STRINGS cuda12 cuda13)
 set(ONNXRUNTIME_CORE_VENDOR_SHA256 "" CACHE STRING
   "SHA256 override for the selected official ONNX Runtime archive")
 
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(_system_arch MATCHES "^(x86_64|amd64)$")
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND "x64_gpu")
-  if(NOT ONNXRUNTIME_CORE_VENDOR_VARIANT MATCHES "^(cuda12|cuda13)$")
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: ONNXRUNTIME_CORE_VENDOR_VARIANT must be cuda12 or cuda13")
-  endif()
-  # Releases from 1.27.0 label both CUDA majors; earlier ones ship CUDA 12 as
-  # an unsuffixed gpu build.
-  if(ONNXRUNTIME_CORE_VENDOR_VERSION VERSION_LESS "1.27.0" AND
-      ONNXRUNTIME_CORE_VENDOR_VARIANT STREQUAL "cuda12")
-    set(_archive_kind "gpu")
-  else()
-    set(_archive_kind "gpu_${ONNXRUNTIME_CORE_VENDOR_VARIANT}")
-  endif()
+  set(ONNXRUNTIME_CORE_VENDOR_VARIANT "cuda12")
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM
-    "onnxruntime-linux-x64-${_archive_kind}-${ONNXRUNTIME_CORE_VENDOR_VERSION}")
+    "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_CORE_VENDOR_VERSION}")
 elseif(_system_arch MATCHES "^(aarch64|arm64)$")
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND "aarch64_cpu")
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM
@@ -58,17 +38,14 @@ else()
     "${PROJECT_NAME}: unsupported architecture '${CMAKE_SYSTEM_PROCESSOR}'")
 endif()
 
-if(ONNXRUNTIME_CORE_VENDOR_VERSION STREQUAL "1.29.0" AND
+if(ONNXRUNTIME_CORE_VENDOR_VERSION STREQUAL "1.26.0" AND
     ONNXRUNTIME_CORE_VENDOR_SHA256 STREQUAL "")
   if(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND STREQUAL "aarch64_cpu")
     set(ONNXRUNTIME_CORE_VENDOR_SHA256
-      "e1799098ebc054b370f6176a450f158720f297818c613e5dc99b92e2ec82346f")
-  elseif(ONNXRUNTIME_CORE_VENDOR_VARIANT STREQUAL "cuda12")
-    set(ONNXRUNTIME_CORE_VENDOR_SHA256
-      "4ca594a0da83927befbd73fe020d7f569be151d70bb4fe9741ad405f4882e2ad")
+      "34ff1c2d0f12e2cf3d33a0c5f82e39792e1d581fbd6968fd7c30d173654be01a")
   else()
     set(ONNXRUNTIME_CORE_VENDOR_SHA256
-      "844c64acfc43ab9423215c26493055ea229268e28283146cc644ecef0bdae048")
+      "cb7df7ee2ca0f962c7ce7c839aeae36223d146a91fb4646d62fb0046f297479f")
   endif()
 endif()
 

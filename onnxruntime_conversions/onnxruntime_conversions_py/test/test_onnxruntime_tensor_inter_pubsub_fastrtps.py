@@ -78,7 +78,7 @@ finally:
 
 def _cuda_unavailable_reason():
     if 'cuda' not in available_backends():
-        return 'the CUDA storage plugin is unavailable'
+        return 'the CUDA conversion plugin is unavailable'
     if 'CUDAExecutionProvider' not in ort.get_available_providers():
         return 'this ONNX Runtime build has no CUDA execution provider'
     from cuda_buffer import CudaBuffer

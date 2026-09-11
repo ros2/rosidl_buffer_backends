@@ -51,7 +51,7 @@ protected:
   {
     const auto backends = available_backends();
     if (std::find(backends.begin(), backends.end(), "cuda") == backends.end()) {
-      GTEST_SKIP() << "the CUDA storage plugin is unavailable";
+      GTEST_SKIP() << "the CUDA conversion plugin is unavailable";
     }
     ASSERT_EQ(cudaStreamCreate(&stream_), cudaSuccess);
   }
@@ -213,7 +213,7 @@ TEST_F(CudaConversions, CopiesDeviceOrtValueIntoHostStorage)
   EXPECT_EQ(result[3], 6.0F);
 }
 
-/// The storage plugin and the execution provider are independent: device
+/// The conversion plugin and execution provider are independent: device
 /// memory can be shared even when the linked ONNX Runtime has no CUDA
 /// provider, so inference is the only part that needs one.
 TEST_F(CudaConversions, ConfiguresTheProviderAndRunsInferenceOnDeviceStorage)

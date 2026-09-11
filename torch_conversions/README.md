@@ -1,37 +1,55 @@
 # PyTorch conversions
 
-Conversions between `tensor_msgs/ExperimentalTensor` and PyTorch.
+Conversions between `tensor_msgs/ExperimentalTensor` and PyTorch tensors.
+The public packages are framework-specific and device-neutral:
 
-`torch_conversions` translates between PyTorch tensors and DLPack, and
-[`dlpack_conversions`](../dlpack_conversions/README.md) owns the message
-storage behind it. Which memory a tensor lands in is decided by the storage
-plugin installed alongside the adapter, not by the adapter itself, so adding
-`dlpack_conversions_cuda` to an existing install is enough to move the same
-code onto the GPU. Pass a backend name to choose among several, or set
-`ROSIDL_TENSOR_BACKEND` to pick one for the whole process.
-
-| Device | C++ plugin | Python plugin |
+| Role | C++ | Python |
 | --- | --- | --- |
-| Host | `dlpack_conversions_cpu` | `dlpack_conversions_py_cpu` |
-| CUDA | `dlpack_conversions_cuda` | `dlpack_conversions_py_cuda` |
+| Public API and plugin registry | `torch_conversions` | `torch_conversions_py` |
+| CPU implementation | `torch_conversions_cpu` | `torch_conversions_py_cpu` |
+| CUDA implementation | `torch_conversions_cuda` | `torch_conversions_py_cuda` |
+
+The core discovers implementations through the ament index. Installing the
+CUDA plugin later does not replace or rebuild the core Debian. A newly started
+process sees both plugins and can select CPU or CUDA per call; set
+`ROSIDL_TENSOR_BACKEND=cpu` or `cuda` to choose the default. Discovery occurs
+once when a process first uses the registry, so a process already running while
+a Debian is installed must be restarted.
+
+## Torch provider boundary
+
+The C++ API exposes `at::Tensor`, so the core and both plugins necessarily
+share LibTorch's C++ ABI. They all depend on the single `libtorch_vendor`
+provider built from the CUDA-enabled LibTorch 2.9.1 distribution. Likewise,
+the Python core depends on the single `python3_torch_cuda_vendor` provider.
+The CPU and CUDA plugins never load different Torch distributions into one
+process.
+
+This means a CPU-only installation still installs the CUDA-capable provider
+and its user-space toolkit libraries, although it does not require a GPU or
+host driver. Adding the CUDA plugins later changes only which implementations
+are discoverable. It does not exchange the provider.
 
 ## C++
 
-`torch_conversions` is header-only and compiles against whichever libtorch the
-consumer already resolved, so it does not pin a PyTorch version.
-
-Debian:
+CPU installation:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-torch-conversions \
-  ros-$ROS_DISTRO-dlpack-conversions-cuda
+  ros-$ROS_DISTRO-torch-conversions-cpu
 ```
 
-Source:
+Add CUDA later:
 
 ```bash
-colcon build --merge-install --packages-up-to torch_conversions \
-  dlpack_conversions_cuda
+sudo apt install ros-$ROS_DISTRO-torch-conversions-cuda
+```
+
+Source build:
+
+```bash
+colcon build --merge-install --packages-up-to \
+  torch_conversions_cpu torch_conversions_cuda
 ```
 
 ### Publisher
@@ -48,110 +66,73 @@ my_pipeline(output);
 publisher->publish(std::move(msg));
 ```
 
-### Subscriber
+### Subscriber and existing tensors
 
 ```cpp
-void * stream = c10::cuda::getCurrentCUDAStream().stream();
-at::Tensor tensor = torch_conversions::from_input_tensor_msg(
+auto tensor = torch_conversions::from_input_tensor_msg(
   *received, /*clone=*/true, stream);
-at::Tensor view = torch_conversions::from_input_tensor_msg(
+auto view = torch_conversions::from_input_tensor_msg(
   *received, /*clone=*/false, stream);
+auto outgoing = torch_conversions::to_tensor_msg(tensor, stream);
+torch_conversions::to_tensor_msg(*preallocated, tensor, stream);
 ```
 
-### Existing tensor
-
-```cpp
-at::Tensor tensor = my_pipeline().contiguous();
-auto msg = torch_conversions::to_tensor_msg(tensor, stream);
-publisher->publish(std::move(msg));
-```
-
-`to_tensor_msg(*msg, tensor, stream)` reuses a pre-sized message.
-
-### Execution streams
-
-Every conversion takes an optional trailing execution stream, which the
-storage plugin uses to order its access against your kernels. It is the same
-parameter `onnxruntime_conversions` takes.
-
-Leave it unset for host storage, or when your work runs on the default stream.
-Pass it whenever it does not: reading storage on the default stream while your
-kernels write it on another is a race, and the adapter cannot detect the
-difference on your behalf. The adapter deliberately does not read the current
-stream itself, since doing so in C++ means compiling against a CUDA LibTorch,
-which would fix a consumer's accelerator at build time. Your own code that
-calls `getCurrentCUDAStream()` is already compiled against CUDA by definition,
-so the choice stays where the information is.
+Every conversion accepts an optional execution stream. Pass the stream when
+work does not run on the default CUDA stream so buffer access is ordered
+against the caller's kernels. Host calls can omit it.
 
 ## Python
 
-Debian:
+CPU installation:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-torch-conversions-py \
-  ros-$ROS_DISTRO-dlpack-conversions-py-cuda
+  ros-$ROS_DISTRO-torch-conversions-py-cpu
 ```
 
-Source:
+Add CUDA later:
 
 ```bash
-colcon build --merge-install --packages-up-to torch_conversions_py \
-  dlpack_conversions_py_cuda
+sudo apt install ros-$ROS_DISTRO-torch-conversions-py-cuda
 ```
 
-### Publisher
+Source build:
+
+```bash
+colcon build --merge-install --packages-up-to \
+  torch_conversions_py_cpu torch_conversions_py_cuda
+```
 
 ```python
 import torch
 from torch_conversions import allocate_tensor_msg
-from torch_conversions import from_output_tensor_msg
-
-msg = allocate_tensor_msg((480, 640, 3), torch.uint8, 'cuda')
-output = from_output_tensor_msg(msg)
-my_pipeline(output)
-publisher.publish(msg)
-```
-
-### Subscriber
-
-```python
 from torch_conversions import from_input_tensor_msg
-
-def callback(msg):
-    tensor = from_input_tensor_msg(msg)
-    view = from_input_tensor_msg(msg, clone=False)
-```
-
-### Existing tensor
-
-```python
+from torch_conversions import from_output_tensor_msg
+from torch_conversions import set_stream
 from torch_conversions import to_tensor_msg
 
-msg = to_tensor_msg(torch.arange(12, device='cuda').reshape(3, 4))
-publisher.publish(msg)
-```
-
-### Execution streams
-
-Python needs no stream argument. Reading the current stream costs nothing
-here, so the conversions order themselves against whatever stream torch is on,
-including inside a `set_stream()` or `torch.cuda.stream()` block:
-
-```python
-from torch_conversions import set_stream
-
-with set_stream():
+with set_stream('cuda'):
     msg = allocate_tensor_msg((480, 640, 3), torch.uint8, 'cuda')
-    from_output_tensor_msg(msg)
+    output = from_output_tensor_msg(msg)
+    my_pipeline(output)
+
+view = from_input_tensor_msg(msg, clone=False)
+outgoing = to_tensor_msg(torch.arange(12, device='cuda').reshape(3, 4))
 ```
 
-Every conversion still accepts a `stream=` override for the rare case of
-handing storage to a stream torch does not know about. This is where the
-Python and C++ APIs differ on purpose: in C++ reading the current stream means
-compiling against a CUDA LibTorch, which would fix a consumer's accelerator at
-build time, so there the stream has to come from the caller.
+Python uses Torch's current CUDA stream when no explicit `stream=` integer is
+provided. `to_tensor_msg(msg, tensor)` reuses preallocated message storage. The
+CUDA plugin uses a private capsule bridge only to construct Torch zero-copy
+views; it is not a public or framework-neutral conversion API.
 
-`to_tensor_msg(msg, tensor)` reuses a pre-sized message.
+## Validation
+
+The release-like validation under `docker/resolute/debian/` builds every
+Debian without a GPU, driver, preinstalled CUDA, LibTorch, or Python Torch.
+A pristine consumer then installs only the cores and CPU plugins, builds the
+test sources separately, manually runs the CPU unit and launch tests, installs
+the CUDA plugins, verifies that the core files did not change, and reruns the
+C++ and Python unit and launch tests on a GPU.
 
 ## License
 

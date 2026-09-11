@@ -5,24 +5,16 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# onnxruntime-gpu publishes a separate wheel per CUDA major from 1.27 onward,
-# so the host toolkit decides which release is usable. 1.26.0 is the floor
-# either way, being the first with OrtValue.from_dlpack.
-set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION "" CACHE STRING
-  "ONNX Runtime CUDA Python wheel version. Auto-selected if empty.")
+# Version 1.26 is the first release with the DLPack methods required by the
+# Python conversion plugin and the last stable PyPI release for CUDA 12.
+set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION "1.26.0" CACHE STRING
+  "ONNX Runtime CUDA Python wheel version")
 
 find_package(CUDAToolkit REQUIRED)
-if(CUDAToolkit_VERSION_MAJOR EQUAL 13)
-  set(_default_version "1.29.0")
-elseif(CUDAToolkit_VERSION_MAJOR EQUAL 12)
-  set(_default_version "1.26.0")
-else()
+if(NOT CUDAToolkit_VERSION_MAJOR EQUAL 12)
   message(FATAL_ERROR
-    "${PROJECT_NAME}: onnxruntime-gpu publishes CUDA 12 and CUDA 13 wheels, "
-    "but found CUDA ${CUDAToolkit_VERSION}")
-endif()
-if(NOT PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION)
-  set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION "${_default_version}")
+    "${PROJECT_NAME}: ONNX Runtime ${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION} "
+    "requires CUDA 12, but found CUDA ${CUDAToolkit_VERSION}")
 endif()
 
 set(_python_package "onnxruntime-gpu")

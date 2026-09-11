@@ -3,7 +3,7 @@
 <package format="3">
   <name>onnxruntime_conversions</name>
   <version>0.1.2</version>
-  <description>Header-only adapter between Ort::Value and DLPack tensor messages.</description>
+  <description>Runtime-pluggable conversions between Ort::Value and tensor messages.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -11,16 +11,13 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>dlpack_conversions</depend>
+  <depend>onnxruntime_cuda_vendor</depend>
+  <depend>pluginlib</depend>
   <depend>tensor_msgs</depend>
-  <depend>onnxruntime_core_vendor</depend>
-
-  <exec_depend>dlpack_conversions_cpu</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
-  <test_depend>dlpack_conversions_cuda</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
   <test_depend>rclcpp</test_depend>
   <test_depend>rclcpp_components</test_depend>

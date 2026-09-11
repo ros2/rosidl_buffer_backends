@@ -35,7 +35,7 @@ import pytest
 pytestmark = [
     pytest.mark.skipif(
         'cuda' not in available_backends(),
-        reason='the CUDA storage plugin is unavailable',
+        reason='the CUDA conversion plugin is unavailable',
     ),
     pytest.mark.skipif(
         'CUDAExecutionProvider' not in ort.get_available_providers(),
@@ -120,8 +120,6 @@ def test_views_describe_device_data_without_copying_it(
     with from_input_tensor_msg(msg, cuda_stream) as value:
         assert value.device_name().lower() == 'cuda'
         assert value.data_ptr() != 0
-        # This file only runs where a CUDA provider exists, and such a build
-        # stages the device-to-host copy itself rather than refusing it.
         assert np.array_equal(value.numpy(), source)
 
     assert np.array_equal(

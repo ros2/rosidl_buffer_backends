@@ -19,9 +19,7 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_vendor_package REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
-# Held equal to onnxruntime_core_vendor and the Python wheel vendors so the
-# whole ONNX Runtime stack reports one version.
-set(ONNXRUNTIME_CUDA_VENDOR_VERSION "1.29.0" CACHE STRING
+set(ONNXRUNTIME_CUDA_VENDOR_VERSION "1.26.0" CACHE STRING
   "ONNX Runtime version to download")
 set(ONNXRUNTIME_CUDA_VENDOR_SHA256 "" CACHE STRING
   "SHA256 override for the selected official ONNX Runtime archive")
@@ -31,38 +29,60 @@ if(NOT _system_arch MATCHES "^(x86_64|amd64)$")
   message(FATAL_ERROR
     "${PROJECT_NAME}: ONNX Runtime GPU archives support x86_64 only")
 endif()
-# Releases from 1.27.0 label both CUDA majors; earlier ones ship CUDA 12 as an
-# unsuffixed gpu build.
-if(CUDAToolkit_VERSION_MAJOR EQUAL 13 OR CUDAToolkit_VERSION_MAJOR EQUAL 12)
-  if(ONNXRUNTIME_CUDA_VENDOR_VERSION VERSION_LESS "1.27.0" AND
-      CUDAToolkit_VERSION_MAJOR EQUAL 12)
-    set(_archive_kind "gpu")
-  else()
-    set(_archive_kind "gpu_cuda${CUDAToolkit_VERSION_MAJOR}")
-  endif()
-else()
+if(NOT CUDAToolkit_VERSION_MAJOR EQUAL 12)
   message(FATAL_ERROR
     "${PROJECT_NAME}: ONNX Runtime ${ONNXRUNTIME_CUDA_VENDOR_VERSION} "
-    "publishes CUDA 12 and CUDA 13 archives, but found CUDA "
-    "${CUDAToolkit_VERSION}")
+    "requires CUDA 12, but found CUDA ${CUDAToolkit_VERSION}")
 endif()
 
 set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE
-  "onnxruntime-linux-x64-${_archive_kind}-${ONNXRUNTIME_CUDA_VENDOR_VERSION}.tgz")
+  "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_CUDA_VENDOR_VERSION}.tgz")
 
 # Same archives onnxruntime_core_vendor fetches, so the checksums are shared.
-if(ONNXRUNTIME_CUDA_VENDOR_VERSION STREQUAL "1.29.0" AND
+if(ONNXRUNTIME_CUDA_VENDOR_VERSION STREQUAL "1.26.0" AND
     ONNXRUNTIME_CUDA_VENDOR_SHA256 STREQUAL "")
-  if(_archive_kind STREQUAL "gpu_cuda12")
-    set(ONNXRUNTIME_CUDA_VENDOR_SHA256
-      "4ca594a0da83927befbd73fe020d7f569be151d70bb4fe9741ad405f4882e2ad")
-  else()
-    set(ONNXRUNTIME_CUDA_VENDOR_SHA256
-      "844c64acfc43ab9423215c26493055ea229268e28283146cc644ecef0bdae048")
-  endif()
+  set(ONNXRUNTIME_CUDA_VENDOR_SHA256
+    "cb7df7ee2ca0f962c7ce7c839aeae36223d146a91fb4646d62fb0046f297479f")
 endif()
 set(ONNXRUNTIME_CUDA_VENDOR_URL
   "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_CUDA_VENDOR_VERSION}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
+
+# ONNX Runtime's CUDA 12 release is built with CUDA 12.8. NVIDIA's minor
+# version compatibility covers the installed driver, but it does not add new
+# entry points to an older libcudart (Ubuntu Resolute currently ships 12.4).
+# Keep that ABI detail inside the exclusive runtime provider instead of making
+# every conversion plugin know which CUDA minor built ONNX Runtime.
+set(_cuda_runtime_root "")
+if(CUDAToolkit_VERSION VERSION_LESS "12.8")
+  set(_cuda_runtime_version "12.8.90")
+  set(_cuda_runtime_archive
+    "nvidia_cuda_runtime_cu12-${_cuda_runtime_version}-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl")
+  set(_cuda_runtime_url
+    "https://files.pythonhosted.org/packages/0d/9b/a997b638fcd068ad6e4d53b8551a7d30fe8b404d6f1804abf1df69838932/${_cuda_runtime_archive}")
+  set(_cuda_runtime_sha256
+    "adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90")
+  set(_cuda_runtime_download
+    "${CMAKE_CURRENT_BINARY_DIR}/${_cuda_runtime_archive}")
+  set(_cuda_runtime_root
+    "${CMAKE_CURRENT_BINARY_DIR}/cuda_runtime_extracted")
+  if(NOT EXISTS
+      "${_cuda_runtime_root}/nvidia/cuda_runtime/lib/libcudart.so.12")
+    file(DOWNLOAD "${_cuda_runtime_url}" "${_cuda_runtime_download}"
+      EXPECTED_HASH "SHA256=${_cuda_runtime_sha256}"
+      SHOW_PROGRESS STATUS _cuda_runtime_download_status)
+    list(GET _cuda_runtime_download_status 0 _cuda_runtime_download_code)
+    if(NOT _cuda_runtime_download_code EQUAL 0)
+      list(GET _cuda_runtime_download_status 1 _cuda_runtime_download_message)
+      message(FATAL_ERROR
+        "${PROJECT_NAME}: CUDA runtime download failed: "
+        "${_cuda_runtime_download_message}")
+    endif()
+    file(REMOVE_RECURSE "${_cuda_runtime_root}")
+    file(ARCHIVE_EXTRACT INPUT "${_cuda_runtime_download}"
+      DESTINATION "${_cuda_runtime_root}")
+    file(REMOVE "${_cuda_runtime_download}")
+  endif()
+endif()
 
 set(_download_path
   "${CMAKE_CURRENT_BINARY_DIR}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
@@ -150,6 +170,16 @@ install(FILES "${_onnxruntime_root}/VERSION_NUMBER"
   DESTINATION "opt/${PROJECT_NAME}")
 install(FILES "${_onnxruntime_root}/LICENSE"
   DESTINATION "share/${PROJECT_NAME}")
+if(_cuda_runtime_root)
+  install(DIRECTORY "${_cuda_runtime_root}/nvidia/cuda_runtime/lib/"
+    DESTINATION "opt/${PROJECT_NAME}/lib"
+    USE_SOURCE_PERMISSIONS
+    FILES_MATCHING PATTERN "libcudart.so*")
+  file(GLOB _cuda_runtime_licenses
+    "${_cuda_runtime_root}/nvidia_cuda_runtime_cu12-*.dist-info/License*")
+  install(FILES ${_cuda_runtime_licenses}
+    DESTINATION "share/${PROJECT_NAME}/cuda_runtime_licenses")
+endif()
 
 ament_index_register_resource("vendor_packages" CONTENT "opt/${PROJECT_NAME}")
 if(APPLE)

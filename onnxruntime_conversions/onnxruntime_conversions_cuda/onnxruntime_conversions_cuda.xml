@@ -1,0 +1,8 @@
+<library path="onnxruntime_conversions_cuda">
+  <class
+    name="cuda"
+    type="onnxruntime_conversions_cuda::CudaConversionPlugin"
+    base_class_type="onnxruntime_conversions::ConversionPlugin">
+    <description>Direct Ort::Value conversion for CUDA-backed messages.</description>
+  </class>
+</library>

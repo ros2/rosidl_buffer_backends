@@ -16,6 +16,10 @@
 
 from torch_conversions import _core
 from torch_conversions._core import allocate_tensor_msg
+from torch_conversions._core import available_backends
+from torch_conversions._core import backend_available
+from torch_conversions._core import backend_for_device
+from torch_conversions._core import default_backend
 from torch_conversions._core import from_input_tensor_msg
 from torch_conversions._core import from_output_tensor_msg
 from torch_conversions._core import set_stream
@@ -26,6 +30,10 @@ _plugin_available = _core._plugin_available
 
 __all__ = [
     'allocate_tensor_msg',
+    'available_backends',
+    'backend_available',
+    'backend_for_device',
+    'default_backend',
     'from_input_tensor_msg',
     'from_output_tensor_msg',
     'set_stream',

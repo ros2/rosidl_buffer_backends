@@ -12,22 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The adapter compiles in the consumer's translation units, so it binds to
-# whichever ONNX Runtime the consumer already resolved. onnxruntime_cuda_vendor
-# is only the fallback for consumers that do not bring their own.
-if(NOT TARGET onnxruntime::onnxruntime)
-  find_package(onnxruntime_cuda_vendor QUIET)
-endif()
-if(NOT TARGET onnxruntime::onnxruntime)
-  find_package(onnxruntime QUIET)
-endif()
-
 if(NOT TARGET onnxruntime::onnxruntime)
   message(FATAL_ERROR
-    "onnxruntime_conversions needs ONNX Runtime. Install "
-    "onnxruntime_cuda_vendor, or call find_package(onnxruntime) with your own "
-    "build before find_package(onnxruntime_conversions).")
+    "onnxruntime_conversions requires its ABI-matched "
+    "onnxruntime_cuda_vendor provider")
 endif()
-
-set_property(TARGET onnxruntime_conversions::onnxruntime_conversions APPEND
-  PROPERTY INTERFACE_LINK_LIBRARIES onnxruntime::onnxruntime)
