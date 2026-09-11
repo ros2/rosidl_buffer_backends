@@ -68,6 +68,31 @@ protected:
   cudaStream_t stream_{nullptr};
 };
 
+void copy_to_device(
+  Ort::Value & value, const std::vector<float> & source, cudaStream_t stream)
+{
+  ASSERT_EQ(
+    cudaMemcpyAsync(
+      value.GetTensorMutableRawData(), source.data(),
+      source.size() * sizeof(float), cudaMemcpyHostToDevice, stream),
+    cudaSuccess);
+  ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+}
+
+void expect_device_values(
+  const Ort::Value & value, const std::vector<float> & expected,
+  cudaStream_t stream)
+{
+  std::vector<float> actual(expected.size());
+  ASSERT_EQ(
+    cudaMemcpyAsync(
+      actual.data(), value.GetTensorRawData(), actual.size() * sizeof(float),
+      cudaMemcpyDeviceToHost, stream),
+    cudaSuccess);
+  ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+  EXPECT_EQ(actual, expected);
+}
+
 TEST_F(CudaConversions, CudaIsPreferredOverHostMemory)
 {
   EXPECT_EQ(onnxruntime_conversions::default_backend(), "cuda");
@@ -124,23 +149,9 @@ TEST_F(CudaConversions, RoundTripsThroughDeviceMemory)
     {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
 
   auto output = from_output_tensor_msg(*msg, stream());
-  ASSERT_EQ(
-    cudaMemcpyAsync(
-      output.value().GetTensorMutableData<float>(), source.data(),
-      source.size() * sizeof(float), cudaMemcpyHostToDevice, stream_),
-    cudaSuccess);
-  ASSERT_EQ(cudaStreamSynchronize(stream_), cudaSuccess);
-
-  std::vector<float> result(source.size());
+  copy_to_device(output.value(), source, stream_);
   auto input = from_input_tensor_msg(*msg, stream());
-  ASSERT_EQ(
-    cudaMemcpyAsync(
-      result.data(), input.value().GetTensorData<float>(),
-      result.size() * sizeof(float), cudaMemcpyDeviceToHost, stream_),
-    cudaSuccess);
-  ASSERT_EQ(cudaStreamSynchronize(stream_), cudaSuccess);
-
-  EXPECT_EQ(result, source);
+  expect_device_values(input.value(), source, stream_);
 }
 
 TEST_F(CudaConversions, LeaseOutlivesTheAcquiringScope)
@@ -167,27 +178,15 @@ TEST_F(CudaConversions, CopiesDeviceOrtValueWithoutHostStaging)
     {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
   const std::vector<float> host{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
   auto source_view = from_output_tensor_msg(*source, stream());
-  ASSERT_EQ(
-    cudaMemcpyAsync(
-      source_view.value().GetTensorMutableData<float>(), host.data(),
-      host.size() * sizeof(float), cudaMemcpyHostToDevice, stream_),
-    cudaSuccess);
-  ASSERT_EQ(cudaStreamSynchronize(stream_), cudaSuccess);
+  copy_to_device(source_view.value(), host, stream_);
 
   auto msg = to_tensor_msg(source_view.value(), stream());
   ASSERT_EQ(cudaStreamSynchronize(stream_), cudaSuccess);
 
   EXPECT_EQ(msg->data.get_backend_type(), "cuda");
   EXPECT_EQ(msg->shape, (std::vector<int64_t>{2, 3}));
-  std::vector<float> result(host.size());
   auto result_view = from_input_tensor_msg(*msg, stream());
-  ASSERT_EQ(
-    cudaMemcpyAsync(
-      result.data(), result_view.value().GetTensorData<float>(),
-      result.size() * sizeof(float), cudaMemcpyDeviceToHost, stream_),
-    cudaSuccess);
-  ASSERT_EQ(cudaStreamSynchronize(stream_), cudaSuccess);
-  EXPECT_EQ(result, host);
+  expect_device_values(result_view.value(), host, stream_);
 }
 
 TEST_F(CudaConversions, CopiesDeviceOrtValueIntoHostStorage)
@@ -196,12 +195,7 @@ TEST_F(CudaConversions, CopiesDeviceOrtValueIntoHostStorage)
     {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
   const std::vector<float> host{9.0F, 8.0F, 7.0F, 6.0F};
   auto source_view = from_output_tensor_msg(*source, stream());
-  ASSERT_EQ(
-    cudaMemcpyAsync(
-      source_view.value().GetTensorMutableData<float>(), host.data(),
-      host.size() * sizeof(float), cudaMemcpyHostToDevice, stream_),
-    cudaSuccess);
-  ASSERT_EQ(cudaStreamSynchronize(stream_), cudaSuccess);
+  copy_to_device(source_view.value(), host, stream_);
 
   auto msg = allocate_tensor_msg(
     {4}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
@@ -241,26 +235,14 @@ TEST_F(CudaConversions, ConfiguresTheProviderAndRunsInferenceOnDeviceStorage)
 
   auto input_view = from_input_tensor_msg(*input, stream());
   auto output_view = from_output_tensor_msg(*output, stream());
-  ASSERT_EQ(
-    cudaMemcpyAsync(
-      const_cast<float *>(input_view.value().GetTensorData<float>()),
-      host.data(), host.size() * sizeof(float), cudaMemcpyHostToDevice,
-      stream_),
-    cudaSuccess);
+  copy_to_device(input_view.value(), host, stream_);
 
   binding.BindInput("input", input_view.value());
   binding.BindOutput("output", output_view.value());
   session.Run(Ort::RunOptions{}, binding);
   binding.SynchronizeOutputs();
 
-  std::vector<float> result(host.size());
-  ASSERT_EQ(
-    cudaMemcpyAsync(
-      result.data(), output_view.value().GetTensorData<float>(),
-      result.size() * sizeof(float), cudaMemcpyDeviceToHost, stream_),
-    cudaSuccess);
-  ASSERT_EQ(cudaStreamSynchronize(stream_), cudaSuccess);
-  EXPECT_EQ(result, host);
+  expect_device_values(output_view.value(), host, stream_);
 }
 
 }  // namespace

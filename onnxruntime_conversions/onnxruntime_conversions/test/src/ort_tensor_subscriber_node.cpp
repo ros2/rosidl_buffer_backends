@@ -23,7 +23,6 @@
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
-#include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/u_int32.hpp"
 
 namespace
@@ -62,10 +61,8 @@ public:
       "test_onnxruntime_cuda_tensor", 10,
       std::bind(&OrtTensorSubscriber::receive, this, std::placeholders::_1),
       subscription_options);
-    count_publisher_ =
-      create_publisher<std_msgs::msg::UInt32>("subscriber_count", 10);
-    validation_publisher_ =
-      create_publisher<std_msgs::msg::Bool>("validation_result", 10);
+    result_publisher_ =
+      create_publisher<std_msgs::msg::UInt32>("validation_count", 10);
   }
 
   ~OrtTensorSubscriber() override
@@ -127,20 +124,17 @@ private:
     }
 
     validation_passed_ = validation_passed_ && valid;
-    std_msgs::msg::UInt32 count;
-    count.data = ++received_count_;
-    count_publisher_->publish(count);
-    std_msgs::msg::Bool validation;
-    validation.data = validation_passed_;
-    validation_publisher_->publish(validation);
+    std_msgs::msg::UInt32 result;
+    ++received_count_;
+    result.data = validation_passed_ ? received_count_ : 0;
+    result_publisher_->publish(result);
   }
 
   Ort::Env env_;
   Ort::Session session_;
   cudaStream_t stream_{nullptr};
   rclcpp::Subscription<onnxruntime_conversions::TensorMsg>::SharedPtr subscription_;
-  rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr count_publisher_;
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr validation_publisher_;
+  rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr result_publisher_;
   uint32_t received_count_{0};
   bool validation_passed_{true};
 };

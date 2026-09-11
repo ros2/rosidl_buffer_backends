@@ -42,6 +42,15 @@ bool installed(const std::string & backend)
   return std::find(backends.begin(), backends.end(), backend) != backends.end();
 }
 
+Ort::Value host_value(
+  std::vector<float> & data, const std::vector<int64_t> & shape)
+{
+  auto info = Ort::MemoryInfo::CreateCpu(
+    OrtDeviceAllocator, OrtMemTypeDefault);
+  return Ort::Value::CreateTensor<float>(
+    info, data.data(), data.size(), shape.data(), shape.size());
+}
+
 const uint8_t identity_model[] = {
   8, 10, 58, 88, 10, 25, 10, 5, 105, 110, 112, 117, 116, 18, 6, 111,
   117, 116, 112, 117, 116, 34, 8, 73, 100, 101, 110, 116, 105, 116, 121,
@@ -202,10 +211,7 @@ TEST(OnnxRuntimeConversions, CopiesHostOrtValueIntoNewMessage)
 {
   std::vector<float> source{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
   const std::vector<int64_t> shape{2, 3};
-  auto memory_info =
-    Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault);
-  auto value = Ort::Value::CreateTensor<float>(
-    memory_info, source.data(), source.size(), shape.data(), shape.size());
+  auto value = host_value(source, shape);
 
   auto msg = to_tensor_msg(value);
 
@@ -223,10 +229,7 @@ TEST(OnnxRuntimeConversions, CopiesHostOrtValueIntoExistingMessage)
 {
   std::vector<float> source{7.0F, 8.0F};
   const std::vector<int64_t> shape{2};
-  auto memory_info =
-    Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault);
-  auto value = Ort::Value::CreateTensor<float>(
-    memory_info, source.data(), source.size(), shape.data(), shape.size());
+  auto value = host_value(source, shape);
   auto msg = allocate_tensor_msg(
     {16}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
 
@@ -244,10 +247,7 @@ TEST(OnnxRuntimeConversions, RejectsOrtValuesLargerThanTheDestination)
 {
   std::vector<float> source{1.0F, 2.0F, 3.0F, 4.0F};
   const std::vector<int64_t> shape{4};
-  auto memory_info =
-    Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault);
-  auto value = Ort::Value::CreateTensor<float>(
-    memory_info, source.data(), source.size(), shape.data(), shape.size());
+  auto value = host_value(source, shape);
   auto msg = allocate_tensor_msg(
     {1}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
 

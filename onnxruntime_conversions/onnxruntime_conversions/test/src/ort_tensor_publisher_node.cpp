@@ -24,7 +24,6 @@
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
-#include "std_msgs/msg/u_int32.hpp"
 
 class OrtTensorPublisher : public rclcpp::Node
 {
@@ -37,7 +36,6 @@ public:
     }
     publisher_ = create_publisher<onnxruntime_conversions::TensorMsg>(
       "test_onnxruntime_cuda_tensor", 10);
-    count_publisher_ = create_publisher<std_msgs::msg::UInt32>("publisher_count", 10);
     timer_ = create_wall_timer(
       std::chrono::milliseconds(100), std::bind(&OrtTensorPublisher::publish, this));
   }
@@ -67,15 +65,11 @@ private:
     auto message =
       std::make_unique<onnxruntime_conversions::TensorMsg>(std::move(*owner));
     publisher_->publish(std::move(message));
-
-    std_msgs::msg::UInt32 count;
-    count.data = ++count_;
-    count_publisher_->publish(count);
+    ++count_;
   }
 
   cudaStream_t stream_{nullptr};
   rclcpp::Publisher<onnxruntime_conversions::TensorMsg>::SharedPtr publisher_;
-  rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr count_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
   uint32_t count_{0};
 };

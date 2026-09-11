@@ -67,6 +67,12 @@ def cuda_stream():
         assert runtime.cudaStreamDestroy(stream) == 0
 
 
+def cuda_message(values, cuda_buffer):
+    msg = allocate_tensor_msg(values.shape, values.dtype, 'cuda')
+    msg.data = cuda_buffer.from_cpu(values.tobytes())
+    return msg
+
+
 def test_cuda_is_preferred_over_host_memory():
     assert default_backend() == 'cuda'
     assert allocate_tensor_msg((4,), np.float32).data.backend_type == 'cuda'
@@ -145,16 +151,11 @@ def test_session_providers_binds_the_compute_stream(cuda_stream):
 
 
 def test_identity_inference_on_device_storage(cuda_buffer, cuda_stream):
-    if 'CUDAExecutionProvider' not in ort.get_available_providers():
-        pytest.skip('this ONNX Runtime build has no CUDA execution provider')
-
     session = ort.InferenceSession(
         identity_model((4,)),
         providers=session_providers('cuda', 0, cuda_stream),
     )
-    input_msg = allocate_tensor_msg((4,), np.float32, 'cuda')
-    input_msg.data = cuda_buffer.from_cpu(
-        np.arange(4, dtype=np.float32).tobytes())
+    input_msg = cuda_message(np.arange(4, dtype=np.float32), cuda_buffer)
     output_msg = allocate_tensor_msg((4,), np.float32, 'cuda')
 
     input_view = from_input_tensor_msg(input_msg, cuda_stream)
@@ -193,8 +194,7 @@ def test_to_tensor_msg_copies_device_values_without_staging_on_the_host(
     cuda_buffer, cuda_stream,
 ):
     source = np.arange(4, dtype=np.float32)
-    staged = allocate_tensor_msg((4,), np.float32, 'cuda')
-    staged.data = cuda_buffer.from_cpu(source.tobytes())
+    staged = cuda_message(source, cuda_buffer)
     destination = allocate_tensor_msg((4,), np.float32, 'cuda')
 
     with from_input_tensor_msg(staged, cuda_stream) as value:
@@ -209,8 +209,7 @@ def test_to_tensor_msg_allocates_on_the_device_that_owns_the_value(
     cuda_buffer, cuda_stream,
 ):
     source = np.arange(4, dtype=np.float32)
-    staged = allocate_tensor_msg((4,), np.float32, 'cuda')
-    staged.data = cuda_buffer.from_cpu(source.tobytes())
+    staged = cuda_message(source, cuda_buffer)
 
     with from_input_tensor_msg(staged, cuda_stream) as value:
         allocated = to_tensor_msg(value, stream=cuda_stream)
@@ -224,8 +223,7 @@ def test_to_tensor_msg_copies_device_values_into_host_storage(
     cuda_buffer, cuda_stream,
 ):
     source = np.arange(4, dtype=np.float32)
-    staged = allocate_tensor_msg((4,), np.float32, 'cuda')
-    staged.data = cuda_buffer.from_cpu(source.tobytes())
+    staged = cuda_message(source, cuda_buffer)
     destination = allocate_tensor_msg((4,), np.float32, 'cpu')
 
     with from_input_tensor_msg(staged, cuda_stream) as value:

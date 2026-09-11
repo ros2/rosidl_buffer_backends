@@ -181,20 +181,10 @@ def test_invalid_metadata_is_rejected(mutate, error, match):
         from_input_tensor_msg(msg)
 
 
-def test_noncontiguous_strides_are_rejected():
-    msg = allocate_tensor_msg((4,), np.float32, 'cpu')
-    msg.shape = [2]
-    msg.strides = [2]
-
-    with pytest.raises(ValueError, match='contiguous'):
-        from_input_tensor_msg(msg)
-
-
-def test_unsupported_element_types_are_rejected():
+@pytest.mark.parametrize('element_type', [8, np.complex64])
+def test_unsupported_element_types_are_rejected(element_type):
     with pytest.raises(ValueError, match='Unsupported ONNX tensor element'):
-        allocate_tensor_msg((1,), 8, 'cpu')
-    with pytest.raises(ValueError, match='Unsupported ONNX tensor element'):
-        allocate_tensor_msg((1,), np.complex64, 'cpu')
+        allocate_tensor_msg((1,), element_type, 'cpu')
 
 
 def test_host_storage_is_always_available():

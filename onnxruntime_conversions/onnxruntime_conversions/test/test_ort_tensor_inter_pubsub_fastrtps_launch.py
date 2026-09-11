@@ -26,7 +26,7 @@ import launch_testing.asserts
 import launch_testing.markers
 import pytest
 import rclpy
-from std_msgs.msg import Bool, UInt32
+from std_msgs.msg import UInt32
 
 
 def _cuda_available():
@@ -80,35 +80,21 @@ class TestCudaTensorInterProcessInference(unittest.TestCase):
 
     def setUp(self):
         self.node = rclpy.create_node('test_cuda_tensor_inter_process_inference')
-        self.publisher_count = 0
-        self.subscriber_count = 0
-        self.validation_passed = True
+        self.validation_count = 0
         self.node.create_subscription(
-            UInt32, 'publisher_count', self._publisher_count, 10)
-        self.node.create_subscription(
-            UInt32, 'subscriber_count', self._subscriber_count, 10)
-        self.node.create_subscription(
-            Bool, 'validation_result', self._validation_result, 10)
+            UInt32, 'validation_count', self._validation_result, 10)
 
     def tearDown(self):
         self.node.destroy_node()
 
-    def _publisher_count(self, message):
-        self.publisher_count = message.data
-
-    def _subscriber_count(self, message):
-        self.subscriber_count = message.data
-
     def _validation_result(self, message):
-        self.validation_passed = message.data
+        self.validation_count = message.data
 
     def test_received_cuda_inference_output(self):
         deadline = time.time() + 20.0
-        while self.subscriber_count < 5 and time.time() < deadline:
+        while self.validation_count < 5 and time.time() < deadline:
             rclpy.spin_once(self.node, timeout_sec=0.1)
-        self.assertGreaterEqual(self.publisher_count, 5)
-        self.assertGreaterEqual(self.subscriber_count, 5)
-        self.assertTrue(self.validation_passed)
+        self.assertGreaterEqual(self.validation_count, 5)
 
 
 @launch_testing.post_shutdown_test()

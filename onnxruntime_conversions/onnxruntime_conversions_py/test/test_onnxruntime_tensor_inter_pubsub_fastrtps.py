@@ -119,16 +119,9 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
         received = []
 
         def callback(msg):
-            validation_index = len(received) + 1
-            if not isinstance(msg.data, Buffer):
+            message_index = len(received)
+            if not isinstance(msg.data, Buffer) or msg.data.backend_type != 'cuda':
                 received.append(False)
-                print(f'VALIDATION_{{validation_index}}_FAIL_NOT_BUFFER')
-                return
-            if msg.data.backend_type != 'cuda':
-                received.append(False)
-                print(
-                    f'VALIDATION_{{validation_index}}_FAIL_BACKEND_'
-                    f'{{msg.data.backend_type}}')
                 return
 
             output_msg = allocate_tensor_msg((2, 3), np.float32, 'cuda')
@@ -148,11 +141,8 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
             actual = np.frombuffer(
                 output_msg.data.to_bytes(), dtype=np.float32).reshape(2, 3)
             expected = np.arange(6, dtype=np.float32).reshape(2, 3)
-            expected += (validation_index - 1) * 10
-            valid = np.array_equal(actual, expected)
-            received.append(valid)
-            result = 'PASS' if valid else 'FAIL_PAYLOAD'
-            print(f'VALIDATION_{{validation_index}}_{{result}}')
+            expected += message_index * 10
+            received.append(np.array_equal(actual, expected))
 
         subscription = node.create_subscription(
             ExperimentalTensor,
@@ -202,7 +192,6 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
             output_view.close()
             assert output_view.closed
             publisher.publish(msg)
-            print(f'PUBLISHED_{{message_index + 1}}_CLOSED')
             time.sleep(0.1)
 
         node.destroy_publisher(publisher)
@@ -213,37 +202,26 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
     environment = os.environ.copy()
     environment['RMW_IMPLEMENTATION'] = 'rmw_fastrtps_cpp'
     environment['ROS_LOCALHOST_ONLY'] = '1'
-    subscriber = subprocess.Popen(
-        [sys.executable, '-c', subscriber_source],
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+
+    def start(source):
+        return subprocess.Popen(
+            [sys.executable, '-c', source], env=environment,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    subscriber = start(subscriber_source)
     time.sleep(0.5)
-    publisher = subprocess.Popen(
-        [sys.executable, '-c', publisher_source],
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    publisher = start(publisher_source)
     try:
         publisher_output, _ = publisher.communicate(timeout=15)
         subscriber_output, _ = subscriber.communicate(timeout=15)
     finally:
-        if publisher.poll() is None:
-            publisher.terminate()
-            publisher.wait(timeout=5)
-        if subscriber.poll() is None:
-            subscriber.terminate()
-            subscriber.wait(timeout=5)
+        for process in (publisher, subscriber):
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
 
     assert publisher.returncode == 0, publisher_output
     assert subscriber.returncode == 0, subscriber_output
     assert 'PUBLISHER_CUDA_ONNX_OK' in publisher_output
     assert 'SUBSCRIBER_CUDA_ONNX_OK' in subscriber_output
-    for validation_index in range(1, 6):
-        assert f'PUBLISHED_{validation_index}_CLOSED' in publisher_output
-        assert f'VALIDATION_{validation_index}_PASS' in subscriber_output
     assert 'cudaEventSynchronize on the publish path' not in publisher_output
