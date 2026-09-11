@@ -34,8 +34,6 @@ from torch_conversions import from_input_tensor_msg
 from torch_conversions import set_stream
 
 
-# The node this test launches asks for CUDA storage explicitly, so it needs
-# both the storage plugin and a torch build with CUDA kernels.
 CUDA_AVAILABLE = (
     torch_conversions._plugin_available('cuda') and torch.cuda.is_available()
 )

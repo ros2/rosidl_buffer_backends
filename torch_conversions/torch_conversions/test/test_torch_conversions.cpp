@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <ATen/dlpack.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "torch_conversions/torch_conversions.hpp"
@@ -29,7 +29,7 @@ TEST(TorchConversions, AllocatePopulatesMetadata)
 
   EXPECT_EQ(msg->shape, (std::vector<int64_t>{2, 3, 4}));
   EXPECT_EQ(msg->strides, (std::vector<int64_t>{12, 4, 1}));
-  EXPECT_EQ(msg->dtype_code, static_cast<uint8_t>(kDLFloat));
+  EXPECT_EQ(msg->dtype_code, static_cast<uint8_t>(2));
   EXPECT_EQ(msg->dtype_bits, 32u);
   EXPECT_EQ(msg->dtype_lanes, 1u);
   EXPECT_EQ(msg->byte_offset, 0u);
@@ -97,6 +97,14 @@ TEST(TorchConversions, RejectsOversizedTensor)
     std::runtime_error);
 }
 
+TEST(TorchConversions, RejectsShapeArithmeticOverflow)
+{
+  EXPECT_THROW(
+    torch_conversions::allocate_tensor_msg(
+      {std::numeric_limits<int64_t>::max(), 2}, at::kByte, c10::kCPU),
+    std::overflow_error);
+}
+
 TEST(TorchConversions, EmptyDataReturnsUndefinedTensor)
 {
   torch_conversions::TensorMsg msg;
@@ -104,10 +112,10 @@ TEST(TorchConversions, EmptyDataReturnsUndefinedTensor)
   EXPECT_FALSE(torch_conversions::from_output_tensor_msg(msg).defined());
 }
 
-TEST(TorchConversions, RejectsDeviceWithoutStoragePlugin)
+TEST(TorchConversions, RejectsDeviceWithoutConversionPlugin)
 {
-  if (dlpack_conversions::backend_available("cuda")) {
-    GTEST_SKIP() << "the CUDA storage plugin is installed";
+  if (torch_conversions::backend_available("cuda")) {
+    GTEST_SKIP() << "the CUDA conversion plugin is installed";
   }
   EXPECT_THROW(
     torch_conversions::allocate_tensor_msg(
@@ -117,15 +125,12 @@ TEST(TorchConversions, RejectsDeviceWithoutStoragePlugin)
 
 TEST(TorchConversions, ReportsInstalledBackends)
 {
-  const auto backends = dlpack_conversions::available_backends();
+  const auto backends = torch_conversions::available_backends();
   EXPECT_NE(
     std::find(backends.begin(), backends.end(), "cpu"), backends.end());
-  EXPECT_FALSE(dlpack_conversions::default_backend().empty());
+  EXPECT_FALSE(torch_conversions::default_backend().empty());
 }
 
-// An accelerator storage plugin can be installed next to a LibTorch built
-// without kernels for that device, so an allocation that names no device has
-// to stay usable rather than abort inside ATen on first touch.
 TEST(TorchConversions, DefaultAllocationsAreUsableByThisTorchBuild)
 {
   auto msg = torch_conversions::allocate_tensor_msg({4}, at::kFloat);

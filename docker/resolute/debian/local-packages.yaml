@@ -1,0 +1,45 @@
+cuda_buffer_backend:
+  ubuntu:
+    resolute: [ros-rolling-cuda-buffer-backend]
+cuda_buffer_backend_msgs:
+  ubuntu:
+    resolute: [ros-rolling-cuda-buffer-backend-msgs]
+cuda_buffer:
+  ubuntu:
+    resolute: [ros-rolling-cuda-buffer]
+cuda_buffer_py:
+  ubuntu:
+    resolute: [ros-rolling-cuda-buffer-py]
+libtorch_vendor:
+  ubuntu:
+    resolute: [ros-rolling-libtorch-vendor]
+libtorch_cuda_vendor:
+  ubuntu:
+    resolute: [ros-rolling-libtorch-cuda-vendor]
+python3_torch_vendor:
+  ubuntu:
+    resolute: [ros-rolling-python3-torch-vendor]
+python3_torch_cuda_vendor:
+  ubuntu:
+    resolute: [ros-rolling-python3-torch-cuda-vendor]
+tensor_msgs:
+  ubuntu:
+    resolute: [ros-rolling-tensor-msgs]
+torch_conversions:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions]
+torch_conversions_cpu:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-cpu]
+torch_conversions_cuda:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-cuda]
+torch_conversions_py:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-py]
+torch_conversions_py_cpu:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-py-cpu]
+torch_conversions_py_cuda:
+  ubuntu:
+    resolute: [ros-rolling-torch-conversions-py-cuda]

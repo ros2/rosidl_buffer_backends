@@ -13,32 +13,62 @@ PyTorch-side helper library that builds on the same buffer infrastructure.
 - **cuda_buffer_backend** -- BufferBackend plugin for CUDA IPC transport.
 - **cuda_buffer_backend_msgs** -- ROS 2 message definitions for CUDA buffer
   descriptors.
-- **libtorch_vendor** -- CUDA LibTorch 2.9.1 vendor for C++ conversions,
-  supporting `cu126`, `cu128`, and `cu130`.
-- **python3_torch_cuda_vendor** -- CUDA Python Torch vendor. It reuses a compatible
-  PyTorch 2.9.1 installation or selects an official `cu126`, `cu128`, or
-  `cu130` wheel from the detected CUDA Toolkit; JetPack provides the
-  required installation on Tegra.
+- **libtorch_vendor** -- Official CPU LibTorch 2.9.1 provider.
+- **libtorch_cuda_vendor** -- Optional CUDA LibTorch 2.9.1 overlay for C++
+  conversions, supporting `cu126`, `cu128`, and `cu130`.
+- **python3_torch_vendor** -- Official CPU Python Torch 2.9.1 provider.
+- **python3_torch_cuda_vendor** -- Optional CUDA Python Torch 2.9.1 overlay.
+  It selects an official `cu126`, `cu128`, or `cu130` wheel from the detected
+  CUDA Toolkit; JetPack provides the required installation on Tegra.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **dlpack_conversions** -- Framework-free C++ core. Allocates message
-  storage, hands out DLPack tensors over it, and loads storage plugins.
-- **dlpack_conversions_cpu** -- Host memory storage plugin.
-- **dlpack_conversions_cuda** -- CUDA device memory storage plugin, backed by
-  `cuda_buffer`.
-- **dlpack_conversions_py** -- Framework-free Python core and plugin registry.
-- **dlpack_conversions_py_cpu** -- Host memory storage plugin for Python.
-- **dlpack_conversions_py_cuda** -- CUDA storage plugin for Python.
-- **torch_conversions** -- Header-only C++ adapter between PyTorch tensors and
-  the DLPack core.
-- **torch_conversions_py** -- Python adapter between PyTorch tensors and the
-  DLPack core.
+- **torch_conversions** -- C++ `at::Tensor` API and runtime plugin registry.
+- **torch_conversions_cpu** -- C++ host-memory implementation.
+- **torch_conversions_cuda** -- C++ CUDA implementation backed by `cuda_buffer`.
+- **torch_conversions_py** -- Python `torch.Tensor` API and plugin registry.
+- **torch_conversions_py_cpu** -- Python host-memory implementation.
+- **torch_conversions_py_cuda** -- Python CUDA implementation.
 
-Storage lives behind a plugin interface that speaks only DLPack, so the
-adapters carry no device code and no framework pins a device. Install
-`torch_conversions` with whichever storage plugins the machine should support;
-adding `dlpack_conversions_cuda` later moves existing code onto the GPU
-without rebuilding it. Name a backend per call, or set
-`ROSIDL_TENSOR_BACKEND` to choose one for the whole process.
+### Torch provider model
+
+The C++ and Python conversion APIs are device-neutral within PyTorch, but they
+are not framework-ABI-neutral: the C++ API exposes `at::Tensor`, and the Python
+API imports `torch`. The conversion cores therefore depend on CPU Torch
+providers, while the optional CUDA plugins bring CUDA-capable provider
+overlays:
+
+| Consumer | CPU provider | Optional CUDA provider |
+| --- | --- | --- |
+| `torch_conversions` | `libtorch_vendor` | `libtorch_cuda_vendor` |
+| `torch_conversions_py` | `python3_torch_vendor` | `python3_torch_cuda_vendor` |
+
+All four providers use exactly PyTorch 2.9.1. The CPU providers contain the
+official CPU LibTorch archive and Python wheel and have no CUDA dependency.
+The CUDA providers are separate packages that depend on their corresponding
+CPU provider and on the supported CUDA dependency closure. Consequently,
+installing either core plus its CPU plugin does not install CUDA.
+
+Installing a CUDA conversion plugin later does not rebuild or replace the
+conversion core or CPU provider. Its CUDA provider is installed under a
+separate ROS-prefix directory, and ROS environment hooks place that directory
+ahead of the CPU provider for subsequently started processes. The process then
+loads one ABI-compatible set of Torch libraries, while both the CPU and CUDA
+conversion plugins remain selectable. Restart the process and source the ROS
+setup file after installing or removing a provider; already-loaded Torch
+libraries and plugin registries cannot be switched safely in-process.
+
+APT installs the providers transitively, so typical installations are:
+
+```bash
+# CPU-only C++ and Python conversions
+sudo apt install \
+  ros-$ROS_DISTRO-torch-conversions-cpu \
+  ros-$ROS_DISTRO-torch-conversions-py-cpu
+
+# Add CUDA later; this retains the CPU plugins
+sudo apt install \
+  ros-$ROS_DISTRO-torch-conversions-cuda \
+  ros-$ROS_DISTRO-torch-conversions-py-cuda
+```
 
 ## Deb build status
 
@@ -68,16 +98,15 @@ without rebuilding it. Name a backend per call, or set
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- A CUDA Toolkit in the 12 or 13 series for the CUDA buffer and conversion
-  packages, declared through the `cuda-toolkit` rosdep key. The vendors read
-  only the major version, choosing a `cu126`, `cu128`, or `cu130` wheel.
-  CPU-only Python PyTorch conversions use Ubuntu Resolute's `python3-torch`
-  package and do not require CUDA.
+- CPU LibTorch and Python Torch 2.9.1 providers for CPU conversions.
+- A CUDA Toolkit in the 12 or 13 series only for the CUDA buffer, provider,
+  and conversion packages, declared through the upstream `nvidia-cuda` rosdep
+  key. The CUDA vendors select a `cu126`, `cu128`, or `cu130` distribution. A
+  CPU-only installation does not require CUDA packages, a GPU, or a driver.
 
 Per-package build, test, and run details live in each package's README:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
-- [`dlpack_conversions/README.md`](dlpack_conversions/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## API overview
@@ -117,7 +146,7 @@ auto msg = torch_conversions::allocate_tensor_msg(
   /*shape=*/{1080, 1920, 3}, torch::kUInt8);
 
 // Wrap as at::Tensor without copying and write into it. On an accelerator,
-// pass the stream your kernels run on as a trailing argument so the storage
+// pass the stream your kernels run on as a trailing argument so the conversion
 // plugin orders its access against them.
 at::Tensor t_out = torch_conversions::from_output_tensor_msg(*msg);
 my_pipeline(t_out);
@@ -127,11 +156,10 @@ publisher->publish(std::move(msg));
 at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
 ```
 
-The message schema carries DLPack's dtype / shape / stride / offset
+The message schema carries DLPack-aligned dtype, shape, stride, and offset
 metadata, while device placement is derived from the underlying
-`rosidl::Buffer` backend. Any DLPack-compatible framework (PyTorch,
-TensorFlow, JAX, CuPy, ONNX Runtime, ...) can interoperate over the wire by
-converting to / from its own DLPack representation.
+`rosidl::Buffer` backend. Each framework adapter owns its public ABI and its
+device plugins; no shared framework-neutral conversion package is required.
 
 ## License
 

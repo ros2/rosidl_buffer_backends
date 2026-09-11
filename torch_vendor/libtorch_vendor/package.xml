@@ -3,7 +3,7 @@
 <package format="3">
   <name>libtorch_vendor</name>
   <version>0.1.2</version>
-  <description>CUDA LibTorch 2.9.1 distribution for C++ Torch conversions.</description>
+  <description>CPU LibTorch 2.9.1 distribution for C++ Torch conversions.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -11,13 +11,6 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
-
-  <depend version_gte="12" version_lt="14">cuda-toolkit</depend>
-
-  <!-- Ubuntu's libtorch-dev ships unversioned SONAMEs (libtorch.so,
-       libc10.so), so a consumer could otherwise link half of this vendor
-       against half of the distro build. -->
-  <conflict>libtorch-dev</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>
   <test_depend>ament_lint_auto</test_depend>

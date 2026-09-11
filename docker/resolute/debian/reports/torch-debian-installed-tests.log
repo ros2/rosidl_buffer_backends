@@ -1,0 +1,885 @@
+	libtorch_cpu.so => /opt/ros/rolling/opt/libtorch_vendor/lib/libtorch_cpu.so (0x000073100ae78000)
+	libc10.so => /opt/ros/rolling/opt/libtorch_vendor/lib/libc10.so (0x000073100ad53000)
+	libgomp-98b21ff3.so.1 => /opt/ros/rolling/opt/libtorch_vendor/lib/libgomp-98b21ff3.so.1 (0x000073100a66f000)
+/usr/bin/rosdep:6: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+  from pkg_resources import load_entry_point
+#All required rosdeps installed successfully
+Starting >>> torch_conversions_installed_tests
+Finished <<< torch_conversions_installed_tests [22.4s]
+
+Summary: 1 package finished [22.5s]
+=== Stage 1: installed core plus CPU plugins ===
+plugins=cpu
+default=cpu
+cpu=pass
+cuda=not-installed
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 11 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 11 tests from TorchConversions
+[ RUN      ] TorchConversions.AllocatePopulatesMetadata
+[       OK ] TorchConversions.AllocatePopulatesMetadata (0 ms)
+[ RUN      ] TorchConversions.RoundTrip
+[       OK ] TorchConversions.RoundTrip (2 ms)
+[ RUN      ] TorchConversions.OutputViewAliasesMessageStorage
+[       OK ] TorchConversions.OutputViewAliasesMessageStorage (0 ms)
+[ RUN      ] TorchConversions.ByteOffsetSelectsStorageSubview
+[       OK ] TorchConversions.ByteOffsetSelectsStorageSubview (0 ms)
+[ RUN      ] TorchConversions.ToExistingMessageUpdatesMetadata
+[       OK ] TorchConversions.ToExistingMessageUpdatesMetadata (0 ms)
+[ RUN      ] TorchConversions.RejectsOversizedTensor
+[       OK ] TorchConversions.RejectsOversizedTensor (0 ms)
+[ RUN      ] TorchConversions.RejectsShapeArithmeticOverflow
+[       OK ] TorchConversions.RejectsShapeArithmeticOverflow (0 ms)
+[ RUN      ] TorchConversions.EmptyDataReturnsUndefinedTensor
+[       OK ] TorchConversions.EmptyDataReturnsUndefinedTensor (0 ms)
+[ RUN      ] TorchConversions.RejectsDeviceWithoutStoragePlugin
+[       OK ] TorchConversions.RejectsDeviceWithoutStoragePlugin (0 ms)
+[ RUN      ] TorchConversions.ReportsInstalledBackends
+[       OK ] TorchConversions.ReportsInstalledBackends (0 ms)
+[ RUN      ] TorchConversions.DefaultAllocationsAreUsableByThisTorchBuild
+[       OK ] TorchConversions.DefaultAllocationsAreUsableByThisTorchBuild (0 ms)
+[----------] 11 tests from TorchConversions (3 ms total)
+
+[----------] Global test environment tear-down
+[==========] 11 tests from 1 test suite ran. (3 ms total)
+[  PASSED  ] 11 tests.
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+rootdir: /source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test
+plugins: ament_copyright-0.21.1, ament_mypy-0.21.1, ament_pep257-0.21.1, ament_xmllint-0.21.1, ament_flake8-0.21.1, launch_testing-3.10.0, ament_lint-0.21.1, launch_testing_ros-0.30.1, typeguard-4.4.4, colcon-core-0.21.1
+collecting ... collected 24 items
+
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_adapter_uses_one_runtime_torch_provider PASSED [  4%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_cpu_conversion_works_in_a_fresh_interpreter PASSED [  8%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype0-expected0] PASSED [ 12%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype1-expected1] PASSED [ 16%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype2-expected2] PASSED [ 20%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype3-expected3] PASSED [ 25%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype4-expected4] PASSED [ 29%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype5-expected5] PASSED [ 33%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype6-expected6] PASSED [ 37%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype7-expected7] PASSED [ 41%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype8-expected8] PASSED [ 45%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_allocate_cpu_metadata[dtype9-expected9] PASSED [ 50%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_cpu_write_read_round_trip PASSED [ 54%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_input_clone_is_independent_and_zero_copy_view_is_shared PASSED [ 58%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_copy_into_existing_message_updates_metadata PASSED [ 62%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_copy_allocates_new_message PASSED [ 66%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_byte_offset_selects_storage_subregion PASSED [ 70%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_empty_buffer_returns_none PASSED [ 75%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_oversized_tensor_is_rejected PASSED [ 79%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_invalid_shape_and_strides_are_rejected PASSED [ 83%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_unsupported_torch_dtype_is_rejected PASSED [ 87%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_unsupported_device_is_rejected PASSED [ 91%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_default_allocation_is_usable_by_this_torch_build PASSED [ 95%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py.py::test_cpu_only_configuration_defaults_to_cpu_and_rejects_cuda PASSED [100%]
+
+============================== 24 passed in 2.21s ==============================
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-52-11-235216-af08fba54257-365
+[INFO] [launch]: Default logging verbosity is set to INFO
+test_intra_process_pubsub (test_torch_tensor_intra_pubsub_fastrtps_launch.TestTorchTensorIntraPubSubFastRTPS.test_intra_process_pubsub) ... [INFO] [component_container-1]: process started with pid [398]
+[component_container-1] [INFO] [1789149131.613342987] [torch_tensor_intraprocess_container]: Load Library: /tmp/torch-conversions-installed-test-ws/install/torch_conversions_installed_tests/lib/libtorch_tensor_publisher_component.so
+[component_container-1] [INFO] [1789149131.798654655] [torch_tensor_intraprocess_container]: Found class: rclcpp_components::NodeFactoryTemplate<TorchTensorPublisher>
+[component_container-1] [INFO] [1789149131.798696485] [torch_tensor_intraprocess_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<TorchTensorPublisher>
+[component_container-1] [INFO] [1789149131.804155019] [torch_tensor_publisher]: Torch tensor publisher started (max=0, rate=200ms)
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/torch_tensor_publisher' in container '/torch_tensor_intraprocess_container'
+[component_container-1] [INFO] [1789149131.805452258] [torch_tensor_intraprocess_container]: Load Library: /tmp/torch-conversions-installed-test-ws/install/torch_conversions_installed_tests/lib/libtorch_tensor_subscriber_component.so
+[component_container-1] [INFO] [1789149131.806767677] [torch_tensor_intraprocess_container]: Found class: rclcpp_components::NodeFactoryTemplate<TorchTensorSubscriber>
+[component_container-1] [INFO] [1789149131.806780807] [torch_tensor_intraprocess_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<TorchTensorSubscriber>
+[component_container-1] [INFO] [1789149131.811222172] [torch_tensor_subscriber]: Torch tensor subscriber started
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/torch_tensor_subscriber' in container '/torch_tensor_intraprocess_container'
+[component_container-1] [INFO] [1789149132.006538049] [torch_tensor_subscriber]: Received tensor #1 (shape=[8,8,3], 192 bytes, backend=cpu)
+[component_container-1] [INFO] [1789149132.204310835] [torch_tensor_subscriber]: Received tensor #2 (shape=[8,8,3], 192 bytes, backend=cpu)
+[component_container-1] [INFO] [1789149132.404408778] [torch_tensor_subscriber]: Received tensor #3 (shape=[8,8,3], 192 bytes, backend=cpu)
+[component_container-1] [INFO] [1789149132.604301031] [torch_tensor_subscriber]: Received tensor #4 (shape=[8,8,3], 192 bytes, backend=cpu)
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.443s
+
+OK
+[component_container-1] [INFO] [1789149132.804309634] [torch_tensor_subscriber]: Received tensor #5 (shape=[8,8,3], 192 bytes, backend=cpu)
+[INFO] [component_container-1]: sending signal 'SIGINT' to process[component_container-1]
+[component_container-1] [INFO] [1789149132.814103004] [rclcpp]: signal_handler(signum=2)
+[INFO] [component_container-1]: process has finished cleanly [pid 398]
+test_exit_codes (test_torch_tensor_intra_pubsub_fastrtps_launch.TestTorchTensorIntraPubSubFastRTPSShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-52-13-433382-af08fba54257-417
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [torch_tensor_subscriber_node-1]: process started with pid [421]
+[torch_tensor_subscriber_node-1] [INFO] [1789149133.681370947] [torch_tensor_subscriber]: Torch tensor subscriber started
+test_inter_process_pubsub (test_torch_tensor_inter_pubsub_fastrtps_launch.TestTorchTensorInterPubSubFastRTPS.test_inter_process_pubsub) ... [INFO] [torch_tensor_publisher_node-2]: process started with pid [441]
+[torch_tensor_publisher_node-2] [INFO] [1789149135.688610180] [torch_tensor_publisher]: Torch tensor publisher started (max=0, rate=100ms)
+[torch_tensor_subscriber_node-1] [INFO] [1789149136.257862770] [torch_tensor_subscriber]: Received tensor #1 (shape=[1080,1920,3], 6220800 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149136.336164819] [torch_tensor_subscriber]: Received tensor #2 (shape=[1080,1920,3], 6220800 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149136.441366750] [torch_tensor_subscriber]: Received tensor #3 (shape=[1080,1920,3], 6220800 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149136.539474149] [torch_tensor_subscriber]: Received tensor #4 (shape=[1080,1920,3], 6220800 bytes, backend=cpu)
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.182s
+
+OK
+[torch_tensor_subscriber_node-1] [INFO] [1789149136.639151466] [torch_tensor_subscriber]: Received tensor #5 (shape=[1080,1920,3], 6220800 bytes, backend=cpu)
+[INFO] [torch_tensor_publisher_node-2]: sending signal 'SIGINT' to process[torch_tensor_publisher_node-2]
+[INFO] [torch_tensor_subscriber_node-1]: sending signal 'SIGINT' to process[torch_tensor_subscriber_node-1]
+[torch_tensor_publisher_node-2] [INFO] [1789149136.642903432] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_subscriber_node-1] [INFO] [1789149136.643148732] [rclcpp]: signal_handler(signum=2)
+[INFO] [torch_tensor_subscriber_node-1]: process has finished cleanly [pid 421]
+[INFO] [torch_tensor_publisher_node-2]: process has finished cleanly [pid 441]
+test_exit_codes (test_torch_tensor_inter_pubsub_fastrtps_launch.TestTorchTensorInterPubSubFastRTPSShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-52-17-259371-af08fba54257-486
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [torch_tensor_subscriber_node-1]: process started with pid [490]
+[torch_tensor_subscriber_node-1] [INFO] [1789149137.506186368] [torch_tensor_subscriber]: Torch tensor subscriber started
+test_multi_pub_single_sub (test_torch_tensor_multi_pub_fastrtps_launch.TestTorchTensorMultiPubFastRTPS.test_multi_pub_single_sub)
+Subscriber receives from both publishers. ... [INFO] [torch_tensor_publisher_node-2]: process started with pid [510]
+[INFO] [torch_tensor_publisher_node-3]: process started with pid [511]
+[torch_tensor_publisher_node-2] [INFO] [1789149139.522004852] [torch_tensor_publisher_1]: Torch tensor publisher started (max=0, rate=200ms)
+[torch_tensor_publisher_node-3] [INFO] [1789149139.523252931] [torch_tensor_publisher_2]: Torch tensor publisher started (max=0, rate=200ms)
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.123996799] [torch_tensor_subscriber]: Received tensor #1 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.124104979] [torch_tensor_subscriber]: Received tensor #2 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.322208484] [torch_tensor_subscriber]: Received tensor #3 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.323436852] [torch_tensor_subscriber]: Received tensor #4 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.522199477] [torch_tensor_subscriber]: Received tensor #5 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.523436006] [torch_tensor_subscriber]: Received tensor #6 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.722231200] [torch_tensor_subscriber]: Received tensor #7 (shape=[8,8,3], 192 bytes, backend=cpu)
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.439s
+
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.723449708] [torch_tensor_subscriber]: Received tensor #8 (shape=[8,8,3], 192 bytes, backend=cpu)
+OK
+[INFO] [torch_tensor_publisher_node-3]: sending signal 'SIGINT' to process[torch_tensor_publisher_node-3]
+[INFO] [torch_tensor_publisher_node-2]: sending signal 'SIGINT' to process[torch_tensor_publisher_node-2]
+[INFO] [torch_tensor_subscriber_node-1]: sending signal 'SIGINT' to process[torch_tensor_subscriber_node-1]
+[torch_tensor_publisher_node-3] [INFO] [1789149140.727252784] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_publisher_node-2] [INFO] [1789149140.727531144] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_subscriber_node-1] [INFO] [1789149140.727826984] [rclcpp]: signal_handler(signum=2)
+[INFO] [torch_tensor_publisher_node-2]: process has finished cleanly [pid 510]
+[INFO] [torch_tensor_publisher_node-3]: process has finished cleanly [pid 511]
+[INFO] [torch_tensor_subscriber_node-1]: process has finished cleanly [pid 490]
+test_exit_codes (test_torch_tensor_multi_pub_fastrtps_launch.TestTorchTensorMultiPubFastRTPSShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-52-21-346490-af08fba54257-559
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [torch_tensor_subscriber_node-1]: process started with pid [563]
+[INFO] [torch_tensor_subscriber_node-2]: process started with pid [564]
+[torch_tensor_subscriber_node-1] [INFO] [1789149141.595816706] [torch_tensor_subscriber_1]: Torch tensor subscriber started
+[torch_tensor_subscriber_node-2] [INFO] [1789149141.595826806] [torch_tensor_subscriber_2]: Torch tensor subscriber started
+test_multi_sub (test_torch_tensor_multi_sub_fastrtps_launch.TestTorchTensorMultiSubFastRTPS.test_multi_sub)
+Both subscribers receive messages from the single publisher. ... [INFO] [torch_tensor_publisher_node-3]: process started with pid [601]
+[torch_tensor_publisher_node-3] [INFO] [1789149143.608268553] [torch_tensor_publisher]: Torch tensor publisher started (max=0, rate=200ms)
+[torch_tensor_subscriber_node-1] [INFO] [1789149143.811520823] [torch_tensor_subscriber_1]: Received tensor #1 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-2] [INFO] [1789149143.811521333] [torch_tensor_subscriber_2]: Received tensor #1 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-2] [INFO] [1789149144.008509649] [torch_tensor_subscriber_2]: Received tensor #2 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149144.008510169] [torch_tensor_subscriber_1]: Received tensor #2 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149144.208757441] [torch_tensor_subscriber_1]: Received tensor #3 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-2] [INFO] [1789149144.208757501] [torch_tensor_subscriber_2]: Received tensor #3 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-1] [INFO] [1789149144.408468064] [torch_tensor_subscriber_1]: Received tensor #4 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-2] [INFO] [1789149144.408469904] [torch_tensor_subscriber_2]: Received tensor #4 (shape=[8,8,3], 192 bytes, backend=cpu)
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.238s
+
+OK
+[torch_tensor_subscriber_node-1] [INFO] [1789149144.609153766] [torch_tensor_subscriber_1]: Received tensor #5 (shape=[8,8,3], 192 bytes, backend=cpu)
+[torch_tensor_subscriber_node-2] [INFO] [1789149144.609152986] [torch_tensor_subscriber_2]: Received tensor #5 (shape=[8,8,3], 192 bytes, backend=cpu)
+[INFO] [torch_tensor_publisher_node-3]: sending signal 'SIGINT' to process[torch_tensor_publisher_node-3]
+[INFO] [torch_tensor_subscriber_node-2]: sending signal 'SIGINT' to process[torch_tensor_subscriber_node-2]
+[INFO] [torch_tensor_subscriber_node-1]: sending signal 'SIGINT' to process[torch_tensor_subscriber_node-1]
+[torch_tensor_publisher_node-3] [INFO] [1789149144.613692832] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_subscriber_node-2] [INFO] [1789149144.614049381] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_subscriber_node-1] [INFO] [1789149144.614382561] [rclcpp]: signal_handler(signum=2)
+[INFO] [torch_tensor_publisher_node-3]: process has finished cleanly [pid 601]
+[INFO] [torch_tensor_subscriber_node-2]: process has finished cleanly [pid 564]
+[INFO] [torch_tensor_subscriber_node-1]: process has finished cleanly [pid 563]
+test_exit_codes (test_torch_tensor_multi_sub_fastrtps_launch.TestTorchTensorMultiSubFastRTPSShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-52-26-057188-af08fba54257-632
+[INFO] [launch]: Default logging verbosity is set to INFO
+test_inter_process_pubsub (test_torch_tensor_inter_pubsub_fastrtps.TestTorchTensorInterProcess.test_inter_process_pubsub) ... skipped 'CUDA support is unavailable'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK (skipped=1)
+test_exit_codes (test_torch_tensor_inter_pubsub_fastrtps.TestTorchTensorInterProcessShutdown.test_exit_codes) ... skipped 'CUDA support is unavailable'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK (skipped=1)
+cpp-core-sha256-before=5511895cb19be2a707602fedd14031755d31866151716375139a334ecd09581f
+python-core-sha256-before=58adf1f01fcb4cb3cd18a04a1e31ce196cfae3b710d2594dc8d8f31524030bdf
+cpp-provider-sha256-before=06b1146c5337d50325544dfb270ebc1d9dd9dfff094ab2f0dae7c5499af94bda
+python-provider-sha256-before=8ec4e60e1ab9921e158b14d6ecb3bda1c1822d95ee3cc54c4e0eaa8c32114afd
+=== Stage 2: install independently built CUDA plugins ===
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Solving dependencies...
+The following additional packages will be installed:
+  cpp-13 cpp-13-x86-64-linux-gnu g++-13 g++-13-x86-64-linux-gnu gcc-13
+  gcc-13-base gcc-13-x86-64-linux-gnu libaccinj64-12.4 libcu++-dev libcub-dev
+  libcublas12 libcublaslt12 libcudart12 libcufft11 libcufftw11 libcuinj64-12.4
+  libcupti-dev libcupti12 libcurand10 libcusolver11 libcusolvermg11
+  libcusparse12 libgcc-13-dev libnppc12 libnppial12 libnppicc12 libnppidei12
+  libnppif12 libnppig12 libnppim12 libnppist12 libnppisu12 libnppitc12
+  libnpps12 libnvblas12 libnvfatbin12 libnvidia-compute-595 libnvidia-ml-dev
+  libnvjitlink12 libnvjpeg12 libnvrtc-builtins12.4 libnvrtc12 libnvtoolsext1
+  libnvvm4 libpciaccess0 libstdc++-13-dev libthrust-dev nvidia-cuda-dev
+  nvidia-cuda-toolkit nvidia-firmware-595-595.91.07 nvidia-kernel-common-595
+  nvidia-opencl-dev nvidia-profiler ocl-icd-libopencl1 ocl-icd-opencl-dev
+  opencl-c-headers opencl-clhpp-headers ros-rolling-cuda-buffer
+  ros-rolling-cuda-buffer-backend ros-rolling-cuda-buffer-backend-msgs
+  ros-rolling-cuda-buffer-py ros-rolling-libtorch-cuda-vendor
+  ros-rolling-python3-torch-cuda-vendor
+Suggested packages:
+  gcc-13-locales cpp-13-doc g++-13-multilib gcc-13-doc gcc-13-multilib
+  pciutils libstdc++-13-doc opencl-clhpp-headers-doc
+Recommended packages:
+  libcupti-doc libtbb-dev libgl-dev libvdpau-dev libnvcuvid1
+  nvidia-cuda-toolkit-doc nvidia-cuda-gdb nsight-compute nsight-systems
+The following NEW packages will be installed:
+  cpp-13 cpp-13-x86-64-linux-gnu g++-13 g++-13-x86-64-linux-gnu gcc-13
+  gcc-13-base gcc-13-x86-64-linux-gnu libaccinj64-12.4 libcu++-dev libcub-dev
+  libcublas12 libcublaslt12 libcudart12 libcufft11 libcufftw11 libcuinj64-12.4
+  libcupti-dev libcupti12 libcurand10 libcusolver11 libcusolvermg11
+  libcusparse12 libgcc-13-dev libnppc12 libnppial12 libnppicc12 libnppidei12
+  libnppif12 libnppig12 libnppim12 libnppist12 libnppisu12 libnppitc12
+  libnpps12 libnvblas12 libnvfatbin12 libnvidia-compute-595 libnvidia-ml-dev
+  libnvjitlink12 libnvjpeg12 libnvrtc-builtins12.4 libnvrtc12 libnvtoolsext1
+  libnvvm4 libpciaccess0 libstdc++-13-dev libthrust-dev nvidia-cuda-dev
+  nvidia-cuda-toolkit nvidia-firmware-595-595.91.07 nvidia-kernel-common-595
+  nvidia-opencl-dev nvidia-profiler ocl-icd-libopencl1 ocl-icd-opencl-dev
+  opencl-c-headers opencl-clhpp-headers ros-rolling-cuda-buffer
+  ros-rolling-cuda-buffer-backend ros-rolling-cuda-buffer-backend-msgs
+  ros-rolling-cuda-buffer-py ros-rolling-libtorch-cuda-vendor
+  ros-rolling-python3-torch-cuda-vendor ros-rolling-torch-conversions-cuda
+  ros-rolling-torch-conversions-py-cuda
+0 upgraded, 65 newly installed, 0 to remove and 0 not upgraded.
+Need to get 0 B/6423 MB of archives.
+After this operation, 16.5 GB of additional disk space will be used.
+Get:1 file:/var/local/ros-debs ./ gcc-13-base 13.4.0-10ubuntu1 [33.6 kB]
+Get:2 file:/var/local/ros-debs ./ cpp-13-x86-64-linux-gnu 13.4.0-10ubuntu1 [10.7 MB]
+Get:3 file:/var/local/ros-debs ./ cpp-13 13.4.0-10ubuntu1 [1032 B]
+Get:4 file:/var/local/ros-debs ./ libgcc-13-dev 13.4.0-10ubuntu1 [2669 kB]
+Get:5 file:/var/local/ros-debs ./ gcc-13-x86-64-linux-gnu 13.4.0-10ubuntu1 [21.1 MB]
+Get:6 file:/var/local/ros-debs ./ libstdc++-13-dev 13.4.0-10ubuntu1 [2750 kB]
+Get:7 file:/var/local/ros-debs ./ g++-13-x86-64-linux-gnu 13.4.0-10ubuntu1 [12.2 MB]
+Get:8 file:/var/local/ros-debs ./ gcc-13 13.4.0-10ubuntu1 [521 kB]
+Get:9 file:/var/local/ros-debs ./ g++-13 13.4.0-10ubuntu1 [20.4 kB]
+Get:10 file:/var/local/ros-debs ./ libcupti12 12.4.127~12.4.1-8 [9461 kB]
+Get:11 file:/var/local/ros-debs ./ libaccinj64-12.4 12.4.127~12.4.1-8 [965 kB]
+Get:12 file:/var/local/ros-debs ./ libcu++-dev 2.5.0-1 [525 kB]
+Get:13 file:/var/local/ros-debs ./ libcub-dev 2.5.0-1 [300 kB]
+Get:14 file:/var/local/ros-debs ./ libcublaslt12 12.4.5.8~12.4.1-8 [189 MB]
+Get:15 file:/var/local/ros-debs ./ libcublas12 12.4.5.8~12.4.1-8 [51.1 MB]
+Get:16 file:/var/local/ros-debs ./ libcudart12 12.4.127~12.4.1-8 [186 kB]
+Get:17 file:/var/local/ros-debs ./ libcufft11 11.2.1.3~12.4.1-8 [175 MB]
+Get:18 file:/var/local/ros-debs ./ libcufftw11 11.2.1.3~12.4.1-8 [283 kB]
+Get:19 file:/var/local/ros-debs ./ libpciaccess0 0.18.1-1ubuntu4.1 [19.0 kB]
+Get:20 file:/var/local/ros-debs ./ nvidia-firmware-595-595.91.07 595.91.07-0ubuntu0.26.04.1 [75.0 MB]
+Get:21 file:/var/local/ros-debs ./ nvidia-kernel-common-595 595.91.07-0ubuntu0.26.04.1 [822 kB]
+Get:22 file:/var/local/ros-debs ./ ocl-icd-libopencl1 2.3.4-1 [40.9 kB]
+Get:23 file:/var/local/ros-debs ./ libnvidia-compute-595 595.91.07-0ubuntu0.26.04.1 [85.8 MB]
+Get:24 file:/var/local/ros-debs ./ libcuinj64-12.4 12.4.127~12.4.1-8 [1123 kB]
+Get:25 file:/var/local/ros-debs ./ libcupti-dev 12.4.127~12.4.1-8 [9534 kB]
+Get:26 file:/var/local/ros-debs ./ libcurand10 11.1.1+~10.3.5.147~12.4.1-8 [41.7 MB]
+Get:27 file:/var/local/ros-debs ./ libnvjitlink12 12.4.127~12.4.1-8 [16.5 MB]
+Get:28 file:/var/local/ros-debs ./ libcusparse12 12.3.1.170~12.4.1-8 [118 MB]
+Get:29 file:/var/local/ros-debs ./ libcusolver11 11.6.1.9~12.4.1-8 [51.1 MB]
+Get:30 file:/var/local/ros-debs ./ libcusolvermg11 11.6.1.9~12.4.1-8 [30.5 MB]
+Get:31 file:/var/local/ros-debs ./ libnppc12 12.2.5.30~12.4.1-8 [433 kB]
+Get:32 file:/var/local/ros-debs ./ libnppial12 12.2.5.30~12.4.1-8 [6093 kB]
+Get:33 file:/var/local/ros-debs ./ libnppicc12 12.2.5.30~12.4.1-8 [2656 kB]
+Get:34 file:/var/local/ros-debs ./ libnppidei12 12.2.5.30~12.4.1-8 [2882 kB]
+Get:35 file:/var/local/ros-debs ./ libnppif12 12.2.5.30~12.4.1-8 [46.6 MB]
+Get:36 file:/var/local/ros-debs ./ libnppig12 12.2.5.30~12.4.1-8 [16.0 MB]
+Get:37 file:/var/local/ros-debs ./ libnppim12 12.2.5.30~12.4.1-8 [3382 kB]
+Get:38 file:/var/local/ros-debs ./ libnppist12 12.2.5.30~12.4.1-8 [15.5 MB]
+Get:39 file:/var/local/ros-debs ./ libnppisu12 12.2.5.30~12.4.1-8 [180 kB]
+Get:40 file:/var/local/ros-debs ./ libnppitc12 12.2.5.30~12.4.1-8 [1554 kB]
+Get:41 file:/var/local/ros-debs ./ libnpps12 12.2.5.30~12.4.1-8 [4839 kB]
+Get:42 file:/var/local/ros-debs ./ libnvblas12 12.4.5.8~12.4.1-8 [190 kB]
+Get:43 file:/var/local/ros-debs ./ libnvfatbin12 12.4.127~12.4.1-8 [785 kB]
+Get:44 file:/var/local/ros-debs ./ libnvidia-ml-dev 12.4.127~12.4.1-8 [86.8 kB]
+Get:45 file:/var/local/ros-debs ./ libnvjpeg12 12.3.1.117~12.4.1-8 [2486 kB]
+Get:46 file:/var/local/ros-debs ./ libnvrtc-builtins12.4 12.4.127~12.4.1-8 [285 kB]
+Get:47 file:/var/local/ros-debs ./ libnvrtc12 12.4.127~12.4.1-8 [18.5 MB]
+Get:48 file:/var/local/ros-debs ./ libnvtoolsext1 12.4.127~12.4.1-8 [29.1 kB]
+Get:49 file:/var/local/ros-debs ./ libnvvm4 12.4.131~12.4.1-8 [8998 kB]
+Get:50 file:/var/local/ros-debs ./ libthrust-dev 2.5.0-1 [391 kB]
+Get:51 file:/var/local/ros-debs ./ nvidia-cuda-dev 12.4.127~12.4.1-8 [967 MB]
+Get:52 file:/var/local/ros-debs ./ nvidia-profiler 12.4.127~12.4.1-8 [2230 kB]
+Get:53 file:/var/local/ros-debs ./ opencl-c-headers 3.0~2025.07.22-2build1 [49.4 kB]
+Get:54 file:/var/local/ros-debs ./ opencl-clhpp-headers 3.0~2025.07.22-1ubuntu2 [52.3 kB]
+Get:55 file:/var/local/ros-debs ./ ocl-icd-opencl-dev 2.3.4-1 [2806 B]
+Get:56 file:/var/local/ros-debs ./ nvidia-opencl-dev 12.4.127~12.4.1-8 [19.1 kB]
+Get:57 file:/var/local/ros-debs ./ nvidia-cuda-toolkit 12.4.131~12.4.1-8 [90.1 MB]
+Get:58 file:/var/local/ros-debs ./ ros-rolling-cuda-buffer-backend-msgs 0.1.2-0resolute [54.9 kB]
+Get:59 file:/var/local/ros-debs ./ ros-rolling-cuda-buffer 0.1.2-0resolute [58.3 kB]
+Get:60 file:/var/local/ros-debs ./ ros-rolling-cuda-buffer-backend 0.1.2-0resolute [35.9 kB]
+Get:61 file:/var/local/ros-debs ./ ros-rolling-cuda-buffer-py 0.1.2-0resolute [108 kB]
+Get:62 file:/var/local/ros-debs ./ ros-rolling-libtorch-cuda-vendor 0.1.2-0resolute [2070 MB]
+Get:63 file:/var/local/ros-debs ./ ros-rolling-python3-torch-cuda-vendor 0.1.2-0resolute [2255 MB]
+Get:64 file:/var/local/ros-debs ./ ros-rolling-torch-conversions-cuda 0.1.2-0resolute [34.7 kB]
+Get:65 file:/var/local/ros-debs ./ ros-rolling-torch-conversions-py-cuda 0.1.2-0resolute [7398 B]
+Selecting previously unselected package gcc-13-base:amd64.
+(Reading database ...
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 77104 files and directories currently installed.)
+Preparing to unpack .../00-gcc-13-base_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking gcc-13-base:amd64 (13.4.0-10ubuntu1) ...
+Selecting previously unselected package cpp-13-x86-64-linux-gnu.
+Preparing to unpack .../01-cpp-13-x86-64-linux-gnu_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking cpp-13-x86-64-linux-gnu (13.4.0-10ubuntu1) ...
+Selecting previously unselected package cpp-13.
+Preparing to unpack .../02-cpp-13_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking cpp-13 (13.4.0-10ubuntu1) ...
+Selecting previously unselected package libgcc-13-dev:amd64.
+Preparing to unpack .../03-libgcc-13-dev_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking libgcc-13-dev:amd64 (13.4.0-10ubuntu1) ...
+Selecting previously unselected package gcc-13-x86-64-linux-gnu.
+Preparing to unpack .../04-gcc-13-x86-64-linux-gnu_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking gcc-13-x86-64-linux-gnu (13.4.0-10ubuntu1) ...
+Selecting previously unselected package libstdc++-13-dev:amd64.
+Preparing to unpack .../05-libstdc++-13-dev_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking libstdc++-13-dev:amd64 (13.4.0-10ubuntu1) ...
+Selecting previously unselected package g++-13-x86-64-linux-gnu.
+Preparing to unpack .../06-g++-13-x86-64-linux-gnu_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking g++-13-x86-64-linux-gnu (13.4.0-10ubuntu1) ...
+Selecting previously unselected package gcc-13.
+Preparing to unpack .../07-gcc-13_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking gcc-13 (13.4.0-10ubuntu1) ...
+Selecting previously unselected package g++-13.
+Preparing to unpack .../08-g++-13_13.4.0-10ubuntu1_amd64.deb ...
+Unpacking g++-13 (13.4.0-10ubuntu1) ...
+Selecting previously unselected package libcupti12:amd64.
+Preparing to unpack .../09-libcupti12_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libcupti12:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libaccinj64-12.4:amd64.
+Preparing to unpack .../10-libaccinj64-12.4_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libaccinj64-12.4:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libcu++-dev.
+Preparing to unpack .../11-libcu++-dev_2.5.0-1_all.deb ...
+Unpacking libcu++-dev (2.5.0-1) ...
+Selecting previously unselected package libcub-dev.
+Preparing to unpack .../12-libcub-dev_2.5.0-1_all.deb ...
+Unpacking libcub-dev (2.5.0-1) ...
+Selecting previously unselected package libcublaslt12:amd64.
+Preparing to unpack .../13-libcublaslt12_12.4.5.8~12.4.1-8_amd64.deb ...
+Unpacking libcublaslt12:amd64 (12.4.5.8~12.4.1-8) ...
+Selecting previously unselected package libcublas12:amd64.
+Preparing to unpack .../14-libcublas12_12.4.5.8~12.4.1-8_amd64.deb ...
+Unpacking libcublas12:amd64 (12.4.5.8~12.4.1-8) ...
+Selecting previously unselected package libcudart12:amd64.
+Preparing to unpack .../15-libcudart12_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libcudart12:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libcufft11:amd64.
+Preparing to unpack .../16-libcufft11_11.2.1.3~12.4.1-8_amd64.deb ...
+Unpacking libcufft11:amd64 (11.2.1.3~12.4.1-8) ...
+Selecting previously unselected package libcufftw11:amd64.
+Preparing to unpack .../17-libcufftw11_11.2.1.3~12.4.1-8_amd64.deb ...
+Unpacking libcufftw11:amd64 (11.2.1.3~12.4.1-8) ...
+Selecting previously unselected package libpciaccess0:amd64.
+Preparing to unpack .../18-libpciaccess0_0.18.1-1ubuntu4.1_amd64.deb ...
+Unpacking libpciaccess0:amd64 (0.18.1-1ubuntu4.1) ...
+Selecting previously unselected package nvidia-firmware-595-595.91.07.
+Preparing to unpack .../19-nvidia-firmware-595-595.91.07_595.91.07-0ubuntu0.26.04.1_amd64.deb ...
+Unpacking nvidia-firmware-595-595.91.07 (595.91.07-0ubuntu0.26.04.1) ...
+Selecting previously unselected package nvidia-kernel-common-595.
+Preparing to unpack .../20-nvidia-kernel-common-595_595.91.07-0ubuntu0.26.04.1_amd64.deb ...
+Unpacking nvidia-kernel-common-595 (595.91.07-0ubuntu0.26.04.1) ...
+Selecting previously unselected package ocl-icd-libopencl1:amd64.
+Preparing to unpack .../21-ocl-icd-libopencl1_2.3.4-1_amd64.deb ...
+Unpacking ocl-icd-libopencl1:amd64 (2.3.4-1) ...
+Selecting previously unselected package libnvidia-compute-595:amd64.
+Preparing to unpack .../22-libnvidia-compute-595_595.91.07-0ubuntu0.26.04.1_amd64.deb ...
+Unpacking libnvidia-compute-595:amd64 (595.91.07-0ubuntu0.26.04.1) ...
+Selecting previously unselected package libcuinj64-12.4:amd64.
+Preparing to unpack .../23-libcuinj64-12.4_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libcuinj64-12.4:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libcupti-dev:amd64.
+Preparing to unpack .../24-libcupti-dev_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libcupti-dev:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libcurand10:amd64.
+Preparing to unpack .../25-libcurand10_11.1.1+~10.3.5.147~12.4.1-8_amd64.deb ...
+Unpacking libcurand10:amd64 (11.1.1+~10.3.5.147~12.4.1-8) ...
+Selecting previously unselected package libnvjitlink12:amd64.
+Preparing to unpack .../26-libnvjitlink12_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libnvjitlink12:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libcusparse12:amd64.
+Preparing to unpack .../27-libcusparse12_12.3.1.170~12.4.1-8_amd64.deb ...
+Unpacking libcusparse12:amd64 (12.3.1.170~12.4.1-8) ...
+Selecting previously unselected package libcusolver11:amd64.
+Preparing to unpack .../28-libcusolver11_11.6.1.9~12.4.1-8_amd64.deb ...
+Unpacking libcusolver11:amd64 (11.6.1.9~12.4.1-8) ...
+Selecting previously unselected package libcusolvermg11:amd64.
+Preparing to unpack .../29-libcusolvermg11_11.6.1.9~12.4.1-8_amd64.deb ...
+Unpacking libcusolvermg11:amd64 (11.6.1.9~12.4.1-8) ...
+Selecting previously unselected package libnppc12:amd64.
+Preparing to unpack .../30-libnppc12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppc12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppial12:amd64.
+Preparing to unpack .../31-libnppial12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppial12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppicc12:amd64.
+Preparing to unpack .../32-libnppicc12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppicc12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppidei12:amd64.
+Preparing to unpack .../33-libnppidei12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppidei12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppif12:amd64.
+Preparing to unpack .../34-libnppif12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppif12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppig12:amd64.
+Preparing to unpack .../35-libnppig12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppig12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppim12:amd64.
+Preparing to unpack .../36-libnppim12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppim12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppist12:amd64.
+Preparing to unpack .../37-libnppist12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppist12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppisu12:amd64.
+Preparing to unpack .../38-libnppisu12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppisu12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnppitc12:amd64.
+Preparing to unpack .../39-libnppitc12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnppitc12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnpps12:amd64.
+Preparing to unpack .../40-libnpps12_12.2.5.30~12.4.1-8_amd64.deb ...
+Unpacking libnpps12:amd64 (12.2.5.30~12.4.1-8) ...
+Selecting previously unselected package libnvblas12:amd64.
+Preparing to unpack .../41-libnvblas12_12.4.5.8~12.4.1-8_amd64.deb ...
+Unpacking libnvblas12:amd64 (12.4.5.8~12.4.1-8) ...
+Selecting previously unselected package libnvfatbin12:amd64.
+Preparing to unpack .../42-libnvfatbin12_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libnvfatbin12:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libnvidia-ml-dev:amd64.
+Preparing to unpack .../43-libnvidia-ml-dev_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libnvidia-ml-dev:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libnvjpeg12:amd64.
+Preparing to unpack .../44-libnvjpeg12_12.3.1.117~12.4.1-8_amd64.deb ...
+Unpacking libnvjpeg12:amd64 (12.3.1.117~12.4.1-8) ...
+Selecting previously unselected package libnvrtc-builtins12.4:amd64.
+Preparing to unpack .../45-libnvrtc-builtins12.4_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libnvrtc-builtins12.4:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libnvrtc12:amd64.
+Preparing to unpack .../46-libnvrtc12_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libnvrtc12:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libnvtoolsext1:amd64.
+Preparing to unpack .../47-libnvtoolsext1_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking libnvtoolsext1:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package libnvvm4:amd64.
+Preparing to unpack .../48-libnvvm4_12.4.131~12.4.1-8_amd64.deb ...
+Unpacking libnvvm4:amd64 (12.4.131~12.4.1-8) ...
+Selecting previously unselected package libthrust-dev.
+Preparing to unpack .../49-libthrust-dev_2.5.0-1_all.deb ...
+Unpacking libthrust-dev (2.5.0-1) ...
+Selecting previously unselected package nvidia-cuda-dev:amd64.
+Preparing to unpack .../50-nvidia-cuda-dev_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking nvidia-cuda-dev:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package nvidia-profiler.
+Preparing to unpack .../51-nvidia-profiler_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking nvidia-profiler (12.4.127~12.4.1-8) ...
+Selecting previously unselected package opencl-c-headers.
+Preparing to unpack .../52-opencl-c-headers_3.0~2025.07.22-2build1_all.deb ...
+Unpacking opencl-c-headers (3.0~2025.07.22-2build1) ...
+Selecting previously unselected package opencl-clhpp-headers.
+Preparing to unpack .../53-opencl-clhpp-headers_3.0~2025.07.22-1ubuntu2_all.deb ...
+Unpacking opencl-clhpp-headers (3.0~2025.07.22-1ubuntu2) ...
+Selecting previously unselected package ocl-icd-opencl-dev:amd64.
+Preparing to unpack .../54-ocl-icd-opencl-dev_2.3.4-1_amd64.deb ...
+Unpacking ocl-icd-opencl-dev:amd64 (2.3.4-1) ...
+Selecting previously unselected package nvidia-opencl-dev:amd64.
+Preparing to unpack .../55-nvidia-opencl-dev_12.4.127~12.4.1-8_amd64.deb ...
+Unpacking nvidia-opencl-dev:amd64 (12.4.127~12.4.1-8) ...
+Selecting previously unselected package nvidia-cuda-toolkit.
+Preparing to unpack .../56-nvidia-cuda-toolkit_12.4.131~12.4.1-8_amd64.deb ...
+Unpacking nvidia-cuda-toolkit (12.4.131~12.4.1-8) ...
+Selecting previously unselected package ros-rolling-cuda-buffer-backend-msgs.
+Preparing to unpack .../57-ros-rolling-cuda-buffer-backend-msgs_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-cuda-buffer-backend-msgs (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-cuda-buffer.
+Preparing to unpack .../58-ros-rolling-cuda-buffer_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-cuda-buffer (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-cuda-buffer-backend.
+Preparing to unpack .../59-ros-rolling-cuda-buffer-backend_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-cuda-buffer-backend (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-cuda-buffer-py.
+Preparing to unpack .../60-ros-rolling-cuda-buffer-py_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-cuda-buffer-py (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-libtorch-cuda-vendor.
+Preparing to unpack .../61-ros-rolling-libtorch-cuda-vendor_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-libtorch-cuda-vendor (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-python3-torch-cuda-vendor.
+Preparing to unpack .../62-ros-rolling-python3-torch-cuda-vendor_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-python3-torch-cuda-vendor (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-torch-conversions-cuda.
+Preparing to unpack .../63-ros-rolling-torch-conversions-cuda_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-torch-conversions-cuda (0.1.2-0resolute) ...
+Selecting previously unselected package ros-rolling-torch-conversions-py-cuda.
+Preparing to unpack .../64-ros-rolling-torch-conversions-py-cuda_0.1.2-0resolute_amd64.deb ...
+Unpacking ros-rolling-torch-conversions-py-cuda (0.1.2-0resolute) ...
+Setting up libnppc12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libnppial12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libcudart12:amd64 (12.4.127~12.4.1-8) ...
+Setting up libpciaccess0:amd64 (0.18.1-1ubuntu4.1) ...
+Setting up libnppig12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libnppidei12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libnppif12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libcupti12:amd64 (12.4.127~12.4.1-8) ...
+Setting up libcu++-dev (2.5.0-1) ...
+Setting up libcupti-dev:amd64 (12.4.127~12.4.1-8) ...
+Setting up libnppicc12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libaccinj64-12.4:amd64 (12.4.127~12.4.1-8) ...
+Setting up libnppisu12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libnpps12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up gcc-13-base:amd64 (13.4.0-10ubuntu1) ...
+Setting up libnvjitlink12:amd64 (12.4.127~12.4.1-8) ...
+Setting up libnppim12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libcufft11:amd64 (11.2.1.3~12.4.1-8) ...
+Setting up libnppitc12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up opencl-c-headers (3.0~2025.07.22-2build1) ...
+Setting up libnvjpeg12:amd64 (12.3.1.117~12.4.1-8) ...
+Setting up libcublaslt12:amd64 (12.4.5.8~12.4.1-8) ...
+Setting up libgcc-13-dev:amd64 (13.4.0-10ubuntu1) ...
+Setting up ocl-icd-libopencl1:amd64 (2.3.4-1) ...
+Setting up nvidia-firmware-595-595.91.07 (595.91.07-0ubuntu0.26.04.1) ...
+Setting up libnvvm4:amd64 (12.4.131~12.4.1-8) ...
+Setting up libnvtoolsext1:amd64 (12.4.127~12.4.1-8) ...
+Setting up libcub-dev (2.5.0-1) ...
+Setting up libnvfatbin12:amd64 (12.4.127~12.4.1-8) ...
+Setting up ros-rolling-cuda-buffer-backend-msgs (0.1.2-0resolute) ...
+Setting up libnppist12:amd64 (12.2.5.30~12.4.1-8) ...
+Setting up libnvrtc-builtins12.4:amd64 (12.4.127~12.4.1-8) ...
+Setting up libcurand10:amd64 (11.1.1+~10.3.5.147~12.4.1-8) ...
+Setting up libstdc++-13-dev:amd64 (13.4.0-10ubuntu1) ...
+Setting up libcusparse12:amd64 (12.3.1.170~12.4.1-8) ...
+Setting up libthrust-dev (2.5.0-1) ...
+Setting up libcufftw11:amd64 (11.2.1.3~12.4.1-8) ...
+Setting up cpp-13-x86-64-linux-gnu (13.4.0-10ubuntu1) ...
+Setting up gcc-13-x86-64-linux-gnu (13.4.0-10ubuntu1) ...
+Setting up libcublas12:amd64 (12.4.5.8~12.4.1-8) ...
+Setting up nvidia-kernel-common-595 (595.91.07-0ubuntu0.26.04.1) ...
+Setting up libcusolver11:amd64 (11.6.1.9~12.4.1-8) ...
+Setting up opencl-clhpp-headers (3.0~2025.07.22-1ubuntu2) ...
+Setting up libcusolvermg11:amd64 (11.6.1.9~12.4.1-8) ...
+Setting up ocl-icd-opencl-dev:amd64 (2.3.4-1) ...
+Setting up libnvblas12:amd64 (12.4.5.8~12.4.1-8) ...
+Setting up libnvrtc12:amd64 (12.4.127~12.4.1-8) ...
+Setting up g++-13-x86-64-linux-gnu (13.4.0-10ubuntu1) ...
+Setting up cpp-13 (13.4.0-10ubuntu1) ...
+Setting up libnvidia-compute-595:amd64 (595.91.07-0ubuntu0.26.04.1) ...
+Setting up gcc-13 (13.4.0-10ubuntu1) ...
+Setting up nvidia-opencl-dev:amd64 (12.4.127~12.4.1-8) ...
+Setting up libcuinj64-12.4:amd64 (12.4.127~12.4.1-8) ...
+Setting up g++-13 (13.4.0-10ubuntu1) ...
+Setting up libnvidia-ml-dev:amd64 (12.4.127~12.4.1-8) ...
+Setting up nvidia-cuda-dev:amd64 (12.4.127~12.4.1-8) ...
+Setting up nvidia-profiler (12.4.127~12.4.1-8) ...
+Setting up nvidia-cuda-toolkit (12.4.131~12.4.1-8) ...
+Setting up ros-rolling-python3-torch-cuda-vendor (0.1.2-0resolute) ...
+Setting up ros-rolling-libtorch-cuda-vendor (0.1.2-0resolute) ...
+Setting up ros-rolling-cuda-buffer (0.1.2-0resolute) ...
+Setting up ros-rolling-cuda-buffer-backend (0.1.2-0resolute) ...
+Setting up ros-rolling-cuda-buffer-py (0.1.2-0resolute) ...
+Setting up ros-rolling-torch-conversions-cuda (0.1.2-0resolute) ...
+Setting up ros-rolling-torch-conversions-py-cuda (0.1.2-0resolute) ...
+Processing triggers for libc-bin (2.43-2ubuntu2.4) ...
+cpp-core-sha256-after=5511895cb19be2a707602fedd14031755d31866151716375139a334ecd09581f
+python-core-sha256-after=58adf1f01fcb4cb3cd18a04a1e31ce196cfae3b710d2594dc8d8f31524030bdf
+cpp-provider-sha256-after=06b1146c5337d50325544dfb270ebc1d9dd9dfff094ab2f0dae7c5499af94bda
+python-provider-sha256-after=8ec4e60e1ab9921e158b14d6ecb3bda1c1822d95ee3cc54c4e0eaa8c32114afd
+core-files-unchanged=pass
+provider-files-unchanged=pass
+NVIDIA GeForce RTX 4080, 610.57.04
+2.9.1+cu126 /opt/ros/rolling/opt/python3_torch_cuda_vendor/lib/python3.14/site-packages/torch/_C.cpython-314-x86_64-linux-gnu.so
+	libtorch_cpu.so => /opt/ros/rolling/opt/libtorch_cuda_vendor/lib/libtorch_cpu.so (0x0000748338cc6000)
+	libc10.so => /opt/ros/rolling/opt/libtorch_cuda_vendor/lib/libc10.so (0x0000748338ba2000)
+	libgomp-98b21ff3.so.1 => /opt/ros/rolling/opt/libtorch_cuda_vendor/lib/libgomp-98b21ff3.so.1 (0x00007483384bb000)
+Starting >>> torch_conversions_installed_tests
+--- stderr: torch_conversions_installed_tests
+CMake Warning at /opt/ros/rolling/opt/libtorch_cuda_vendor/share/cmake/Caffe2/public/cuda.cmake:140 (message):
+  Failed to compute shorthash for libnvrtc.so
+Call Stack (most recent call first):
+  /opt/ros/rolling/opt/libtorch_cuda_vendor/share/cmake/Caffe2/Caffe2Config.cmake:86 (include)
+  /opt/ros/rolling/opt/libtorch_cuda_vendor/share/cmake/Torch/TorchConfig.cmake:68 (find_package)
+  CMakeLists.txt:21 (find_package)
+
+
+CMake Warning at /opt/ros/rolling/opt/libtorch_cuda_vendor/share/cmake/Caffe2/public/cuda.cmake:323 (message):
+  pytorch is not compatible with `CMAKE_CUDA_ARCHITECTURES` and will ignore
+  its value.  Please configure `TORCH_CUDA_ARCH_LIST` instead.
+Call Stack (most recent call first):
+  /opt/ros/rolling/opt/libtorch_cuda_vendor/share/cmake/Caffe2/Caffe2Config.cmake:86 (include)
+  /opt/ros/rolling/opt/libtorch_cuda_vendor/share/cmake/Torch/TorchConfig.cmake:68 (find_package)
+  CMakeLists.txt:21 (find_package)
+
+
+---
+Finished <<< torch_conversions_installed_tests [31.3s]
+
+Summary: 1 package finished [31.4s]
+  1 package had stderr output: torch_conversions_installed_tests
+=== Stage 3: CUDA default plus CPU/CUDA runtime selection ===
+plugins=cpu,cuda
+default=cuda
+cpu=pass
+cuda=pass
+runtime-switch=pass
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from TorchConversionsCuda
+[ RUN      ] TorchConversionsCuda.AllocatesCudaStorage
+[       OK ] TorchConversionsCuda.AllocatesCudaStorage (166 ms)
+[ RUN      ] TorchConversionsCuda.RoundTripsOnACallerSuppliedStream
+[       OK ] TorchConversionsCuda.RoundTripsOnACallerSuppliedStream (17 ms)
+[ RUN      ] TorchConversionsCuda.CopiesIntoStorageOnACallerSuppliedStream
+[       OK ] TorchConversionsCuda.CopiesIntoStorageOnACallerSuppliedStream (0 ms)
+[ RUN      ] TorchConversionsCuda.HonoursANonDefaultStream
+[       OK ] TorchConversionsCuda.HonoursANonDefaultStream (1 ms)
+[----------] 4 tests from TorchConversionsCuda (186 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (186 ms total)
+[  PASSED  ] 4 tests.
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+rootdir: /source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test
+plugins: ament_copyright-0.21.1, ament_mypy-0.21.1, ament_pep257-0.21.1, ament_xmllint-0.21.1, ament_flake8-0.21.1, launch_testing-3.10.0, ament_lint-0.21.1, launch_testing_ros-0.30.1, typeguard-4.4.4, colcon-core-0.21.1
+collecting ... collected 7 items
+
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py_cuda.py::test_cuda_write_read_round_trip PASSED [ 14%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py_cuda.py::test_cuda_tensor_to_message_round_trip PASSED [ 28%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py_cuda.py::test_cuda_zero_copy_view_aliases_message_storage PASSED [ 42%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py_cuda.py::test_cuda_byte_offset_selects_storage_subregion PASSED [ 57%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py_cuda.py::test_cuda_is_the_default_backend_when_installed PASSED [ 71%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py_cuda.py::test_set_stream_selects_non_default_cuda_stream PASSED [ 85%]
+source/rosidl_buffer_backends/torch_conversions/torch_conversions_py/test/test_torch_conversions_py_cuda.py::test_conversions_use_the_active_torch_stream PASSED [100%]
+
+============================== 7 passed in 1.22s ===============================
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-54-12-213646-af08fba54257-1806
+[INFO] [launch]: Default logging verbosity is set to INFO
+test_intra_process_pubsub (test_torch_tensor_intra_pubsub_fastrtps_launch.TestTorchTensorIntraPubSubFastRTPS.test_intra_process_pubsub) ... [INFO] [component_container-1]: process started with pid [1839]
+[component_container-1] [INFO] [1789149252.520098461] [torch_tensor_intraprocess_container]: Load Library: /tmp/torch-conversions-installed-test-ws/install-cuda/torch_conversions_installed_tests/lib/libtorch_tensor_publisher_component.so
+[component_container-1] [INFO] [1789149252.804052377] [torch_tensor_intraprocess_container]: Found class: rclcpp_components::NodeFactoryTemplate<TorchTensorPublisher>
+[component_container-1] [INFO] [1789149252.804095087] [torch_tensor_intraprocess_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<TorchTensorPublisher>
+[component_container-1] [INFO] [1789149252.858596421] [host_endpoint_manager]: Initialized shared memory registry for domain 0 on host af08fba54257
+[component_container-1] [INFO] [1789149252.956526219] [torch_tensor_publisher]: Torch tensor publisher started (max=0, rate=200ms)
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/torch_tensor_publisher' in container '/torch_tensor_intraprocess_container'
+[component_container-1] [INFO] [1789149252.958011888] [torch_tensor_intraprocess_container]: Load Library: /tmp/torch-conversions-installed-test-ws/install-cuda/torch_conversions_installed_tests/lib/libtorch_tensor_subscriber_component.so
+[component_container-1] [INFO] [1789149252.959487406] [torch_tensor_intraprocess_container]: Found class: rclcpp_components::NodeFactoryTemplate<TorchTensorSubscriber>
+[component_container-1] [INFO] [1789149252.959501236] [torch_tensor_intraprocess_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<TorchTensorSubscriber>
+[component_container-1] [INFO] [1789149252.963842192] [torch_tensor_subscriber]: Torch tensor subscriber started
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/torch_tensor_subscriber' in container '/torch_tensor_intraprocess_container'
+[component_container-1] [INFO] [1789149253.171056827] [torch_tensor_subscriber]: Received tensor #1 (shape=[8,8,3], 192 bytes, backend=cuda)
+[component_container-1] [INFO] [1789149253.356829255] [torch_tensor_subscriber]: Received tensor #2 (shape=[8,8,3], 192 bytes, backend=cuda)
+[component_container-1] [INFO] [1789149253.556786898] [torch_tensor_subscriber]: Received tensor #3 (shape=[8,8,3], 192 bytes, backend=cuda)
+[component_container-1] [INFO] [1789149253.756792241] [torch_tensor_subscriber]: Received tensor #4 (shape=[8,8,3], 192 bytes, backend=cuda)
+[component_container-1] [INFO] [1789149253.956780904] [torch_tensor_subscriber]: Received tensor #5 (shape=[8,8,3], 192 bytes, backend=cuda)
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.689s
+
+OK
+[INFO] [component_container-1]: sending signal 'SIGINT' to process[component_container-1]
+[component_container-1] [INFO] [1789149253.967279903] [rclcpp]: signal_handler(signum=2)
+[INFO] [component_container-1]: process has finished cleanly [pid 1839]
+test_exit_codes (test_torch_tensor_intra_pubsub_fastrtps_launch.TestTorchTensorIntraPubSubFastRTPSShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-54-14-694197-af08fba54257-1864
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [torch_tensor_subscriber_node-1]: process started with pid [1868]
+[torch_tensor_subscriber_node-1] [INFO] [1789149255.090579061] [host_endpoint_manager]: Initialized shared memory registry for domain 0 on host af08fba54257
+[torch_tensor_subscriber_node-1] [INFO] [1789149255.192548905] [torch_tensor_subscriber]: Torch tensor subscriber started
+[INFO] [torch_tensor_publisher_node-2]: process started with pid [1891]
+test_inter_process_pubsub (test_torch_tensor_inter_pubsub_fastrtps_launch.TestTorchTensorInterPubSubFastRTPS.test_inter_process_pubsub) ... [torch_tensor_publisher_node-2] [INFO] [1789149257.388337733] [host_endpoint_manager]: Attached to existing shared memory registry for domain 0
+[torch_tensor_publisher_node-2] [INFO] [1789149257.487854070] [torch_tensor_publisher]: Torch tensor publisher started (max=0, rate=100ms)
+[torch_tensor_subscriber_node-1] [INFO] [1789149257.658282073] [torch_tensor_subscriber]: Received tensor #1 (shape=[1080,1920,3], 6220800 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149257.736472082] [torch_tensor_subscriber]: Received tensor #2 (shape=[1080,1920,3], 6220800 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149257.833244012] [torch_tensor_subscriber]: Received tensor #3 (shape=[1080,1920,3], 6220800 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149257.931040411] [torch_tensor_subscriber]: Received tensor #4 (shape=[1080,1920,3], 6220800 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149258.030316918] [torch_tensor_subscriber]: Received tensor #5 (shape=[1080,1920,3], 6220800 bytes, backend=cuda)
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.316s
+
+OK
+[INFO] [torch_tensor_publisher_node-2]: sending signal 'SIGINT' to process[torch_tensor_publisher_node-2]
+[INFO] [torch_tensor_subscriber_node-1]: sending signal 'SIGINT' to process[torch_tensor_subscriber_node-1]
+[torch_tensor_publisher_node-2] [INFO] [1789149258.034249174] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_subscriber_node-1] [INFO] [1789149258.034533473] [rclcpp]: signal_handler(signum=2)
+[INFO] [torch_tensor_subscriber_node-1]: process has finished cleanly [pid 1868]
+[INFO] [torch_tensor_publisher_node-2]: process has finished cleanly [pid 1891]
+test_exit_codes (test_torch_tensor_inter_pubsub_fastrtps_launch.TestTorchTensorInterPubSubFastRTPSShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-54-18-849983-af08fba54257-1931
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [torch_tensor_subscriber_node-1]: process started with pid [1935]
+[torch_tensor_subscriber_node-1] [INFO] [1789149259.244715891] [host_endpoint_manager]: Initialized shared memory registry for domain 0 on host af08fba54257
+[torch_tensor_subscriber_node-1] [INFO] [1789149259.341072861] [torch_tensor_subscriber]: Torch tensor subscriber started
+test_multi_pub_single_sub (test_torch_tensor_multi_pub_fastrtps_launch.TestTorchTensorMultiPubFastRTPS.test_multi_pub_single_sub)
+Subscriber receives from both publishers. ... [INFO] [torch_tensor_publisher_node-2]: process started with pid [1958]
+[INFO] [torch_tensor_publisher_node-3]: process started with pid [1961]
+[torch_tensor_publisher_node-2] [INFO] [1789149261.560581845] [host_endpoint_manager]: Attached to existing shared memory registry for domain 0
+[torch_tensor_publisher_node-3] [INFO] [1789149261.564675080] [host_endpoint_manager]: Attached to existing shared memory registry for domain 0
+[torch_tensor_publisher_node-2] [INFO] [1789149261.718893921] [torch_tensor_publisher_1]: Torch tensor publisher started (max=0, rate=200ms)
+[torch_tensor_publisher_node-3] [INFO] [1789149261.721277898] [torch_tensor_publisher_2]: Torch tensor publisher started (max=0, rate=200ms)
+[torch_tensor_subscriber_node-1] [INFO] [1789149261.940501281] [torch_tensor_subscriber]: Received tensor #1 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149261.941036591] [torch_tensor_subscriber]: Received tensor #2 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149262.119351076] [torch_tensor_subscriber]: Received tensor #3 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149262.121833884] [torch_tensor_subscriber]: Received tensor #4 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149262.319244549] [torch_tensor_subscriber]: Received tensor #5 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149262.321618267] [torch_tensor_subscriber]: Received tensor #6 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149262.519212622] [torch_tensor_subscriber]: Received tensor #7 (shape=[8,8,3], 192 bytes, backend=cuda)
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.651s
+
+OK
+[torch_tensor_subscriber_node-1] [INFO] [1789149262.521612240] [torch_tensor_subscriber]: Received tensor #8 (shape=[8,8,3], 192 bytes, backend=cuda)
+[INFO] [torch_tensor_publisher_node-3]: sending signal 'SIGINT' to process[torch_tensor_publisher_node-3]
+[INFO] [torch_tensor_publisher_node-2]: sending signal 'SIGINT' to process[torch_tensor_publisher_node-2]
+[INFO] [torch_tensor_subscriber_node-1]: sending signal 'SIGINT' to process[torch_tensor_subscriber_node-1]
+[torch_tensor_publisher_node-3] [INFO] [1789149262.526140345] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_publisher_node-2] [INFO] [1789149262.526417475] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_subscriber_node-1] [INFO] [1789149262.526708575] [rclcpp]: signal_handler(signum=2)
+[INFO] [torch_tensor_subscriber_node-1]: process has finished cleanly [pid 1935]
+[INFO] [torch_tensor_publisher_node-2]: process has finished cleanly [pid 1958]
+[INFO] [torch_tensor_publisher_node-3]: process has finished cleanly [pid 1961]
+test_exit_codes (test_torch_tensor_multi_pub_fastrtps_launch.TestTorchTensorMultiPubFastRTPSShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-54-23-404324-af08fba54257-2022
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [torch_tensor_subscriber_node-1]: process started with pid [2026]
+[INFO] [torch_tensor_subscriber_node-2]: process started with pid [2027]
+[torch_tensor_subscriber_node-1] [INFO] [1789149263.809362417] [host_endpoint_manager]: Initialized shared memory registry for domain 0 on host af08fba54257
+[torch_tensor_subscriber_node-2] [INFO] [1789149263.818391668] [host_endpoint_manager]: Attached to existing shared memory registry for domain 0
+[torch_tensor_subscriber_node-1] [INFO] [1789149263.955843496] [torch_tensor_subscriber_1]: Torch tensor subscriber started
+[torch_tensor_subscriber_node-2] [INFO] [1789149263.958565763] [torch_tensor_subscriber_2]: Torch tensor subscriber started
+test_multi_sub (test_torch_tensor_multi_sub_fastrtps_launch.TestTorchTensorMultiSubFastRTPS.test_multi_sub)
+Both subscribers receive messages from the single publisher. ... [INFO] [torch_tensor_publisher_node-3]: process started with pid [2074]
+[torch_tensor_publisher_node-3] [INFO] [1789149266.102009334] [host_endpoint_manager]: Attached to existing shared memory registry for domain 0
+[torch_tensor_publisher_node-3] [INFO] [1789149266.198729484] [torch_tensor_publisher]: Torch tensor publisher started (max=0, rate=200ms)
+[torch_tensor_subscriber_node-2] [INFO] [1789149266.418563106] [torch_tensor_subscriber_2]: Received tensor #1 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149266.418563136] [torch_tensor_subscriber_1]: Received tensor #1 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149266.599146099] [torch_tensor_subscriber_1]: Received tensor #2 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-2] [INFO] [1789149266.599208108] [torch_tensor_subscriber_2]: Received tensor #2 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149266.799074642] [torch_tensor_subscriber_1]: Received tensor #3 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-2] [INFO] [1789149266.799138291] [torch_tensor_subscriber_2]: Received tensor #3 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-1] [INFO] [1789149266.999119195] [torch_tensor_subscriber_1]: Received tensor #4 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-2] [INFO] [1789149266.999169855] [torch_tensor_subscriber_2]: Received tensor #4 (shape=[8,8,3], 192 bytes, backend=cuda)
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.776s
+
+OK
+[torch_tensor_subscriber_node-1] [INFO] [1789149267.199045978] [torch_tensor_subscriber_1]: Received tensor #5 (shape=[8,8,3], 192 bytes, backend=cuda)
+[torch_tensor_subscriber_node-2] [INFO] [1789149267.199109188] [torch_tensor_subscriber_2]: Received tensor #5 (shape=[8,8,3], 192 bytes, backend=cuda)
+[INFO] [torch_tensor_publisher_node-3]: sending signal 'SIGINT' to process[torch_tensor_publisher_node-3]
+[INFO] [torch_tensor_subscriber_node-2]: sending signal 'SIGINT' to process[torch_tensor_subscriber_node-2]
+[INFO] [torch_tensor_subscriber_node-1]: sending signal 'SIGINT' to process[torch_tensor_subscriber_node-1]
+[torch_tensor_publisher_node-3] [INFO] [1789149267.203694263] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_subscriber_node-2] [INFO] [1789149267.203928193] [rclcpp]: signal_handler(signum=2)
+[torch_tensor_subscriber_node-1] [INFO] [1789149267.204216303] [rclcpp]: signal_handler(signum=2)
+[INFO] [torch_tensor_subscriber_node-2]: process has finished cleanly [pid 2027]
+[INFO] [torch_tensor_subscriber_node-1]: process has finished cleanly [pid 2026]
+[INFO] [torch_tensor_publisher_node-3]: process has finished cleanly [pid 2074]
+test_exit_codes (test_torch_tensor_multi_sub_fastrtps_launch.TestTorchTensorMultiSubFastRTPSShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-11-17-54-29-063063-af08fba54257-2113
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [torch_tensor_publisher_node_py-1]: process started with pid [2118]
+test_inter_process_pubsub (test_torch_tensor_inter_pubsub_fastrtps.TestTorchTensorInterProcess.test_inter_process_pubsub) ... [INFO] [1789149271.115470374] [host_endpoint_manager]: Initialized shared memory registry for domain 0 on host af08fba54257
+[torch_tensor_publisher_node_py-1] [INFO] [1789149272.215278146] [host_endpoint_manager]: Attached to existing shared memory registry for domain 0
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.728s
+
+OK
+[INFO] [torch_tensor_publisher_node_py-1]: sending signal 'SIGINT' to process[torch_tensor_publisher_node_py-1]
+[INFO] [torch_tensor_publisher_node_py-1]: process has finished cleanly [pid 2118]
+test_exit_codes (test_torch_tensor_inter_pubsub_fastrtps.TestTorchTensorInterProcessShutdown.test_exit_codes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+python-runtime-switch=pass
+=== Installed package versions ===
+ros-rolling-libtorch-cuda-vendor	0.1.2-0resolute
+ros-rolling-libtorch-vendor	0.1.2-0resolute
+ros-rolling-python3-torch-cuda-vendor	0.1.2-0resolute
+ros-rolling-python3-torch-vendor	0.1.2-0resolute
+ros-rolling-torch-conversions	0.1.2-0resolute
+ros-rolling-torch-conversions-cpu	0.1.2-0resolute
+ros-rolling-torch-conversions-cuda	0.1.2-0resolute
+ros-rolling-torch-conversions-py	0.1.2-0resolute
+ros-rolling-torch-conversions-py-cpu	0.1.2-0resolute
+ros-rolling-torch-conversions-py-cuda	0.1.2-0resolute
+staged-debian-installed-source-tests=pass

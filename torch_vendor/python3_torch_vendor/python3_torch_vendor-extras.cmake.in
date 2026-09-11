@@ -1,0 +1,6 @@
+# Copyright 2026 NVIDIA Corporation
+# Licensed under the Apache License, Version 2.0
+
+set(PYTHON3_TORCH_VENDOR_TORCH_VERSION
+  "@PYTHON3_TORCH_VENDOR_TORCH_VERSION@")
+set(PYTHON3_TORCH_VENDOR_VARIANT "cpu")

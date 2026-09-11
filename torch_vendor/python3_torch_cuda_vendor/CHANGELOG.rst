@@ -2,6 +2,7 @@
 Changelog for package python3_torch_cuda_vendor
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
-* Add a vendor package for CUDA Python Torch.
+0.1.2 (2026-06-05)
+------------------
+* Provide CUDA Python Torch independently from the CPU provider.
+* Contributors: yuanknv

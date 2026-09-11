@@ -1,0 +1,8 @@
+<library path="torch_conversions_cpu">
+  <class
+    name="cpu"
+    type="torch_conversions_cpu::CpuConversionPlugin"
+    base_class_type="torch_conversions::ConversionPlugin">
+    <description>Direct at::Tensor conversion for CPU-backed messages.</description>
+  </class>
+</library>

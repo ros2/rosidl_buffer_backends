@@ -3,8 +3,14 @@ project(torch_conversions_py)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+find_package(pybind11 REQUIRED)
+
+pybind11_add_module(_torch_bridge src/torch_bridge.cpp)
 
 ament_python_install_package(torch_conversions)
+install(TARGETS _torch_bridge
+  DESTINATION "${PYTHON_INSTALL_DIR}/torch_conversions")
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
@@ -13,23 +19,15 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   ament_add_pytest_test(test_torch_conversions_py
-    test/test_torch_conversions_py.py
-    TIMEOUT 90
-  )
+    test/test_torch_conversions_py.py TIMEOUT 90)
   ament_add_pytest_test(test_torch_conversions_py_cuda
-    test/test_torch_conversions_py_cuda.py
-    TIMEOUT 90
-  )
+    test/test_torch_conversions_py_cuda.py TIMEOUT 90)
 
   install(PROGRAMS test/torch_tensor_publisher_node.py
     DESTINATION "lib/${PROJECT_NAME}"
-    RENAME torch_tensor_publisher_node
-  )
-
+    RENAME torch_tensor_publisher_node)
   add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps.py
-    TARGET test_torch_tensor_inter_pubsub_fastrtps
-    TIMEOUT 40
-  )
+    TARGET test_torch_tensor_inter_pubsub_fastrtps TIMEOUT 40)
 endif()
 
 ament_package()

@@ -47,17 +47,22 @@ endforeach()
 
 foreach(rejected_argument IN ITEMS
     "-DTEST_VARIANT=cu132"
-    "-DTEST_CUDA_VERSION=12.5")
+    "-DTEST_CUDA_VERSION=11.8"
+    "-DTEST_CUDA_VERSION=14.0")
   execute_process(
     COMMAND "${CMAKE_COMMAND}" "${rejected_argument}" -P
       "${CMAKE_CURRENT_LIST_FILE}"
-    RESULT_VARIABLE result)
+    RESULT_VARIABLE result
+    OUTPUT_QUIET
+    ERROR_QUIET)
   if(result EQUAL 0)
     message(FATAL_ERROR "${rejected_argument} should have been rejected")
   endif()
 endforeach()
 
 foreach(test_case IN ITEMS
+    "12.0,cu126"
+    "12.5,cu126"
     "12.6,cu126"
     "12.8,cu128"
     "12.9,cu128"

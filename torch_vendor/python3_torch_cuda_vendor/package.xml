@@ -14,11 +14,10 @@
 
   <build_depend>python3-pip</build_depend>
 
-  <depend version_gte="12" version_lt="14">cuda-toolkit</depend>
+  <depend version_gte="12" version_lt="14">nvidia-cuda</depend>
+  <depend>python3_torch_vendor</depend>
 
   <exec_depend>python3</exec_depend>
-
-  <conflict>python3-torch</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>
   <test_depend>ament_lint_auto</test_depend>

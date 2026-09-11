@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>torch_conversions_installed_tests</name>
+  <version>0.1.2</version>
+  <description>Source-only post-installation tests for Torch conversion Debians.</description>
+  <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>ament_cmake_gtest</build_depend>
+  <depend>launch_testing_ament_cmake</depend>
+  <depend>libtorch_vendor</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
+  <depend>rosidl_runtime_cpp</depend>
+  <depend>std_msgs</depend>
+  <depend>tensor_msgs</depend>
+  <depend>torch_conversions</depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>launch_testing</exec_depend>
+  <exec_depend>python3-pytest</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rmw_fastrtps_cpp</exec_depend>
+  <exec_depend>torch_conversions_cpu</exec_depend>
+  <exec_depend>torch_conversions_py</exec_depend>
+  <exec_depend>torch_conversions_py_cpu</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

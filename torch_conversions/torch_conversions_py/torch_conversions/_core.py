@@ -13,19 +13,21 @@
 # limitations under the License.
 
 from contextlib import nullcontext
+from math import prod
 from typing import Optional
 from typing import Sequence
 from typing import Union
 
-import dlpack_conversions
-
 from tensor_msgs.msg import ExperimentalTensor
 
 import torch
-import torch.utils.dlpack
+
+from torch_conversions._plugin import ConversionRegistry
+from torch_conversions._plugin import load_external_plugins
+from torch_conversions._plugin import TensorMetadata
 
 
-_DTYPE_TO_DLPACK = {
+_DTYPE_TO_MESSAGE = {
     torch.uint8: (1, 8, 1),
     torch.int8: (0, 8, 1),
     torch.int16: (0, 16, 1),
@@ -37,82 +39,73 @@ _DTYPE_TO_DLPACK = {
     torch.float64: (2, 64, 1),
     torch.bool: (6, 8, 1),
 }
+_MESSAGE_TO_DTYPE = {value: key for key, value in _DTYPE_TO_MESSAGE.items()}
 
 Device = Union[str, torch.device]
+_REGISTRY = ConversionRegistry()
+load_external_plugins(_REGISTRY)
 
 
-def _dl_device_type(device: torch.device) -> int:
-    if device.type == 'cpu':
-        return dlpack_conversions.CPU
-    if device.type == 'cuda':
-        return (
-            dlpack_conversions.ROCM if torch.version.hip
-            else dlpack_conversions.CUDA
-        )
-    raise ValueError(f'Unsupported tensor device: {device.type!r}')
+def contiguous_strides(shape: Sequence[int]) -> list[int]:
+    result = [0] * len(shape)
+    stride = 1
+    for index in range(len(shape) - 1, -1, -1):
+        result[index] = stride
+        stride *= shape[index]
+    return result
 
 
-def _backend_for(device: Device) -> str:
-    normalized = torch.device(device)
-    backend = dlpack_conversions.backend_for_device(
-        _dl_device_type(normalized)
-    )
-    if backend is None:
-        raise RuntimeError(
-            f'No storage plugin serves {normalized.type!r} tensors; '
-            f'installed backends are {dlpack_conversions.available_backends()}'
-        )
-    return backend
+def _metadata(msg: ExperimentalTensor) -> TensorMetadata:
+    key = (msg.dtype_code, msg.dtype_bits, msg.dtype_lanes)
+    dtype = _MESSAGE_TO_DTYPE.get(key)
+    if dtype is None:
+        raise TypeError(f'Unsupported tensor message dtype {key}')
+    shape = list(msg.shape)
+    strides = list(msg.strides) or contiguous_strides(shape)
+    if len(shape) != len(strides):
+        raise ValueError('Strides must match shape rank')
+    if any(value < 0 for value in shape + strides):
+        raise ValueError('Negative shape dimensions and strides are invalid')
+    span = 0 if any(value == 0 for value in shape) else 1
+    if span:
+        span += sum((size - 1) * stride for size, stride in zip(shape, strides))
+    item_size = torch.empty((), dtype=dtype).element_size()
+    if msg.byte_offset + span * item_size > len(msg.data):
+        raise ValueError('Tensor view exceeds message storage')
+    return TensorMetadata(
+        shape, strides, dtype, *key, span, msg.byte_offset, item_size)
 
 
-def _accelerator_available() -> bool:
-    return torch.cuda.is_available() and _has_accelerator_backend()
+def available_backends() -> list[str]:
+    return _REGISTRY.backends()
 
 
-def _default_backend() -> Optional[str]:
-    """
-    Choose a default backend this torch build can actually use.
-
-    Storage plugins and the torch build are installed separately, so the core
-    default can name a device this build has no kernels for. Handing that
-    storage back would only fail later inside torch.
-    """
-    backend = dlpack_conversions.default_backend()
-    if backend == 'cpu' or _accelerator_available():
-        return backend
-    available = dlpack_conversions.available_backends()
-    return 'cpu' if 'cpu' in available else backend
-
-
-def _has_accelerator_backend() -> bool:
-    return any(
-        backend != 'cpu'
-        for backend in dlpack_conversions.available_backends()
-    )
-
-
-def _resolve_stream(stream: Optional[int]) -> Optional[int]:
-    """
-    Take the caller's stream, or fall back to the one torch is running on.
-
-    The C++ adapter cannot do this: reading the current stream there means
-    compiling against a CUDA LibTorch, which would decide a consumer's
-    accelerator at build time. Here it is a plain runtime attribute lookup, so
-    an explicit stream is only needed to override the current one.
-    """
-    if stream is not None:
-        return stream
-    if not _accelerator_available():
-        return None
-    return torch.cuda.current_stream().cuda_stream
+def backend_available(backend: str) -> bool:
+    return backend in _REGISTRY.backends()
 
 
 def _plugin_available(device: Device) -> bool:
-    try:
-        _backend_for(device)
-    except (RuntimeError, ValueError):
-        return False
-    return True
+    normalized = torch.device(device).type
+    return _REGISTRY.backend_for_device(normalized) is not None
+
+
+def backend_for_device(device: Device) -> Optional[str]:
+    device_type = torch.device(device).type
+    if device_type not in ('cpu', 'cuda'):
+        raise ValueError(f'Unsupported tensor device: {device_type!r}')
+    return _REGISTRY.backend_for_device(device_type)
+
+
+def default_backend() -> str:
+    return _REGISTRY.default_backend()
+
+
+def _resolve_stream(stream: Optional[int]) -> Optional[int]:
+    if stream is not None:
+        return stream
+    if not torch.cuda.is_available():
+        return None
+    return torch.cuda.current_stream().cuda_stream
 
 
 def allocate_tensor_msg(
@@ -120,24 +113,38 @@ def allocate_tensor_msg(
     dtype: torch.dtype,
     device: Optional[Device] = None,
 ) -> ExperimentalTensor:
-    if dtype not in _DTYPE_TO_DLPACK:
+    dtype_description = _DTYPE_TO_MESSAGE.get(dtype)
+    if dtype_description is None:
         raise TypeError(f'Unsupported torch dtype {dtype}')
-    backend = _default_backend() if device is None else _backend_for(device)
-    return dlpack_conversions.allocate_tensor_msg(
-        shape, _DTYPE_TO_DLPACK[dtype], backend
-    )
+    dimensions = list(shape)
+    if any(value < 0 for value in dimensions):
+        raise ValueError('Shape dimensions must be nonnegative')
+    if device is None:
+        plugin = _REGISTRY.for_backend(_REGISTRY.default_backend())
+    else:
+        device_type = torch.device(device).type
+        if device_type not in ('cpu', 'cuda'):
+            raise ValueError(f'Unsupported tensor device: {device_type!r}')
+        plugin = _REGISTRY.for_device(device_type)
+    backend = plugin.backends[0]
+    msg = ExperimentalTensor()
+    msg.shape = dimensions
+    msg.strides = contiguous_strides(dimensions)
+    msg.dtype_code, msg.dtype_bits, msg.dtype_lanes = dtype_description
+    msg.byte_offset = 0
+    byte_count = prod(dimensions) * torch.empty((), dtype=dtype).element_size()
+    msg.data = plugin.allocate(byte_count, backend)
+    return msg
 
 
 def from_output_tensor_msg(
     msg: ExperimentalTensor,
     stream: Optional[int] = None,
 ) -> Optional[torch.Tensor]:
-    capsule = dlpack_conversions.from_output_tensor_msg(
-        msg, _resolve_stream(stream)
-    )
-    if capsule is None:
+    if len(msg.data) == 0:
         return None
-    return torch.utils.dlpack.from_dlpack(capsule)
+    return _REGISTRY.for_data(msg.data).from_output(
+        msg.data, _metadata(msg), _resolve_stream(stream))
 
 
 def from_input_tensor_msg(
@@ -145,13 +152,11 @@ def from_input_tensor_msg(
     clone: bool = True,
     stream: Optional[int] = None,
 ) -> Optional[torch.Tensor]:
-    capsule = dlpack_conversions.from_input_tensor_msg(
-        msg, _resolve_stream(stream)
-    )
-    if capsule is None:
+    if len(msg.data) == 0:
         return None
-    tensor = torch.utils.dlpack.from_dlpack(capsule)
-    return tensor.clone() if clone else tensor
+    result = _REGISTRY.for_data(msg.data).from_input(
+        msg.data, _metadata(msg), _resolve_stream(stream))
+    return result.clone() if clone else result
 
 
 def to_tensor_msg(
@@ -173,28 +178,28 @@ def to_tensor_msg(
             return msg
     else:
         raise TypeError(
-            'Expected to_tensor_msg(tensor) or to_tensor_msg(msg, tensor)'
-        )
+            'Expected to_tensor_msg(tensor) or to_tensor_msg(msg, tensor)')
+
     contiguous = tensor.contiguous()
-    if contiguous.dtype not in _DTYPE_TO_DLPACK:
+    dtype_description = _DTYPE_TO_MESSAGE.get(contiguous.dtype)
+    if dtype_description is None:
         raise TypeError(f'Unsupported torch dtype {contiguous.dtype}')
-    required_size = contiguous.numel() * contiguous.element_size()
-    if required_size > len(msg.data):
+    if contiguous.numel() * contiguous.element_size() > len(msg.data):
         raise ValueError('Tensor exceeds allocated message storage')
-    dtype = _DTYPE_TO_DLPACK[contiguous.dtype]
-    msg.dtype_code, msg.dtype_bits, msg.dtype_lanes = dtype
+
     msg.shape = list(contiguous.shape)
-    msg.strides = dlpack_conversions.contiguous_strides(msg.shape)
+    msg.strides = contiguous_strides(msg.shape)
+    msg.dtype_code, msg.dtype_bits, msg.dtype_lanes = dtype_description
     msg.byte_offset = 0
-    output = from_output_tensor_msg(msg, stream)
-    if output is not None:
-        output.copy_(contiguous)
+    plugin = _REGISTRY.for_data(msg.data)
+    plugin.copy_to(
+        msg.data, _metadata(msg), contiguous, _resolve_stream(stream))
     return msg
 
 
 def set_stream(device: Optional[Device] = None):
     if device is not None and torch.device(device).type == 'cpu':
         return nullcontext()
-    if not _accelerator_available():
+    if not torch.cuda.is_available() or not backend_available('cuda'):
         return nullcontext()
     return torch.cuda.stream(torch.cuda.Stream())
