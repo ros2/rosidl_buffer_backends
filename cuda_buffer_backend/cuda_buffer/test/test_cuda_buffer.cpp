@@ -16,6 +16,7 @@
 #include <cuda_runtime.h>
 
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "cuda_buffer/cuda_buffer_api.hpp"
@@ -347,4 +348,150 @@ int main(int argc, char ** argv)
 {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+// ---------------------------------------------------------------------------
+// Adoption: wrapping device memory allocated outside this backend.
+//
+// These are deliberately fixture-free. CudaBuffer::adopt() makes no CUDA calls
+// and event creation degrades to "no ordering" without a device, so every
+// ownership and sizing rule below can be checked on a machine with no GPU. The
+// one test that moves bytes takes the fixture and skips itself instead.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Stands in for a transport slot: memory the buffer must never free.
+alignas(256) uint8_t g_fake_slot[4096];
+
+}  // namespace
+
+TEST(CudaBufferAdoptTest, LooksLikeAnyOtherCudaBuffer)
+{
+  rosidl::Buffer<uint8_t> buffer =
+    cuda_buffer_backend::adopt_buffer<uint8_t>(g_fake_slot, sizeof(g_fake_slot), nullptr, 0);
+
+  // The point of the whole feature: an application cannot tell adopted storage
+  // from allocated storage, so it never has to care which it was handed.
+  EXPECT_EQ(buffer.get_backend_type(), "cuda");
+  EXPECT_EQ(buffer.size(), sizeof(g_fake_slot));
+
+  auto * impl = dynamic_cast<cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(buffer.get_impl());
+  ASSERT_NE(impl, nullptr);
+  EXPECT_TRUE(impl->is_adopted());
+  EXPECT_EQ(impl->get_cuda_buffer().get_device_ptr(), g_fake_slot);
+}
+
+TEST(CudaBufferAdoptTest, HoldsTheKeepaliveUntilTheBufferDies)
+{
+  auto pin = std::make_shared<int>(1);
+  std::weak_ptr<int> observer = pin;
+
+  {
+    rosidl::Buffer<uint8_t> buffer =
+      cuda_buffer_backend::adopt_buffer<uint8_t>(g_fake_slot, sizeof(g_fake_slot), pin, 0);
+    pin.reset();
+    EXPECT_FALSE(observer.expired()) << "the buffer must keep the owner's pin alive";
+  }
+
+  EXPECT_TRUE(observer.expired()) << "dropping the buffer must release the pin";
+}
+
+TEST(CudaBufferAdoptTest, NarrowsInPlaceAndRefusesToGrow)
+{
+  rosidl::Buffer<uint8_t> buffer =
+    cuda_buffer_backend::adopt_buffer<uint8_t>(g_fake_slot, sizeof(g_fake_slot), nullptr, 0);
+  auto * impl = dynamic_cast<cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(buffer.get_impl());
+  ASSERT_NE(impl, nullptr);
+
+  // "I was given a whole slot and filled 1024 bytes of it."
+  EXPECT_TRUE(cuda_buffer_backend::shrink_buffer(buffer, 1024));
+  EXPECT_EQ(buffer.size(), 1024u);
+  EXPECT_EQ(impl->get_cuda_buffer().get_device_ptr(), g_fake_slot)
+    << "narrowing must not reallocate";
+  EXPECT_TRUE(impl->is_adopted());
+
+  EXPECT_FALSE(cuda_buffer_backend::shrink_buffer(buffer, 2048));
+  EXPECT_EQ(buffer.size(), 1024u) << "a refused narrowing must change nothing";
+
+  // Growing would need storage to grow into, which is exactly what a buffer
+  // over someone else's memory does not have. Reallocating instead would
+  // silently swap the caller's slot for a pool block.
+  EXPECT_THROW(impl->resize(sizeof(g_fake_slot)), cuda_buffer_backend::CudaError);
+  EXPECT_EQ(impl->get_cuda_buffer().get_device_ptr(), g_fake_slot);
+}
+
+TEST(CudaBufferAdoptTest, RejectsNonsenseArguments)
+{
+  EXPECT_THROW(
+    cuda_buffer_backend::adopt_buffer<uint8_t>(nullptr, 16, nullptr, 0),
+    cuda_buffer_backend::CudaError);
+  EXPECT_THROW(
+    cuda_buffer_backend::adopt_buffer<uint8_t>(g_fake_slot, 0, nullptr, 0),
+    cuda_buffer_backend::CudaError);
+}
+
+TEST(CudaBufferAdoptTest, ShrinkBufferDeclinesForeignBackends)
+{
+  rosidl::Buffer<uint8_t> cpu;
+  cpu.resize(64);
+  ASSERT_EQ(cpu.get_backend_type(), "cpu");
+
+  // A CPU buffer can simply be resized, and any other backend is not ours to
+  // narrow -- so this reports "not mine" rather than throwing.
+  EXPECT_FALSE(cuda_buffer_backend::shrink_buffer(cpu, 32));
+  EXPECT_EQ(cpu.size(), 64u);
+}
+
+TEST_F(CudaBufferTest, AdoptedMemoryRoundTripsAndIsNotFreed)
+{
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
+    GTEST_SKIP() << "no usable CUDA device";
+  }
+
+  // cudaMalloc stands in for the transport's preallocated, already-mapped
+  // region -- an NvSciBuf attachment imported into CUDA looks the same here.
+  constexpr size_t kCapacity = 2048;
+  constexpr size_t kUsed = 300;
+  void * external = nullptr;
+  ASSERT_EQ(cudaMalloc(&external, kCapacity), cudaSuccess);
+
+  std::vector<uint8_t> expected(kUsed);
+  for (size_t i = 0; i < kUsed; ++i) {
+    expected[i] = static_cast<uint8_t>(i % 251);
+  }
+
+  {
+    rosidl::Buffer<uint8_t> buffer =
+      cuda_buffer_backend::adopt_buffer<uint8_t>(external, kCapacity, nullptr, 0);
+
+    // Written and read through the ordinary handle API, with no hint that the
+    // storage is on loan.
+    {
+      cuda_buffer_backend::WriteHandle wh =
+        cuda_buffer_backend::from_output_buffer(buffer, stream1_);
+      ASSERT_EQ(
+        cudaMemcpyAsync(
+          wh.get_ptr(), expected.data(), kUsed, cudaMemcpyHostToDevice, stream1_),
+        cudaSuccess);
+    }
+    ASSERT_TRUE(cuda_buffer_backend::shrink_buffer(buffer, kUsed));
+    ASSERT_EQ(buffer.size(), kUsed);
+
+    {
+      cuda_buffer_backend::ReadHandle rh =
+        cuda_buffer_backend::from_input_buffer(buffer, stream2_);
+      EXPECT_EQ(rh.get_ptr(), static_cast<const uint8_t *>(external))
+        << "reading must hand back the adopted pointer, not a promoted copy";
+    }
+
+    const std::vector<uint8_t> host = buffer.to_vector();
+    ASSERT_EQ(host.size(), kUsed);
+    EXPECT_EQ(std::memcmp(host.data(), expected.data(), kUsed), 0);
+  }
+
+  // The buffer is gone. If adoption had taken ownership this would double-free.
+  EXPECT_EQ(cudaFree(external), cudaSuccess);
 }

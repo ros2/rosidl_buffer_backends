@@ -50,12 +50,14 @@ public:
     owns_write_event_(other.owns_write_event_),
     read_events_(std::move(other.read_events_)),
     handle_state_(std::move(other.handle_state_)),
-    recycler_(std::move(other.recycler_))
+    recycler_(std::move(other.recycler_)),
+    adopted_(other.adopted_)
   {
     other.size_ = 0;
     other.device_id_ = 0;
     other.write_event_ = nullptr;
     other.owns_write_event_ = false;
+    other.adopted_ = false;
   }
 
   CudaBuffer(const CudaBuffer &) = delete;
@@ -72,6 +74,7 @@ public:
       std::swap(read_events_, other.read_events_);
       std::swap(handle_state_, other.handle_state_);
       std::swap(recycler_, other.recycler_);
+      std::swap(adopted_, other.adopted_);
     }
     return *this;
   }
@@ -81,6 +84,27 @@ public:
   CudaBuffer(
     void * ptr, size_t size, int device_id,
     std::function<void(uint8_t *)> custom_deleter);
+
+  /// \brief Wrap device memory that belongs to somebody else.
+  ///
+  /// For memory allocated outside this backend and mapped into CUDA by its
+  /// owner -- a zero-copy transport's shared slot, an NvSciBuf attachment, a
+  /// graphics interop surface. The result behaves exactly like a pool-allocated
+  /// CudaBuffer for every read and write, and differs in what it will not do:
+  /// it never frees the storage and never reallocates it.
+  ///
+  /// \param keepalive Held until the GPU is finished with this memory, then
+  ///   released. Whatever the owner uses to mean "still in use" goes here -- a
+  ///   slot refcount pin, a shared_ptr to the owning object. May be null when
+  ///   the storage outlives this buffer by construction.
+  static CudaBuffer adopt(
+    void * ptr, size_t size, int device_id, std::shared_ptr<void> keepalive);
+
+  /// \brief True when the storage came from adopt() rather than the pool.
+  ///
+  /// The one thing callers have to branch on: adopted storage cannot be
+  /// reallocated, because it is not this object's to reallocate.
+  bool is_adopted() const {return adopted_;}
 
   ReadHandle get_read_handle(cudaStream_t stream) const;
   WriteHandle get_write_handle(cudaStream_t stream);
@@ -120,6 +144,10 @@ private:
 
   std::shared_ptr<HandleState> handle_state_{nullptr};
   std::shared_ptr<BufferRecycler> recycler_;
+
+  /// Metadata only -- the keepalive that makes adoption safe rides in the
+  /// deleter, not here. See CudaBuffer::adopt().
+  bool adopted_{false};
 };
 
 }  // namespace cuda_buffer_backend
