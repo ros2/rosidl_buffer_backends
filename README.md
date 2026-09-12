@@ -99,13 +99,13 @@ auto rh = cuda_buffer_backend::from_input_buffer(cpu_or_other_buf, stream);
 #include "torch_conversions/torch_conversions.hpp"
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
-// Publisher: allocate a Tensor message (accelerated backend when available).
+auto guard = torch_conversions::set_stream();
+
+// Publisher: allocate storage on the selected backend.
 auto msg = torch_conversions::allocate_tensor_msg(
   /*shape=*/{1080, 1920, 3}, torch::kUInt8);
 
-// Wrap as at::Tensor without copying and write into it. On an accelerator,
-// pass the stream your kernels run on as a trailing argument so the conversion
-// plugin orders its access against them.
+// Write through a zero-copy view on Torch's current stream.
 {
   at::Tensor t_out = torch_conversions::from_output_tensor_msg(*msg);
   my_pipeline(t_out);
@@ -118,8 +118,8 @@ at::Tensor t_in = torch_conversions::from_input_tensor_msg(*received_msg);
 
 The message schema carries DLPack-aligned dtype, shape, stride, and offset
 metadata, while device placement is derived from the underlying
-`rosidl::Buffer` backend. Each framework adapter owns its public ABI and its
-device plugins; no shared framework-neutral conversion package is required.
+`rosidl::Buffer` backend. Each framework conversion API loads its device
+implementations from separately packaged plugins.
 
 ## License
 

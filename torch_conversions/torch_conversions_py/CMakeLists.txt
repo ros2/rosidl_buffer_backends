@@ -16,6 +16,7 @@ if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   ament_lint_auto_find_test_dependencies()
 
   ament_add_pytest_test(test_torch_conversions_py
@@ -27,7 +28,8 @@ if(BUILD_TESTING)
     DESTINATION "lib/${PROJECT_NAME}"
     RENAME torch_tensor_publisher_node)
   add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps.py
-    TARGET test_torch_tensor_inter_pubsub_fastrtps TIMEOUT 40)
+    TARGET test_torch_tensor_inter_pubsub_fastrtps TIMEOUT 40
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package()

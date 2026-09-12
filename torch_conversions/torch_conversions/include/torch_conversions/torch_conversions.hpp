@@ -15,6 +15,7 @@
 #ifndef TORCH_CONVERSIONS__TORCH_CONVERSIONS_HPP_
 #define TORCH_CONVERSIONS__TORCH_CONVERSIONS_HPP_
 
+#include <c10/core/StreamGuard.h>
 #include <torch/torch.h>
 
 #include <memory>
@@ -40,6 +41,21 @@ TORCH_CONVERSIONS_PUBLIC std::string backend_for_device(
 
 TORCH_CONVERSIONS_PUBLIC std::string default_backend();
 
+/// Select a plugin stream for this thread and restore it at scope exit; CPU is a no-op.
+class TORCH_CONVERSIONS_PUBLIC StreamGuard
+{
+public:
+  explicit StreamGuard(std::optional<c10::Device> device = std::nullopt);
+
+private:
+  c10::OptionalStreamGuard guard_;
+};
+
+inline StreamGuard set_stream(std::optional<c10::Device> device = std::nullopt)
+{
+  return StreamGuard(device);
+}
+
 TORCH_CONVERSIONS_PUBLIC at::ScalarType scalar_type(
   const TensorMsg & msg);
 
@@ -49,14 +65,14 @@ TORCH_CONVERSIONS_PUBLIC std::vector<int64_t> normalized_strides(
 TORCH_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   at::ScalarType dtype,
-  std::optional<c10::DeviceType> device = std::nullopt);
+  std::optional<c10::Device> device = std::nullopt);
 
-/// CPU views borrow msg storage. Release output views before publishing msg.
+/// Views borrow msg storage. Keep msg alive and release views before publishing.
 TORCH_CONVERSIONS_PUBLIC at::Tensor from_output_tensor_msg(
   TensorMsg & msg,
   void * execution_stream = nullptr);
 
-/// With clone=false, CPU storage must remain alive and unchanged in size.
+/// With clone=false, msg and its storage must remain alive and unchanged in size.
 TORCH_CONVERSIONS_PUBLIC at::Tensor from_input_tensor_msg(
   const TensorMsg & msg,
   bool clone = true,

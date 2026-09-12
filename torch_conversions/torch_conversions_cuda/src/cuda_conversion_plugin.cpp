@@ -14,6 +14,7 @@
 
 #include <cuda_runtime_api.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <torch/torch.h>
 
 #include <memory>
@@ -55,6 +56,11 @@ public:
     return 100;
   }
 
+  std::optional<c10::Stream> select_stream(c10::Device device) override
+  {
+    return c10::cuda::getStreamFromPool(false, device.index());
+  }
+
   void allocate(
     TensorMsg & msg, size_t byte_count, c10::Device device) override
   {
@@ -63,30 +69,39 @@ public:
     }
     c10::cuda::CUDAGuard guard(device);
     msg.data = cuda_buffer_backend::allocate_buffer(byte_count);
+    if (byte_count > 0 &&
+      cuda_implementation(msg)->get_device_id() != c10::cuda::current_device())
+    {
+      throw std::runtime_error("CUDA buffer pool cannot allocate on the requested device");
+    }
   }
 
   at::Tensor from_input(
-    const TensorMsg & msg, void * execution_stream) override
+    const TensorMsg & msg, bool clone, void * execution_stream) override
   {
     const auto * implementation = cuda_implementation(msg);
-    const auto cuda_stream = stream(execution_stream);
+    const auto selected = stream(execution_stream, implementation->get_device_id());
+    c10::cuda::CUDAStreamGuard guard(selected);
     std::shared_ptr<void> lease =
       std::make_shared<cuda_buffer_backend::ReadHandle>(
-      implementation->get_cuda_buffer().get_read_handle(cuda_stream));
+      implementation->get_cuda_buffer().get_read_handle(buffer_stream(selected)));
     const auto * read_handle =
       static_cast<const cuda_buffer_backend::ReadHandle *>(lease.get());
-    return make_tensor(
+    auto view = make_tensor(
       const_cast<uint8_t *>(read_handle->get_ptr()),
       msg,
       implementation->get_device_id(),
       std::move(lease));
+    return clone ? view.clone() : view;
   }
 
   at::Tensor from_output(
     TensorMsg & msg, void * execution_stream) override
   {
     auto * implementation = cuda_implementation(msg);
-    const auto cuda_stream = stream(execution_stream);
+    const auto selected = stream(execution_stream, implementation->get_device_id());
+    c10::cuda::CUDAStreamGuard guard(selected);
+    const auto cuda_stream = buffer_stream(selected);
     implementation->set_stream(cuda_stream);
     std::shared_ptr<void> lease =
       std::make_shared<cuda_buffer_backend::WriteHandle>(
@@ -105,29 +120,39 @@ public:
     const at::Tensor & source,
     void * execution_stream) override
   {
-    const auto cuda_stream = stream(execution_stream);
     if (msg.data.get_backend_type() == "cpu") {
       if (!source.device().is_cuda()) {
         throw std::runtime_error(
                 "CUDA plugin expected a CUDA source for a CPU destination");
       }
-      c10::cuda::CUDAGuard guard(source.device());
+      const auto selected = stream(execution_stream, source.device().index());
+      c10::cuda::CUDAStreamGuard guard(selected);
+      const auto contiguous = source.contiguous();
+      const auto cuda_stream = buffer_stream(selected);
       check_cuda(cudaMemcpyAsync(
-          msg.data.data(), source.data_ptr(), source.nbytes(),
+          msg.data.data(), contiguous.data_ptr(), contiguous.nbytes(),
           cudaMemcpyDeviceToHost, cuda_stream));
       check_cuda(cudaStreamSynchronize(cuda_stream));
       return;
     }
 
     auto * implementation = cuda_implementation(msg);
-    c10::cuda::CUDAGuard guard(
-      c10::Device(c10::kCUDA, implementation->get_device_id()));
+    if (!source.device().is_cpu() &&
+      source.device().index() != implementation->get_device_id())
+    {
+      throw std::invalid_argument("CUDA copies require matching source and destination devices");
+    }
+    const auto selected = stream(execution_stream, implementation->get_device_id());
+    c10::cuda::CUDAStreamGuard guard(selected);
+    const auto contiguous = source.contiguous();
+    const auto cuda_stream = buffer_stream(selected);
     auto write_handle = cuda_buffer_backend::from_output_buffer(
       msg.data, cuda_stream);
     const auto kind = source.device().is_cpu() ?
       cudaMemcpyHostToDevice : cudaMemcpyDeviceToDevice;
     cuda_buffer_backend::to_buffer(
-      source.data_ptr(), source.nbytes(), write_handle, cuda_stream, kind);
+      contiguous.data_ptr(), contiguous.nbytes(), write_handle, cuda_stream, kind);
+    check_cuda(cudaStreamSynchronize(cuda_stream));
   }
 
 private:
@@ -150,9 +175,16 @@ private:
       options);
   }
 
-  static cudaStream_t stream(void * value)
+  static c10::cuda::CUDAStream stream(void * value, int device)
   {
-    return reinterpret_cast<cudaStream_t>(value);
+    return value ? c10::cuda::getStreamFromExternal(
+      reinterpret_cast<cudaStream_t>(value), device) :
+           c10::cuda::getCurrentCUDAStream(device);
+  }
+
+  static cudaStream_t buffer_stream(c10::cuda::CUDAStream stream)
+  {
+    return stream.stream() ? stream.stream() : cudaStreamLegacy;
   }
 
   static void check_cuda(cudaError_t result)

@@ -169,8 +169,32 @@ def test_unsupported_torch_dtype_is_rejected():
 
 
 def test_unsupported_device_is_rejected():
-    with pytest.raises(ValueError, match='Unsupported tensor device'):
+    with pytest.raises(RuntimeError, match='No Torch conversion plugin serves device'):
         allocate_tensor_msg((4,), torch.float32, 'meta')
+
+
+def test_new_device_plugin_receives_the_complete_device(monkeypatch):
+    from torch_conversions import _core
+    from torch_conversions._plugin import ConversionRegistry
+
+    class Plugin:
+        backends = ('test_xpu',)
+        device_types = ('xpu',)
+        priority = 0
+
+        def is_available(self):
+            return True
+
+        def allocate(self, byte_count, backend, device):
+            assert backend == 'test_xpu'
+            assert device == torch.device('xpu:3')
+            return array('B', bytes(byte_count))
+
+    registry = ConversionRegistry()
+    registry.register(Plugin())
+    monkeypatch.setattr(_core, '_REGISTRY', registry)
+    msg = allocate_tensor_msg((2,), torch.float32, 'xpu:3')
+    assert len(msg.data) == 8
 
 
 def test_default_allocation_is_usable_by_this_torch_build():

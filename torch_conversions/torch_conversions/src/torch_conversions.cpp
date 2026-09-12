@@ -284,7 +284,7 @@ void set_metadata(TensorMsg & msg, const at::Tensor & tensor)
 {
   const auto dtype = describe_dtype(tensor.scalar_type());
   msg.shape.assign(tensor.sizes().begin(), tensor.sizes().end());
-  msg.strides.assign(tensor.strides().begin(), tensor.strides().end());
+  msg.strides = contiguous_strides(msg.shape);
   msg.dtype_code = dtype.code;
   msg.dtype_bits = dtype.bits;
   msg.dtype_lanes = dtype.lanes;
@@ -311,6 +311,17 @@ std::string backend_for_device(c10::DeviceType device_type)
 std::string default_backend()
 {
   return Registry::instance().default_name();
+}
+
+StreamGuard::StreamGuard(std::optional<c10::Device> device)
+{
+  auto & registry = Registry::instance();
+  auto plugin = device ? registry.for_device(device->type()) :
+    registry.for_backend(registry.default_name());
+  const auto stream = plugin->select_stream(device.value_or(c10::Device(plugin->device_type())));
+  if (stream) {
+    guard_.reset_stream(*stream);
+  }
 }
 
 at::ScalarType scalar_type(const TensorMsg & msg)
@@ -365,17 +376,17 @@ std::vector<int64_t> normalized_strides(const TensorMsg & msg)
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   at::ScalarType dtype,
-  std::optional<c10::DeviceType> device)
+  std::optional<c10::Device> device)
 {
   auto & registry = Registry::instance();
   std::shared_ptr<ConversionPlugin> plugin;
   c10::Device selected_device(c10::kCPU);
   if (device) {
-    selected_device = c10::Device(*device, 0);
-    plugin = registry.for_device(*device);
+    selected_device = *device;
+    plugin = registry.for_device(device->type());
   } else {
     plugin = registry.for_backend(registry.default_name());
-    selected_device = c10::Device(plugin->device_type(), 0);
+    selected_device = c10::Device(plugin->device_type());
   }
 
   auto msg = std::make_unique<TensorMsg>();
@@ -408,9 +419,8 @@ at::Tensor from_input_tensor_msg(
     return {};
   }
   validate_view(msg);
-  auto result = Registry::instance().for_backend(
-    msg.data.get_backend_type())->from_input(msg, execution_stream);
-  return clone ? result.clone() : result;
+  return Registry::instance().for_backend(
+    msg.data.get_backend_type())->from_input(msg, clone, execution_stream);
 }
 
 void to_tensor_msg(
@@ -419,19 +429,18 @@ void to_tensor_msg(
   if (!tensor.defined() || tensor.numel() == 0) {
     return;
   }
-  const auto contiguous = tensor.contiguous();
-  const size_t required = contiguous.nbytes();
+  const size_t required = tensor.nbytes();
   if (required > msg.data.size()) {
     throw std::runtime_error(
             "torch_conversions: tensor exceeds message storage");
   }
 
   auto & registry = Registry::instance();
-  auto plugin = contiguous.device().is_cpu() ?
+  auto plugin = tensor.device().is_cpu() ?
     registry.for_backend(msg.data.get_backend_type()) :
-    registry.for_device(contiguous.device().type());
-  plugin->copy_to(msg, contiguous, execution_stream);
-  set_metadata(msg, contiguous);
+    registry.for_device(tensor.device().type());
+  plugin->copy_to(msg, tensor, execution_stream);
+  set_metadata(msg, tensor);
 }
 
 std::unique_ptr<TensorMsg> to_tensor_msg(
@@ -440,11 +449,10 @@ std::unique_ptr<TensorMsg> to_tensor_msg(
   if (!tensor.defined() || tensor.numel() == 0) {
     return std::make_unique<TensorMsg>();
   }
-  const auto contiguous = tensor.contiguous();
   auto msg = allocate_tensor_msg(
-    std::vector<int64_t>(contiguous.sizes().begin(), contiguous.sizes().end()),
-    contiguous.scalar_type(), contiguous.device().type());
-  to_tensor_msg(*msg, contiguous, execution_stream);
+    std::vector<int64_t>(tensor.sizes().begin(), tensor.sizes().end()),
+    tensor.scalar_type(), tensor.device());
+  to_tensor_msg(*msg, tensor, execution_stream);
   return msg;
 }
 

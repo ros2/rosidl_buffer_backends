@@ -51,6 +51,7 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   find_package(rclcpp REQUIRED)
   find_package(rclcpp_components REQUIRED)
   find_package(rosidl_runtime_cpp REQUIRED)
@@ -105,13 +106,17 @@ if(BUILD_TESTING)
     RUNTIME DESTINATION bin)
 
   add_launch_test(test/test_torch_tensor_intra_pubsub_fastrtps_launch.py
-    TARGET test_torch_tensor_intra_pubsub_fastrtps_launch TIMEOUT 30)
+    TARGET test_torch_tensor_intra_pubsub_fastrtps_launch TIMEOUT 30
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
   add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps_launch.py
-    TARGET test_torch_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30)
+    TARGET test_torch_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
   add_launch_test(test/test_torch_tensor_multi_pub_fastrtps_launch.py
-    TARGET test_torch_tensor_multi_pub_fastrtps_launch TIMEOUT 45)
+    TARGET test_torch_tensor_multi_pub_fastrtps_launch TIMEOUT 45
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
   add_launch_test(test/test_torch_tensor_multi_sub_fastrtps_launch.py
-    TARGET test_torch_tensor_multi_sub_fastrtps_launch TIMEOUT 45)
+    TARGET test_torch_tensor_multi_sub_fastrtps_launch TIMEOUT 45
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package(CONFIG_EXTRAS_POST cmake/torch_conversions-extras.cmake)

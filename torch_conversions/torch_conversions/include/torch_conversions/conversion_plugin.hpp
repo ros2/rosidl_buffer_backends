@@ -15,9 +15,11 @@
 #ifndef TORCH_CONVERSIONS__CONVERSION_PLUGIN_HPP_
 #define TORCH_CONVERSIONS__CONVERSION_PLUGIN_HPP_
 
+#include <c10/core/Stream.h>
 #include <torch/torch.h>
 
 #include <cstddef>
+#include <optional>
 #include <string>
 
 #include "tensor_msgs/msg/experimental_tensor.hpp"
@@ -38,16 +40,18 @@ public:
   virtual bool available() const = 0;
   virtual int priority() const = 0;
 
+  virtual std::optional<c10::Stream> select_stream(c10::Device device) = 0;
+
   virtual void allocate(
     TensorMsg & msg, size_t byte_count, c10::Device device) = 0;
 
   virtual at::Tensor from_input(
-    const TensorMsg & msg, void * execution_stream) = 0;
+    const TensorMsg & msg, bool clone, void * execution_stream) = 0;
 
   virtual at::Tensor from_output(
     TensorMsg & msg, void * execution_stream) = 0;
 
-  /// Copy a contiguous Torch tensor into CPU- or device-backed message storage.
+  /// Copy into message storage; the source may be non-contiguous.
   virtual void copy_to(
     TensorMsg & msg,
     const at::Tensor & source,

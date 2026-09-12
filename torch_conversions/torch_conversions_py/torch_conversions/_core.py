@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from contextlib import nullcontext
 from math import prod
 from typing import Optional
 from typing import Sequence
@@ -86,21 +85,11 @@ def backend_available(backend: str) -> bool:
 
 def backend_for_device(device: Device) -> Optional[str]:
     device_type = torch.device(device).type
-    if device_type not in ('cpu', 'cuda'):
-        raise ValueError(f'Unsupported tensor device: {device_type!r}')
     return _REGISTRY.backend_for_device(device_type)
 
 
 def default_backend() -> str:
     return _REGISTRY.default_backend()
-
-
-def _resolve_stream(stream: Optional[int]) -> Optional[int]:
-    if stream is not None:
-        return stream
-    if not torch.cuda.is_available():
-        return None
-    return torch.cuda.current_stream().cuda_stream
 
 
 def allocate_tensor_msg(
@@ -116,11 +105,10 @@ def allocate_tensor_msg(
         raise ValueError('Shape dimensions must be nonnegative')
     if device is None:
         plugin = _REGISTRY.for_backend(_REGISTRY.default_backend())
+        selected_device = torch.device(plugin.device_types[0])
     else:
-        device_type = torch.device(device).type
-        if device_type not in ('cpu', 'cuda'):
-            raise ValueError(f'Unsupported tensor device: {device_type!r}')
-        plugin = _REGISTRY.for_device(device_type)
+        selected_device = torch.device(device)
+        plugin = _REGISTRY.for_device(selected_device.type)
     backend = plugin.backends[0]
     msg = ExperimentalTensor()
     msg.shape = dimensions
@@ -128,7 +116,7 @@ def allocate_tensor_msg(
     msg.dtype_code, msg.dtype_bits, msg.dtype_lanes = dtype_description
     msg.byte_offset = 0
     byte_count = prod(dimensions) * torch.empty((), dtype=dtype).element_size()
-    msg.data = plugin.allocate(byte_count, backend)
+    msg.data = plugin.allocate(byte_count, backend, selected_device)
     return msg
 
 
@@ -139,7 +127,7 @@ def from_output_tensor_msg(
     if len(msg.data) == 0:
         return None
     return _REGISTRY.for_data(msg.data).from_output(
-        msg.data, _metadata(msg), _resolve_stream(stream))
+        msg.data, _metadata(msg), stream)
 
 
 def from_input_tensor_msg(
@@ -149,9 +137,8 @@ def from_input_tensor_msg(
 ) -> Optional[torch.Tensor]:
     if len(msg.data) == 0:
         return None
-    result = _REGISTRY.for_data(msg.data).from_input(
-        msg.data, _metadata(msg), _resolve_stream(stream))
-    return result.clone() if clone else result
+    return _REGISTRY.for_data(msg.data).from_input(
+        msg.data, _metadata(msg), stream, clone)
 
 
 def to_tensor_msg(
@@ -175,26 +162,25 @@ def to_tensor_msg(
         raise TypeError(
             'Expected to_tensor_msg(tensor) or to_tensor_msg(msg, tensor)')
 
-    contiguous = tensor.contiguous()
-    dtype_description = _DTYPE_TO_MESSAGE.get(contiguous.dtype)
+    dtype_description = _DTYPE_TO_MESSAGE.get(tensor.dtype)
     if dtype_description is None:
-        raise TypeError(f'Unsupported torch dtype {contiguous.dtype}')
-    if contiguous.numel() * contiguous.element_size() > len(msg.data):
+        raise TypeError(f'Unsupported torch dtype {tensor.dtype}')
+    if tensor.numel() * tensor.element_size() > len(msg.data):
         raise ValueError('Tensor exceeds allocated message storage')
 
-    msg.shape = list(contiguous.shape)
+    msg.shape = list(tensor.shape)
     msg.strides = contiguous_strides(msg.shape)
     msg.dtype_code, msg.dtype_bits, msg.dtype_lanes = dtype_description
     msg.byte_offset = 0
-    plugin = _REGISTRY.for_data(msg.data)
+    plugin = _REGISTRY.for_data(msg.data) if tensor.device.type == 'cpu' \
+        else _REGISTRY.for_device(tensor.device.type)
     plugin.copy_to(
-        msg.data, _metadata(msg), contiguous, _resolve_stream(stream))
+        msg.data, _metadata(msg), tensor, stream)
     return msg
 
 
 def set_stream(device: Optional[Device] = None):
-    if device is not None and torch.device(device).type == 'cpu':
-        return nullcontext()
-    if not torch.cuda.is_available() or not backend_available('cuda'):
-        return nullcontext()
-    return torch.cuda.stream(torch.cuda.Stream())
+    plugin = _REGISTRY.for_backend(_REGISTRY.default_backend()) if device is None \
+        else _REGISTRY.for_device(torch.device(device).type)
+    selected = torch.device(device or plugin.device_types[0])
+    return plugin.stream_context(selected)
