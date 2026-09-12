@@ -50,6 +50,11 @@ public:
     return 0;
   }
 
+  std::optional<c10::Stream> select_stream(c10::Device) override
+  {
+    return std::nullopt;
+  }
+
   void allocate(
     TensorMsg & msg, size_t byte_count, c10::Device device) override
   {
@@ -59,10 +64,11 @@ public:
     msg.data.resize(byte_count);
   }
 
-  at::Tensor from_input(const TensorMsg & msg, void *) override
+  at::Tensor from_input(const TensorMsg & msg, bool clone, void *) override
   {
     require_cpu_storage(msg);
-    return make_tensor(const_cast<uint8_t *>(msg.data.data()), msg);
+    auto view = make_tensor(const_cast<uint8_t *>(msg.data.data()), msg);
+    return clone ? view.clone() : view;
   }
 
   at::Tensor from_output(TensorMsg & msg, void *) override
@@ -78,7 +84,8 @@ public:
     if (!source.device().is_cpu()) {
       throw std::runtime_error("CPU plugin cannot read a non-CPU tensor");
     }
-    std::memcpy(msg.data.data(), source.data_ptr(), source.nbytes());
+    const auto contiguous = source.contiguous();
+    std::memcpy(msg.data.data(), contiguous.data_ptr(), contiguous.nbytes());
   }
 
 private:

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from cuda_buffer import CudaBuffer
+import gc
 
 import pytest
 
@@ -59,6 +59,7 @@ def test_cuda_tensor_to_message_round_trip():
 
 
 def test_cuda_zero_copy_view_aliases_message_storage():
+    cuda_buffer = pytest.importorskip('cuda_buffer').CudaBuffer
     msg = allocate_tensor_msg((8,), torch.float32, 'cuda')
     output = from_output_tensor_msg(msg)
     output.copy_(torch.arange(8, dtype=torch.float32, device='cuda'))
@@ -66,7 +67,7 @@ def test_cuda_zero_copy_view_aliases_message_storage():
     del output
 
     stream = torch.cuda.current_stream().cuda_stream
-    with CudaBuffer.from_input_buffer(msg.data, stream) as handle:
+    with cuda_buffer.from_input_buffer(msg.data, stream) as handle:
         expected_pointer = handle.device_ptr
         expected_device = handle.device_id
 
@@ -119,3 +120,68 @@ def test_conversions_use_the_active_torch_stream():
     assert torch.equal(
         from_input_tensor_msg(msg).cpu(), torch.full((4,), 2.0)
     )
+
+
+def test_clone_waits_on_the_supplied_consumer_stream():
+    producer = torch.cuda.Stream()
+    consumer = torch.cuda.Stream()
+    msg = allocate_tensor_msg((4,), torch.float32, 'cuda')
+    with torch.cuda.stream(producer):
+        output = from_output_tensor_msg(msg, stream=producer.cuda_stream)
+        output.zero_()
+        producer.synchronize()
+        torch.cuda._sleep(200_000_000)
+        output.fill_(7)
+        del output
+
+    result = from_input_tensor_msg(msg, stream=consumer.cuda_stream)
+    consumer.synchronize()
+    assert torch.equal(result.cpu(), torch.full((4,), 7.0))
+
+
+def test_non_contiguous_copy_uses_the_supplied_stream():
+    stream = torch.cuda.Stream()
+    with torch.cuda.stream(stream):
+        source = torch.zeros((2, 3), device='cuda')
+        stream.synchronize()
+        torch.cuda._sleep(200_000_000)
+        source.fill_(5)
+    msg = to_tensor_msg(source.T, stream=stream.cuda_stream)
+    del source
+    result = from_input_tensor_msg(msg, stream=stream.cuda_stream)
+    stream.synchronize()
+    assert torch.equal(result.cpu(), torch.full((3, 2), 5.0))
+
+
+@pytest.mark.parametrize('output_view', [False, True])
+def test_cuda_view_retains_storage_after_message_destruction(output_view):
+    with set_stream('cuda'):
+        msg = allocate_tensor_msg((4,), torch.float32, 'cuda')
+        value = from_output_tensor_msg(msg)
+        value.fill_(9)
+        pointer = value.data_ptr()
+        if not output_view:
+            del value
+            value = from_input_tensor_msg(msg, clone=False)
+        del msg
+        gc.collect()
+        assert value.data_ptr() == pointer
+        assert torch.equal(value.cpu(), torch.full((4,), 9.0))
+
+
+def test_device_index_is_preserved_and_validated():
+    count = torch.cuda.device_count()
+    current = torch.cuda.current_device()
+    assert len(allocate_tensor_msg((0,), torch.float32, 'cuda').data) == 0
+    allocate_tensor_msg((1,), torch.float32, 'cuda')
+    with pytest.raises(RuntimeError):
+        allocate_tensor_msg((1,), torch.float32, f'cuda:{count}')
+    for device in range(count):
+        if device != current:
+            with pytest.raises(RuntimeError, match='CUDA buffer is on device'):
+                allocate_tensor_msg((1,), torch.float32, f'cuda:{device}')
+            continue
+        msg = allocate_tensor_msg((1,), torch.float32, f'cuda:{device}')
+        with torch.cuda.device(device):
+            value = from_output_tensor_msg(msg)
+            assert value.device.index == device

@@ -33,18 +33,5 @@ unset(_@PROJECT_NAME@_vendor_torch_dir)
 # language, which errors on CMake 3.28+ if CMAKE_CUDA_ARCHITECTURES is empty.
 # Consumers that set CMAKE_CUDA_ARCHITECTURES themselves take precedence.
 if(NOT CMAKE_CUDA_ARCHITECTURES)
-  execute_process(
-    COMMAND python3 -c "import torch; print(';'.join(a.split('_',1)[-1] for a in torch.cuda.get_arch_list()))"
-    OUTPUT_VARIABLE _@PROJECT_NAME@_torch_arch_list
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE _@PROJECT_NAME@_torch_arch_rc
-    ERROR_QUIET
-  )
-  if(_@PROJECT_NAME@_torch_arch_rc EQUAL 0 AND _@PROJECT_NAME@_torch_arch_list)
-    set(CMAKE_CUDA_ARCHITECTURES "${_@PROJECT_NAME@_torch_arch_list}")
-  else()
-    set(CMAKE_CUDA_ARCHITECTURES all-major)
-  endif()
-  unset(_@PROJECT_NAME@_torch_arch_list)
-  unset(_@PROJECT_NAME@_torch_arch_rc)
+  set(CMAKE_CUDA_ARCHITECTURES all-major)
 endif()

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from array import array
+from contextlib import nullcontext
 from typing import Optional
 
 import torch
@@ -39,9 +40,15 @@ class CpuConversionPlugin:
             return False
         return True
 
-    def allocate(self, byte_count: int, backend: str) -> array:
+    def allocate(self, byte_count: int, backend: str, device: torch.device) -> array:
         del backend
+        if device.index not in (None, 0):
+            raise ValueError('CPU storage has no device index other than 0')
         return array('B', bytes(byte_count))
+
+    def stream_context(self, device: torch.device):
+        del device
+        return nullcontext()
 
     @staticmethod
     def _view(data: object, metadata: TensorMetadata) -> torch.Tensor:
@@ -55,10 +62,12 @@ class CpuConversionPlugin:
             flat, tuple(metadata.shape), tuple(metadata.strides))
 
     def from_input(
-        self, data: object, metadata: TensorMetadata, stream: Optional[int]
+        self, data: object, metadata: TensorMetadata, stream: Optional[int],
+        clone: bool,
     ) -> torch.Tensor:
         del stream
-        return self._view(data, metadata)
+        view = self._view(data, metadata)
+        return view.clone() if clone else view
 
     def from_output(
         self, data: object, metadata: TensorMetadata, stream: Optional[int]

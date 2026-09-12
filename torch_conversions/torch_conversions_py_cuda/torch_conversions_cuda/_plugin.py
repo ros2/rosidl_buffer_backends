@@ -32,27 +32,44 @@ class CudaConversionPlugin:
     priority = 100
 
     def is_available(self) -> bool:
-        return torch.cuda.is_available()
+        return torch.version.cuda is not None and torch.cuda.is_available()
 
     def matches(self, data: object) -> bool:
         del data
         return False
 
-    def allocate(self, byte_count: int, backend: str) -> object:
+    def allocate(self, byte_count: int, backend: str, device: torch.device) -> object:
         del backend
-        return CudaBuffer.allocate_buffer(byte_count)
+        with torch.cuda.device(device):
+            data = CudaBuffer.allocate_buffer(byte_count)
+            if byte_count:
+                with CudaBuffer.from_input_buffer(data, 0) as handle:
+                    _check_device(handle)
+            return data
+
+    def stream_context(self, device: torch.device):
+        return torch.cuda.stream(torch.cuda.Stream(device=device))
 
     def from_input(
-        self, data: object, metadata: TensorMetadata, stream: Optional[int]
+        self, data: object, metadata: TensorMetadata, stream: Optional[int],
+        clone: bool,
     ) -> torch.Tensor:
-        return _tensor(
-            CudaBuffer.from_input_buffer(data, stream), data, metadata)
+        device = torch.cuda.current_device()
+        raw_stream = _stream_pointer(stream, device)
+        handle = CudaBuffer.from_input_buffer(data, raw_stream or 1)
+        _check_device(handle)
+        selected = torch.cuda.ExternalStream(raw_stream, device=device)
+        with torch.cuda.stream(selected):
+            view = _tensor(handle, data, metadata)
+            return view.clone() if clone else view
 
     def from_output(
         self, data: object, metadata: TensorMetadata, stream: Optional[int]
     ) -> torch.Tensor:
-        return _tensor(
-            CudaBuffer.from_output_buffer(data, stream), data, metadata)
+        device = torch.cuda.current_device()
+        handle = CudaBuffer.from_output_buffer(data, _stream_pointer(stream, device) or 1)
+        _check_device(handle)
+        return _tensor(handle, data, metadata)
 
     def copy_to(
         self,
@@ -61,7 +78,32 @@ class CudaConversionPlugin:
         source: torch.Tensor,
         stream: Optional[int],
     ) -> None:
-        self.from_output(data, metadata, stream).copy_(source)
+        if getattr(data, 'backend_type', None) == 'cuda':
+            destination = self.from_output(data, metadata, stream)
+            device = destination.device
+            if source.device.type != 'cpu' and source.device != device:
+                raise ValueError('CUDA copies require matching source and destination devices')
+        else:
+            destination = torch.frombuffer(
+                data, dtype=metadata.dtype, count=source.numel(),
+                offset=metadata.byte_offset).reshape(metadata.shape)
+            device = source.device
+        selected = torch.cuda.ExternalStream(_stream_pointer(stream, device), device=device)
+        with torch.cuda.stream(selected):
+            destination.copy_(source.contiguous())
+            selected.synchronize()
+
+
+def _check_device(handle: object) -> None:
+    current = torch.cuda.current_device()
+    if handle.device_id != current:
+        handle.close()
+        raise RuntimeError(
+            f'CUDA buffer is on device {handle.device_id}, but current device is {current}')
+
+
+def _stream_pointer(stream: Optional[int], device: object) -> int:
+    return torch.cuda.current_stream(device).cuda_stream if stream is None else stream
 
 
 class _Lease:
@@ -72,7 +114,8 @@ class _Lease:
         self._data = data
 
     def __del__(self) -> None:
-        self._handle.close()
+        with torch.cuda.device(self._handle.device_id):
+            self._handle.close()
 
 
 def _tensor(

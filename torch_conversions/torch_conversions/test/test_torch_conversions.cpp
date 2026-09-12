@@ -39,6 +39,7 @@ TEST(TorchConversions, AllocatePopulatesMetadata)
 
 TEST(TorchConversions, RoundTrip)
 {
+  auto guard = torch_conversions::set_stream(c10::kCPU);
   auto source = torch::arange(12, torch::kFloat).reshape({3, 4});
   auto msg = torch_conversions::to_tensor_msg(source);
   EXPECT_EQ(msg->data.get_backend_type(), "cpu");
@@ -118,6 +119,8 @@ TEST(TorchConversions, RejectsDeviceWithoutConversionPlugin)
     GTEST_SKIP() << "the CUDA conversion plugin is installed";
   }
   EXPECT_THROW(
+    torch_conversions::set_stream(c10::kCUDA), std::runtime_error);
+  EXPECT_THROW(
     torch_conversions::allocate_tensor_msg(
       {1}, at::kFloat, c10::kCUDA),
     std::runtime_error);
@@ -133,10 +136,15 @@ TEST(TorchConversions, ReportsInstalledBackends)
 
 TEST(TorchConversions, DefaultAllocationsAreUsableByThisTorchBuild)
 {
+  auto guard = torch_conversions::set_stream();
   auto msg = torch_conversions::allocate_tensor_msg({4}, at::kFloat);
 
-  at::Tensor tensor = torch_conversions::from_output_tensor_msg(*msg);
-
-  ASSERT_TRUE(tensor.defined());
-  EXPECT_NO_THROW(tensor.fill_(1.0f));
+  {
+    auto tensor = torch_conversions::from_output_tensor_msg(*msg);
+    ASSERT_TRUE(tensor.defined());
+    tensor.fill_(3.0f);
+  }
+  auto tensor = torch_conversions::from_input_tensor_msg(*msg);
+  auto copied = torch_conversions::to_tensor_msg(tensor * 2);
+  EXPECT_FLOAT_EQ(torch_conversions::from_input_tensor_msg(*copied).sum().item<float>(), 24.0f);
 }
