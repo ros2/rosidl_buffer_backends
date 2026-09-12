@@ -1,8 +1,8 @@
 # rosidl_buffer_backends
 
 CUDA buffer backend implementation for `rosidl::Buffer`, enabling zero-copy
-GPU memory sharing between ROS 2 publishers and subscribers, plus PyTorch
-conversion libraries built on the same buffer infrastructure.
+GPU memory sharing between ROS 2 publishers and subscribers, plus PyTorch and
+ONNX Runtime conversion libraries built on the same buffer infrastructure.
 
 ## Packages
 
@@ -21,6 +21,17 @@ conversion libraries built on the same buffer infrastructure.
   It selects an official `cu126`, `cu128`, or `cu130` wheel from the detected
   CUDA Toolkit; JetPack provides the required installation on Tegra.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
+- **onnxruntime_core_vendor** -- CPU-only ONNX Runtime 1.26.0 C++ provider.
+- **onnxruntime_cuda_vendor** -- ONNX Runtime 1.26.0 C++ provider for CUDA 12.
+- **python_onnxruntime_vendor** -- CPU-only ONNX Runtime 1.26.0 Python provider.
+- **python_onnxruntime_cuda_vendor** -- ONNX Runtime 1.26.0 Python provider for
+  CUDA 12.
+- **onnxruntime_conversions** -- C++ `Ort::Value` API and plugin registry.
+- **onnxruntime_conversions_cpu** -- C++ host-memory implementation.
+- **onnxruntime_conversions_cuda** -- C++ CUDA implementation.
+- **onnxruntime_conversions_py** -- Python `OrtValue` API and plugin registry.
+- **onnxruntime_conversions_py_cpu** -- Python host-memory implementation.
+- **onnxruntime_conversions_py_cuda** -- Python CUDA implementation.
 - **torch_conversions** -- C++ `at::Tensor` API and runtime plugin registry.
 - **torch_conversions_cpu** -- C++ host-memory implementation.
 - **torch_conversions_cuda** -- C++ CUDA implementation backed by `cuda_buffer`.
@@ -57,14 +68,17 @@ conversion libraries built on the same buffer infrastructure.
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
 - CPU LibTorch and Python Torch 2.9.1 providers for CPU conversions.
-- A CUDA Toolkit in the 12 or 13 series only for the CUDA buffer, provider,
-  and conversion packages, declared through the upstream `nvidia-cuda` rosdep
-  key. The CUDA vendors select a `cu126`, `cu128`, or `cu130` distribution. A
-  CPU-only installation does not require CUDA packages, a GPU, or a driver.
+- A CUDA Toolkit in the 12 or 13 series for the CUDA buffer and Torch
+  accelerator packages, declared through the upstream `nvidia-cuda` rosdep
+  key. The Torch vendors select a `cu126`, `cu128`, or `cu130` distribution. A
+  Torch CPU-only installation does not require CUDA packages, a GPU, or a
+  driver.
+- ONNX Runtime accelerator packages require CUDA 12 and cuDNN 9.
 
 Per-package build, test, and run details live in each package's README:
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
+- [`onnxruntime_conversions/README.md`](onnxruntime_conversions/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## API overview

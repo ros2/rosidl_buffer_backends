@@ -1,0 +1,118 @@
+# Copyright 2026 Open Source Robotics Foundation, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from array import array
+from typing import Optional
+
+import numpy
+import onnxruntime as ort
+
+from onnxruntime_conversions._ort_bridge import make_dlpack_capsule
+from onnxruntime_conversions._plugin import ConversionRegistry
+from onnxruntime_conversions._plugin import DLPackProducer
+from onnxruntime_conversions._plugin import TensorMetadata
+
+
+class CpuConversionPlugin:
+    """Direct OrtValue views over host-backed tensor message storage."""
+
+    backends = ('cpu',)
+    device_types = (1,)
+    priority = 0
+    is_fallback = True
+
+    def create_stream(self, device_id: int) -> None:
+        self.validate_stream(device_id, None)
+        return None
+
+    def validate_stream(self, device_id: int, stream: Optional[int]) -> None:
+        if device_id != 0 or stream is not None:
+            raise ValueError('CPU streams require device 0 and a null handle')
+
+    def is_available(self) -> bool:
+        return True
+
+    def matches(self, data: object) -> bool:
+        try:
+            memoryview(data)
+        except TypeError:
+            return False
+        return True
+
+    def allocate(
+        self, byte_count: int, backend: str, device_id: Optional[int]
+    ) -> array:
+        del backend
+        if device_id not in (None, 0):
+            raise ValueError('CPU storage has no device index other than 0')
+        return array('B', bytes(byte_count))
+
+    @staticmethod
+    def _numpy_view(data: object, metadata: TensorMetadata) -> numpy.ndarray:
+        return numpy.frombuffer(
+            data,
+            dtype=metadata.numpy_dtype,
+            count=metadata.byte_count // metadata.numpy_dtype.itemsize,
+            offset=metadata.byte_offset,
+        ).reshape(tuple(metadata.shape))
+
+    def from_input(
+        self, data: object, metadata: TensorMetadata, stream: Optional[int]
+    ) -> tuple[object, object]:
+        del stream
+        view = self._numpy_view(data, metadata)
+        dtype_code = 1 if metadata.element_type == 9 else metadata.dtype_code
+        capsule = make_dlpack_capsule(
+            view.ctypes.data,
+            1,
+            0,
+            dtype_code,
+            metadata.dtype_bits,
+            metadata.dtype_lanes,
+            list(metadata.shape),
+            list(metadata.strides),
+            0,
+            view,
+        )
+        return ort.OrtValue.from_dlpack(
+            DLPackProducer(capsule, metadata.numpy_dtype, (1, 0))), view
+
+    def from_output(
+        self, data: object, metadata: TensorMetadata, stream: Optional[int]
+    ) -> tuple[object, object]:
+        return self.from_input(data, metadata, stream)
+
+    def copy_to(
+        self,
+        data: object,
+        metadata: TensorMetadata,
+        source: object,
+        stream: Optional[int],
+    ) -> None:
+        del stream
+        if source.device_name().lower() != 'cpu':
+            raise RuntimeError('CPU plugin cannot read a non-CPU OrtValue')
+        numpy.copyto(self._numpy_view(data, metadata), source.numpy())
+
+    def session_providers(
+        self, device_id: int, stream: Optional[int]
+    ) -> list:
+        del device_id
+        if stream is not None:
+            raise ValueError('Host memory sessions take no execution stream')
+        return ['CPUExecutionProvider']
+
+
+def register(registry: ConversionRegistry) -> None:
+    registry.register(CpuConversionPlugin())
