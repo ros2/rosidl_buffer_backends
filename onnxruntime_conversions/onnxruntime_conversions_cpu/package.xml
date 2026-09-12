@@ -9,7 +9,7 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>onnxruntime_conversions</depend>
-  <depend>onnxruntime_cuda_vendor</depend>
+  <depend>onnxruntime_core_vendor</depend>
   <depend>pluginlib</depend>
 
   <test_depend>ament_lint_auto</test_depend>

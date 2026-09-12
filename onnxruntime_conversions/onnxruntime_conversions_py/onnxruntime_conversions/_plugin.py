@@ -66,14 +66,16 @@ class ConversionPlugin(Protocol):
     """ONNX Runtime conversion implementation for one device type."""
 
     backends: Sequence[str]
-    device_types: Sequence[str]
+    device_types: Sequence[int]
     priority: int
 
     def is_available(self) -> bool: ...
 
     def matches(self, data: object) -> bool: ...
 
-    def allocate(self, byte_count: int, backend: str) -> object: ...
+    def allocate(
+        self, byte_count: int, backend: str, device_id: Optional[int]
+    ) -> object: ...
 
     def from_input(
         self, data: object, metadata: TensorMetadata, stream: Optional[int]
@@ -92,12 +94,16 @@ class ConversionPlugin(Protocol):
         self, device_id: int, stream: Optional[int]
     ) -> list: ...
 
+    def create_stream(self, device_id: int) -> object: ...
+
+    def validate_stream(self, device_id: int, stream: Optional[int]) -> None: ...
+
 
 class ConversionRegistry:
 
     def __init__(self) -> None:
         self._by_backend: dict[str, ConversionPlugin] = {}
-        self._by_device: dict[str, str] = {}
+        self._by_device: dict[int, str] = {}
         self._fallbacks: list[ConversionPlugin] = []
 
     def register(self, plugin: ConversionPlugin) -> None:
@@ -135,7 +141,7 @@ class ConversionRegistry:
                 f'installed backends are {self.backends()}')
         return plugin
 
-    def for_device(self, device_type: str) -> ConversionPlugin:
+    def for_device(self, device_type: int) -> ConversionPlugin:
         backend = self._by_device.get(device_type)
         if backend is None:
             raise RuntimeError(

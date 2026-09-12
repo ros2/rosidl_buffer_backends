@@ -28,9 +28,17 @@ class CpuConversionPlugin:
     """Direct OrtValue views over host-backed tensor message storage."""
 
     backends = ('cpu',)
-    device_types = ('cpu',)
+    device_types = (1,)
     priority = 0
     is_fallback = True
+
+    def create_stream(self, device_id: int) -> None:
+        self.validate_stream(device_id, None)
+        return None
+
+    def validate_stream(self, device_id: int, stream: Optional[int]) -> None:
+        if device_id != 0 or stream is not None:
+            raise ValueError('CPU streams require device 0 and a null handle')
 
     def is_available(self) -> bool:
         return True
@@ -42,8 +50,12 @@ class CpuConversionPlugin:
             return False
         return True
 
-    def allocate(self, byte_count: int, backend: str) -> array:
+    def allocate(
+        self, byte_count: int, backend: str, device_id: Optional[int]
+    ) -> array:
         del backend
+        if device_id not in (None, 0):
+            raise ValueError('CPU storage has no device index other than 0')
         return array('B', bytes(byte_count))
 
     @staticmethod

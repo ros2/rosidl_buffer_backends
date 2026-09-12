@@ -17,14 +17,13 @@
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
-  <exec_depend>python_onnxruntime_cuda_vendor</exec_depend>
+  <exec_depend>python_onnxruntime_vendor</exec_depend>
   <exec_depend>rosidl_buffer_py</exec_depend>
   <exec_depend>tensor_msgs</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
-  <test_depend>cuda_buffer_py</test_depend>
   <test_depend>rclpy</test_depend>
   <test_depend>rmw_fastrtps_cpp</test_depend>
 

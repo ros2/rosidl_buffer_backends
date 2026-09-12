@@ -22,13 +22,17 @@ import numpy as np
 
 import onnxruntime as ort
 
+from onnxruntime_conversions import _core
 from onnxruntime_conversions import allocate_tensor_msg
 from onnxruntime_conversions import available_backends
+from onnxruntime_conversions import borrow_stream
+from onnxruntime_conversions import create_stream
 from onnxruntime_conversions import from_input_tensor_msg
 from onnxruntime_conversions import from_output_tensor_msg
 from onnxruntime_conversions import OrtTensorView
 from onnxruntime_conversions import session_providers
 from onnxruntime_conversions import to_tensor_msg
+from onnxruntime_conversions._plugin import ConversionRegistry
 
 import pytest
 
@@ -54,6 +58,71 @@ SUPPORTED_TYPES = [
 def identity_session():
     return ort.InferenceSession(
         identity_model((2, 3)), providers=session_providers('cpu'))
+
+
+def test_cpu_stream_selection_and_validation(monkeypatch):
+    monkeypatch.setenv('ROSIDL_TENSOR_BACKEND', 'cpu')
+    stream = create_stream()
+    assert stream.backend == 'cpu'
+    assert stream.device_id == 0
+    assert stream.handle is None
+    assert not stream.owns_stream
+    assert borrow_stream(None, 'cpu') == stream
+    monkeypatch.setenv('ROSIDL_TENSOR_BACKEND', 'unavailable')
+    assert create_stream('cpu') == stream
+    assert session_providers(stream=stream) == ['CPUExecutionProvider']
+    with pytest.raises(RuntimeError, match='unavailable'):
+        create_stream()
+    with pytest.raises(ValueError, match='device 0'):
+        create_stream('cpu', 1)
+    with pytest.raises(ValueError, match='null handle'):
+        borrow_stream(1, 'cpu')
+    msg = allocate_tensor_msg((4,), np.float32, stream=stream)
+    with from_output_tensor_msg(msg, stream) as value:
+        value.update_inplace(np.arange(4, dtype=np.float32))
+    with from_input_tensor_msg(msg, stream) as value:
+        copied = to_tensor_msg(value, stream=stream)
+    assert copied.data == msg.data
+    with pytest.raises(ValueError, match='Backend must match'):
+        session_providers('cuda', stream=stream)
+    with pytest.raises(ValueError, match='Device must match'):
+        session_providers(device_id=1, stream=stream)
+    with pytest.raises(ValueError, match='Backend must match'):
+        allocate_tensor_msg((4,), np.float32, 'cuda', stream=stream)
+    with pytest.raises(ValueError, match='Device must match'):
+        allocate_tensor_msg((4,), np.float32, device_id=1, stream=stream)
+    with pytest.raises(TypeError, match='Stream object'):
+        allocate_tensor_msg((4,), np.float32, stream=1)
+
+
+def test_registry_distinguishes_accelerators_and_preserves_device_index(monkeypatch):
+    class Plugin:
+        priority = 100
+
+        def __init__(self, backend, device_type):
+            self.backends = (backend,)
+            self.device_types = (device_type,)
+            self.allocated_device = None
+
+        def is_available(self):
+            return True
+
+        def allocate(self, byte_count, backend, device_id):
+            self.allocated_device = device_id
+            return array('B', [0]) * byte_count
+
+    registry = ConversionRegistry()
+    cuda = Plugin('cuda', 2)
+    rocm = Plugin('rocm', 10)
+    registry.register(cuda)
+    registry.register(rocm)
+    assert registry.for_device(2) is cuda
+    assert registry.for_device(10) is rocm
+    monkeypatch.setattr(_core, '_REGISTRY', registry)
+
+    allocate_tensor_msg((4,), np.float32, 'rocm', device_id=3)
+    assert rocm.allocated_device == 3
+    assert cuda.allocated_device is None
 
 
 @pytest.mark.parametrize('element_type,numpy_type', SUPPORTED_TYPES)

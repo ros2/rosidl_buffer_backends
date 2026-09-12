@@ -19,8 +19,7 @@
   <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
   <depend version_gte="9" version_lt="10">nvidia-cudnn</depend>
 
-  <!-- These providers install competing copies of libonnxruntime.so.1. -->
-  <conflict>onnxruntime_core_vendor</conflict>
+  <depend>onnxruntime_core_vendor</depend>
   <conflict>onnxruntime_vendor</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>

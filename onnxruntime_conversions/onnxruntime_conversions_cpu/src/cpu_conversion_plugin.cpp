@@ -31,15 +31,31 @@ class CpuConversionPlugin final
 {
 public:
   std::string backend() const override {return "cpu";}
-  OrtMemoryInfoDeviceType device_type() const override
+  bool supports(const Ort::ConstMemoryInfo & memory) const override
   {
-    return OrtMemoryInfoDeviceType_CPU;
+    return memory.GetDeviceType() == OrtMemoryInfoDeviceType_CPU;
   }
   bool available() const override {return true;}
   int priority() const override {return 0;}
 
-  void allocate(TensorMsg & msg, size_t byte_count) override
+  Ort::SyncStream create_stream(Ort::Env &, int device_id) override
   {
+    validate_stream(device_id, nullptr);
+    return Ort::SyncStream{nullptr};
+  }
+
+  void validate_stream(int device_id, void * execution_stream) const override
+  {
+    if (device_id != 0 || execution_stream != nullptr) {
+      throw std::invalid_argument("CPU streams require device 0 and a null handle");
+    }
+  }
+
+  void allocate(TensorMsg & msg, size_t byte_count, int device_id) override
+  {
+    if (device_id != -1 && device_id != 0) {
+      throw std::invalid_argument("CPU storage has no device index other than 0");
+    }
     msg.data.resize(byte_count);
   }
 

@@ -16,17 +16,23 @@
 
 from onnxruntime_conversions._core import allocate_tensor_msg
 from onnxruntime_conversions._core import available_backends
+from onnxruntime_conversions._core import borrow_stream
+from onnxruntime_conversions._core import create_stream
 from onnxruntime_conversions._core import default_backend
 from onnxruntime_conversions._core import from_input_tensor_msg
 from onnxruntime_conversions._core import from_output_tensor_msg
 from onnxruntime_conversions._core import OrtTensorView
 from onnxruntime_conversions._core import session_providers
+from onnxruntime_conversions._core import Stream
 from onnxruntime_conversions._core import to_tensor_msg
 
 __all__ = [
     'OrtTensorView',
+    'Stream',
     'allocate_tensor_msg',
     'available_backends',
+    'borrow_stream',
+    'create_stream',
     'default_backend',
     'from_input_tensor_msg',
     'from_output_tensor_msg',

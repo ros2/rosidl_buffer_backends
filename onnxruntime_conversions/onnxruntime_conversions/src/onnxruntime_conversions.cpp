@@ -75,16 +75,23 @@ public:
   }
 
   std::shared_ptr<ConversionPlugin> for_device(
-    OrtMemoryInfoDeviceType device_type) const
+    const Ort::ConstMemoryInfo & memory) const
   {
-    const auto found = devices_.find(device_type);
-    if (found == devices_.end()) {
-      throw std::runtime_error(
-              "onnxruntime_conversions: no plugin serves ONNX Runtime device " +
-              std::to_string(static_cast<int>(device_type)) +
-              "; available backends are " + describe());
+    std::shared_ptr<ConversionPlugin> selected;
+    for (const auto & entry : backends_) {
+      if (entry.second->supports(memory)) {
+        if (selected) {
+          throw std::runtime_error("onnxruntime_conversions: ambiguous memory provider");
+        }
+        selected = entry.second;
+      }
     }
-    return found->second;
+    if (!selected) {
+      throw std::runtime_error(
+              "onnxruntime_conversions: no plugin serves allocator '" +
+              memory.GetAllocatorName() + "'; available backends are " + describe());
+    }
+    return selected;
   }
 
   std::vector<std::string> names() const
@@ -136,9 +143,7 @@ private:
         if (!plugin->available()) {
           continue;
         }
-        if (backends_.emplace(plugin->backend(), plugin).second) {
-          devices_.emplace(plugin->device_type(), plugin);
-        }
+        backends_.emplace(plugin->backend(), plugin);
       } catch (const std::exception &) {
         // Independently installed accelerator plugins may lack their runtime.
       }
@@ -156,7 +161,6 @@ private:
 
   pluginlib::ClassLoader<ConversionPlugin> loader_;
   std::map<std::string, std::shared_ptr<ConversionPlugin>> backends_;
-  std::map<OrtMemoryInfoDeviceType, std::shared_ptr<ConversionPlugin>> devices_;
 };
 
 struct DtypeDescription
@@ -303,10 +307,45 @@ size_t value_byte_count(const Ort::Value & value)
 
 }  // namespace
 
+Stream::Stream(std::string backend, int device_id, void * handle, Ort::SyncStream owner)
+: backend_(std::move(backend)), device_id_(device_id), borrowed_handle_(handle),
+  owner_(owner ? std::make_shared<Ort::SyncStream>(std::move(owner)) : nullptr) {}
+
+void * Stream::handle() const
+{
+  return owner_ ? owner_->GetHandle() : borrowed_handle_;
+}
+
+Stream create_stream(Ort::Env & env, const std::string & backend, int device_id)
+{
+  auto & registry = Registry::instance();
+  auto plugin = registry.for_backend(backend.empty() ? registry.default_name() : backend);
+  auto owner = plugin->create_stream(env, device_id);
+  plugin->validate_stream(device_id, owner ? owner.GetHandle() : nullptr);
+  return Stream(plugin->backend(), device_id, nullptr, std::move(owner));
+}
+
+Stream borrow_stream(void * handle, const std::string & backend, int device_id)
+{
+  auto plugin = Registry::instance().for_backend(backend);
+  plugin->validate_stream(device_id, handle);
+  return Stream(plugin->backend(), device_id, handle, Ort::SyncStream{nullptr});
+}
+
 OrtTensorView::OrtTensorView() = default;
 
 OrtTensorView::OrtTensorView(std::shared_ptr<void> lease, Ort::Value value)
 : lease_(std::move(lease)), value_(std::move(value)) {}
+
+OrtTensorView & OrtTensorView::operator=(OrtTensorView && other) noexcept
+{
+  if (this != &other) {
+    value_ = Ort::Value{nullptr};
+    lease_ = std::move(other.lease_);
+    value_ = std::move(other.value_);
+  }
+  return *this;
+}
 
 Ort::Value & OrtTensorView::value() {return value_;}
 const Ort::Value & OrtTensorView::value() const {return value_;}
@@ -396,7 +435,8 @@ size_t tensor_byte_count(const TensorMsg & msg)
 std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const std::string & backend)
+  const std::string & backend,
+  int device_id)
 {
   const auto description = describe_dtype(dtype);
   const auto strides = contiguous_strides(shape);
@@ -415,7 +455,7 @@ std::unique_ptr<TensorMsg> allocate_tensor_msg(
   if (count != 0 && item_size > std::numeric_limits<size_t>::max() / count) {
     throw std::overflow_error("onnxruntime_conversions: tensor size overflow");
   }
-  plugin->allocate(*msg, count * item_size);
+  plugin->allocate(*msg, count * item_size, device_id);
   return msg;
 }
 
@@ -451,11 +491,11 @@ void to_tensor_msg(
     throw std::runtime_error(
             "onnxruntime_conversions: tensor exceeds message storage");
   }
-  const auto source_device = value.GetTensorMemoryInfo().GetDeviceType();
+  const auto memory = value.GetTensorMemoryInfo();
   auto & registry = Registry::instance();
-  auto plugin = source_device == OrtMemoryInfoDeviceType_CPU ?
+  auto plugin = memory.GetDeviceType() == OrtMemoryInfoDeviceType_CPU ?
     registry.for_backend(msg.data.get_backend_type()) :
-    registry.for_device(source_device);
+    registry.for_device(memory);
   plugin->copy_to(msg, value, bytes, execution_stream);
   set_metadata(msg, value);
 }
@@ -467,12 +507,43 @@ std::unique_ptr<TensorMsg> to_tensor_msg(
     throw std::invalid_argument("onnxruntime_conversions: Ort::Value is not a tensor");
   }
   const auto info = value.GetTensorTypeAndShapeInfo();
-  auto plugin = Registry::instance().for_device(
-    value.GetTensorMemoryInfo().GetDeviceType());
+  const auto memory = value.GetTensorMemoryInfo();
+  auto plugin = Registry::instance().for_device(memory);
   auto msg = allocate_tensor_msg(
-    info.GetShape(), info.GetElementType(), plugin->backend());
+    info.GetShape(), info.GetElementType(), plugin->backend(), memory.GetDeviceId());
   to_tensor_msg(*msg, value, execution_stream);
   return msg;
+}
+
+std::unique_ptr<TensorMsg> allocate_tensor_msg(
+  const std::vector<int64_t> & shape, ONNXTensorElementDataType dtype, const Stream & stream)
+{
+  return allocate_tensor_msg(shape, dtype, stream.backend(), stream.device_id());
+}
+
+OrtTensorView from_input_tensor_msg(const TensorMsg & msg, const Stream & stream)
+{
+  return from_input_tensor_msg(msg, stream.handle());
+}
+
+OrtTensorView from_output_tensor_msg(TensorMsg & msg, const Stream & stream)
+{
+  return from_output_tensor_msg(msg, stream.handle());
+}
+
+void to_tensor_msg(TensorMsg & msg, const Ort::Value & value, const Stream & stream)
+{
+  to_tensor_msg(msg, value, stream.handle());
+}
+
+std::unique_ptr<TensorMsg> to_tensor_msg(const Ort::Value & value, const Stream & stream)
+{
+  return to_tensor_msg(value, stream.handle());
+}
+
+void configure_session_options(Ort::SessionOptions & session_options, const Stream & stream)
+{
+  configure_session_options(session_options, stream.backend(), stream.device_id(), stream.handle());
 }
 
 void configure_session_options(

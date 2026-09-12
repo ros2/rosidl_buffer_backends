@@ -13,8 +13,6 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
 
-  <!-- These providers install competing copies of libonnxruntime.so.1. -->
-  <conflict>onnxruntime_cuda_vendor</conflict>
   <conflict>onnxruntime_vendor</conflict>
 
   <test_depend>ament_cmake_xmllint</test_depend>

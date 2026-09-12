@@ -10,7 +10,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
-find_package(onnxruntime_cuda_vendor REQUIRED)
+find_package(onnxruntime_core_vendor REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(tensor_msgs REQUIRED)
 
@@ -44,13 +44,14 @@ install(
 )
 
 ament_export_targets(export_${PROJECT_NAME} NAMESPACE ${PROJECT_NAME}::)
-ament_export_dependencies(onnxruntime_cuda_vendor pluginlib tensor_msgs)
+ament_export_dependencies(onnxruntime_core_vendor pluginlib tensor_msgs)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
-  find_package(CUDAToolkit REQUIRED)
+  find_package(CUDAToolkit QUIET)
   find_package(launch_testing_ament_cmake REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   find_package(rclcpp REQUIRED)
   find_package(rclcpp_components REQUIRED)
   find_package(rosidl_runtime_cpp REQUIRED)
@@ -63,18 +64,20 @@ if(BUILD_TESTING)
     target_link_libraries(test_onnxruntime_conversions ${PROJECT_NAME})
   endif()
 
-  ament_add_gtest(test_onnxruntime_conversions_cuda
-    test/test_onnxruntime_conversions_cuda.cpp)
-  if(TARGET test_onnxruntime_conversions_cuda)
-    target_link_libraries(test_onnxruntime_conversions_cuda
-      ${PROJECT_NAME} CUDA::cudart)
+  if(CUDAToolkit_FOUND)
+    ament_add_gtest(test_onnxruntime_conversions_cuda
+      test/test_onnxruntime_conversions_cuda.cpp)
+    if(TARGET test_onnxruntime_conversions_cuda)
+      target_link_libraries(test_onnxruntime_conversions_cuda
+        ${PROJECT_NAME} CUDA::cudart)
+    endif()
+
   endif()
 
   add_library(ort_tensor_publisher_component SHARED
     test/src/ort_tensor_publisher_node.cpp)
   target_link_libraries(ort_tensor_publisher_component
     ${PROJECT_NAME}
-    CUDA::cudart
     rclcpp::rclcpp
     rclcpp_components::component
     rosidl_runtime_cpp::rosidl_runtime_cpp
@@ -88,7 +91,6 @@ if(BUILD_TESTING)
     test/src/ort_tensor_subscriber_node.cpp)
   target_link_libraries(ort_tensor_subscriber_component
     ${PROJECT_NAME}
-    CUDA::cudart
     rclcpp::rclcpp
     rclcpp_components::component
     rosidl_runtime_cpp::rosidl_runtime_cpp
@@ -107,7 +109,8 @@ if(BUILD_TESTING)
     RUNTIME DESTINATION bin)
 
   add_launch_test(test/test_ort_tensor_inter_pubsub_fastrtps_launch.py
-    TARGET test_ort_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30)
+    TARGET test_ort_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package(CONFIG_EXTRAS_POST cmake/onnxruntime_conversions-extras.cmake)

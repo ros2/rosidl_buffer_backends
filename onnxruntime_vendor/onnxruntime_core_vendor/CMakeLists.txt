@@ -23,11 +23,9 @@ set(ONNXRUNTIME_CORE_VENDOR_VERSION "1.26.0" CACHE STRING
 
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
 if(_system_arch MATCHES "^(x86_64|amd64)$")
-  set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND "x64_gpu")
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM
-    "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_CORE_VENDOR_VERSION}")
+    "onnxruntime-linux-x64-${ONNXRUNTIME_CORE_VENDOR_VERSION}")
 elseif(_system_arch MATCHES "^(aarch64|arm64)$")
-  set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND "aarch64_cpu")
   set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM
     "onnxruntime-linux-aarch64-${ONNXRUNTIME_CORE_VENDOR_VERSION}")
 else()
@@ -64,17 +62,21 @@ set(_required_files
   VERSION_NUMBER
   lib/libonnxruntime.so
   lib/cmake/onnxruntime/onnxruntimeConfig.cmake
-  lib/cmake/onnxruntime/onnxruntimeConfigVersion.cmake
-  lib/libonnxruntime_providers_shared.so)
-if(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_KIND STREQUAL "x64_gpu")
-  list(APPEND _required_files lib/libonnxruntime_providers_cuda.so)
-endif()
+  lib/cmake/onnxruntime/onnxruntimeConfigVersion.cmake)
 foreach(_required_file IN LISTS _required_files)
   if(NOT EXISTS "${_onnxruntime_root}/${_required_file}")
     message(FATAL_ERROR
       "${PROJECT_NAME}: archive is missing ${_required_file}")
   endif()
 endforeach()
+
+file(READ "${_onnxruntime_root}/VERSION_NUMBER" _archive_version)
+string(STRIP "${_archive_version}" _archive_version)
+if(NOT _archive_version STREQUAL ONNXRUNTIME_CORE_VENDOR_VERSION)
+  message(FATAL_ERROR
+    "${PROJECT_NAME}: expected ${ONNXRUNTIME_CORE_VENDOR_VERSION}, "
+    "but the archive contains ${_archive_version}")
+endif()
 
 set(_onnxruntime_cmake_dir
   "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime_cmake")

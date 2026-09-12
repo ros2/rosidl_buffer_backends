@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Encode Identity models without loading ONNX's duplicate protobuf descriptors."""
+"""Encode test models without loading ONNX's duplicate protobuf descriptors."""
 
 from typing import Sequence
 
@@ -77,6 +77,16 @@ def identity_model(
 ) -> bytes:
     """Serialize a ModelProto holding one Identity node over ``shape``."""
     node = _text(1, 'input') + _text(2, 'output') + _text(4, 'Identity')
+    return _model(node, shape, element_type)
+
+
+def matmul_model() -> bytes:
+    """Serialize MatMul(input, input) for a float32 [2, 2] tensor."""
+    node = _text(1, 'input') * 2 + _text(2, 'output') + _text(4, 'MatMul')
+    return _model(node, (2, 2), ElementType.FLOAT)
+
+
+def _model(node: bytes, shape: Sequence[int], element_type: int) -> bytes:
     graph = (
         _bytes(1, node)
         + _text(2, 'identity')

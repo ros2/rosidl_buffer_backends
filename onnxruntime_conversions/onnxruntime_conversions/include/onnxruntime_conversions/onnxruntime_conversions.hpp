@@ -29,7 +29,35 @@ namespace onnxruntime_conversions
 
 using TensorMsg = tensor_msgs::msg::ExperimentalTensor;
 
-/// An Ort::Value over message storage. CPU storage must outlive the view.
+/// Keep this handle alive until its sessions, tensor views, and queued work finish.
+class ONNXRUNTIME_CONVERSIONS_PUBLIC Stream
+{
+public:
+  const std::string & backend() const {return backend_;}
+  int device_id() const {return device_id_;}
+  void * handle() const;
+  bool owns_stream() const {return owner_ != nullptr;}
+
+private:
+  friend Stream create_stream(Ort::Env &, const std::string &, int);
+  friend Stream borrow_stream(void *, const std::string &, int);
+  Stream(std::string backend, int device_id, void * handle, Ort::SyncStream owner);
+
+  std::string backend_;
+  int device_id_;
+  void * borrowed_handle_;
+  std::shared_ptr<Ort::SyncStream> owner_;
+};
+
+/// Create an ORT-owned accelerator stream, or an empty stream for CPU execution.
+ONNXRUNTIME_CONVERSIONS_PUBLIC Stream create_stream(
+  Ort::Env & env, const std::string & backend = {}, int device_id = 0);
+
+/// Wrap a native stream without taking ownership. The caller must keep it alive.
+ONNXRUNTIME_CONVERSIONS_PUBLIC Stream borrow_stream(
+  void * handle, const std::string & backend, int device_id = 0);
+
+/// An Ort::Value over borrowed storage. Keep msg alive and do not resize its buffer.
 class ONNXRUNTIME_CONVERSIONS_PUBLIC OrtTensorView
 {
 public:
@@ -38,7 +66,7 @@ public:
   ~OrtTensorView() = default;
 
   OrtTensorView(OrtTensorView &&) noexcept = default;
-  OrtTensorView & operator=(OrtTensorView &&) noexcept = default;
+  OrtTensorView & operator=(OrtTensorView && other) noexcept;
   OrtTensorView(const OrtTensorView &) = delete;
   OrtTensorView & operator=(const OrtTensorView &) = delete;
 
@@ -66,23 +94,38 @@ ONNXRUNTIME_CONVERSIONS_PUBLIC size_t tensor_byte_count(const TensorMsg & msg);
 ONNXRUNTIME_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> allocate_tensor_msg(
   const std::vector<int64_t> & shape,
   ONNXTensorElementDataType dtype,
-  const std::string & backend = {});
+  const Stream & stream);
+ONNXRUNTIME_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> allocate_tensor_msg(
+  const std::vector<int64_t> & shape,
+  ONNXTensorElementDataType dtype,
+  const std::string & backend = {},
+  int device_id = -1);
 
+ONNXRUNTIME_CONVERSIONS_PUBLIC OrtTensorView from_input_tensor_msg(
+  const TensorMsg & msg, const Stream & stream);
 ONNXRUNTIME_CONVERSIONS_PUBLIC OrtTensorView from_input_tensor_msg(
   const TensorMsg & msg,
   void * execution_stream = nullptr);
+ONNXRUNTIME_CONVERSIONS_PUBLIC OrtTensorView from_output_tensor_msg(
+  TensorMsg & msg, const Stream & stream);
 ONNXRUNTIME_CONVERSIONS_PUBLIC OrtTensorView from_output_tensor_msg(
   TensorMsg & msg,
   void * execution_stream = nullptr);
 
 ONNXRUNTIME_CONVERSIONS_PUBLIC void to_tensor_msg(
+  TensorMsg & msg, const Ort::Value & value, const Stream & stream);
+ONNXRUNTIME_CONVERSIONS_PUBLIC void to_tensor_msg(
   TensorMsg & msg,
   const Ort::Value & value,
   void * execution_stream = nullptr);
 ONNXRUNTIME_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> to_tensor_msg(
+  const Ort::Value & value, const Stream & stream);
+ONNXRUNTIME_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> to_tensor_msg(
   const Ort::Value & value,
   void * execution_stream = nullptr);
 
+ONNXRUNTIME_CONVERSIONS_PUBLIC void configure_session_options(
+  Ort::SessionOptions & session_options, const Stream & stream);
 ONNXRUNTIME_CONVERSIONS_PUBLIC void configure_session_options(
   Ort::SessionOptions & session_options,
   const std::string & backend = {},

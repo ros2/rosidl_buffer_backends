@@ -13,9 +13,12 @@
 # limitations under the License.
 
 import ctypes
+import gc
+import time
 
 from identity_model import ElementType
 from identity_model import identity_model
+from identity_model import matmul_model
 
 import numpy as np
 
@@ -23,6 +26,8 @@ import onnxruntime as ort
 
 from onnxruntime_conversions import allocate_tensor_msg
 from onnxruntime_conversions import available_backends
+from onnxruntime_conversions import borrow_stream
+from onnxruntime_conversions import create_stream
 from onnxruntime_conversions import default_backend
 from onnxruntime_conversions import from_input_tensor_msg
 from onnxruntime_conversions import from_output_tensor_msg
@@ -50,13 +55,32 @@ def cuda_buffer():
 
 
 @pytest.fixture
-def cuda_stream():
+def cuda_runtime():
     runtime = ctypes.CDLL('libcudart.so')
     runtime.cudaStreamCreateWithFlags.argtypes = [
         ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
     runtime.cudaStreamCreateWithFlags.restype = ctypes.c_int
     runtime.cudaStreamDestroy.argtypes = [ctypes.c_void_p]
     runtime.cudaStreamDestroy.restype = ctypes.c_int
+    runtime.cudaStreamSynchronize.argtypes = [ctypes.c_void_p]
+    runtime.cudaStreamSynchronize.restype = ctypes.c_int
+    runtime.cudaMemcpyAsync.argtypes = [
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+        ctypes.c_int, ctypes.c_void_p]
+    runtime.cudaMemcpyAsync.restype = ctypes.c_int
+    runtime.cudaLaunchHostFunc.argtypes = [
+        ctypes.c_void_p, ctypes.CFUNCTYPE(None, ctypes.c_void_p), ctypes.c_void_p]
+    runtime.cudaLaunchHostFunc.restype = ctypes.c_int
+    runtime.cudaStreamQuery.argtypes = [ctypes.c_void_p]
+    runtime.cudaStreamQuery.restype = ctypes.c_int
+    runtime.cudaGetDeviceCount.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    runtime.cudaGetDeviceCount.restype = ctypes.c_int
+    return runtime
+
+
+@pytest.fixture
+def cuda_stream(cuda_runtime):
+    runtime = cuda_runtime
     stream = ctypes.c_void_p()
     result = runtime.cudaStreamCreateWithFlags(ctypes.byref(stream), 1)
     if result != 0:
@@ -78,6 +102,64 @@ def test_cuda_is_preferred_over_host_memory():
     assert allocate_tensor_msg((4,), np.float32).data.backend_type == 'cuda'
 
 
+def test_stream_ownership_and_validation(cuda_runtime, cuda_stream):
+    owner = create_stream()
+    assert owner.backend == 'cuda'
+    assert owner.device_id == 0
+    assert owner.owns_stream
+    assert create_stream('cuda').handle != owner.handle
+    retained = owner
+    del owner
+    gc.collect()
+    assert cuda_runtime.cudaStreamSynchronize(retained.handle) == 0
+    borrowed = borrow_stream(cuda_stream, 'cuda')
+    assert not borrowed.owns_stream
+    assert borrowed.handle == cuda_stream
+    del borrowed
+    gc.collect()
+    assert cuda_runtime.cudaStreamSynchronize(cuda_stream) == 0
+    assert borrow_stream(0, 'cuda').handle == 0
+    with pytest.raises(ValueError, match='integer native handle'):
+        borrow_stream(None, 'cuda')
+    count = ctypes.c_int()
+    assert cuda_runtime.cudaGetDeviceCount(ctypes.byref(count)) == 0
+    with pytest.raises(RuntimeError, match='cudaSetDevice'):
+        create_stream('cuda', count.value)
+    with pytest.raises(RuntimeError, match='cudaSetDevice'):
+        borrow_stream(cuda_stream, 'cuda', count.value)
+
+
+@pytest.mark.parametrize('owned', [True, False])
+def test_stream_orders_matmul_inference(owned, cuda_runtime, cuda_stream):
+    stream = create_stream() if owned else borrow_stream(cuda_stream, 'cuda')
+    session = ort.InferenceSession(matmul_model(), providers=session_providers(stream=stream))
+    provider_options = session.get_provider_options()['CUDAExecutionProvider']
+    assert int(provider_options['user_compute_stream']) == stream.handle
+    input_msg = allocate_tensor_msg((2, 2), np.float32, stream=stream)
+    output_msg = allocate_tensor_msg((2, 2), np.float32, stream=stream)
+    zeros = np.zeros((2, 2), dtype=np.float32)
+    values = np.full((2, 2), 7, dtype=np.float32)
+    delayed = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(lambda _: time.sleep(0.2))
+    with from_output_tensor_msg(input_msg, stream) as value:
+        assert cuda_runtime.cudaMemcpyAsync(
+            value.data_ptr(), zeros.ctypes.data, zeros.nbytes, 1, stream.handle) == 0
+        assert cuda_runtime.cudaStreamSynchronize(stream.handle) == 0
+        assert cuda_runtime.cudaLaunchHostFunc(stream.handle, delayed, None) == 0
+        assert cuda_runtime.cudaMemcpyAsync(
+            value.data_ptr(), values.ctypes.data, values.nbytes, 1, stream.handle) == 0
+    del value
+    with from_input_tensor_msg(input_msg, stream) as source:
+        with from_output_tensor_msg(output_msg, stream) as output:
+            binding = session.io_binding()
+            binding.bind_ortvalue_input('input', source)
+            binding.bind_ortvalue_output('output', output)
+            session.run_with_iobinding(binding)
+            assert cuda_runtime.cudaStreamSynchronize(stream.handle) == 0
+            assert np.array_equal(output.numpy(), np.full((2, 2), 98, dtype=np.float32))
+            del binding, output
+    del source
+
+
 def test_host_storage_stays_available_alongside_cuda():
     msg = allocate_tensor_msg((4,), np.float32, 'cpu')
 
@@ -92,6 +174,84 @@ def test_views_report_cuda_device_memory(cuda_stream):
         assert value.shape() == [2, 3]
         assert value.element_type() == ElementType.FLOAT
         assert value.data_ptr() != 0
+
+
+@pytest.mark.parametrize('conversion', [
+    from_input_tensor_msg, from_output_tensor_msg])
+def test_views_keep_storage_alive_after_message_destruction(
+    conversion, cuda_stream,
+):
+    msg = allocate_tensor_msg((4,), np.float32, 'cuda')
+    view = conversion(msg, cuda_stream)
+    pointer = view.value.data_ptr()
+    del msg
+    gc.collect()
+    assert view.value.data_ptr() == pointer
+    assert view.value.numpy().shape == (4,)
+    view.close()
+
+
+def test_view_orders_the_producer_before_consumer_work(cuda_runtime, cuda_stream):
+    producer = ctypes.c_void_p()
+    assert cuda_runtime.cudaStreamCreateWithFlags(ctypes.byref(producer), 1) == 0
+    delayed = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(lambda _: time.sleep(0.2))
+    expected = np.arange(4, dtype=np.float32)
+    msg = allocate_tensor_msg((4,), np.float32, 'cuda')
+    try:
+        with from_output_tensor_msg(msg, producer.value) as value:
+            assert cuda_runtime.cudaLaunchHostFunc(producer, delayed, None) == 0
+            assert cuda_runtime.cudaMemcpyAsync(
+                value.data_ptr(), expected.ctypes.data, expected.nbytes,
+                1, producer) == 0
+        with from_input_tensor_msg(msg, cuda_stream) as value:
+            actual = np.empty_like(expected)
+            assert cuda_runtime.cudaMemcpyAsync(
+                actual.ctypes.data, value.data_ptr(), actual.nbytes,
+                2, cuda_stream) == 0
+            assert cuda_runtime.cudaStreamSynchronize(cuda_stream) == 0
+            assert np.array_equal(actual, expected)
+    finally:
+        assert cuda_runtime.cudaStreamDestroy(producer) == 0
+
+
+def test_copy_finishes_before_releasing_the_source(cuda_runtime, cuda_stream):
+    delayed = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(lambda _: time.sleep(0.2))
+    expected = np.arange(4, dtype=np.float32)
+    value = ort.OrtValue.ortvalue_from_numpy(expected)
+    msg = allocate_tensor_msg((4,), np.float32, 'cuda')
+    assert cuda_runtime.cudaLaunchHostFunc(cuda_stream, delayed, None) == 0
+    to_tensor_msg(msg, value, cuda_stream)
+    assert cuda_runtime.cudaStreamQuery(cuda_stream) == 0
+    del value
+    with from_input_tensor_msg(msg, cuda_stream) as result:
+        assert np.array_equal(result.numpy(), expected)
+
+
+def test_preserves_and_validates_device_indices(cuda_runtime):
+    count = ctypes.c_int()
+    assert cuda_runtime.cudaGetDeviceCount(ctypes.byref(count)) == 0
+    current = ctypes.c_int()
+    assert cuda_runtime.cudaGetDevice(ctypes.byref(current)) == 0
+    allocate_tensor_msg((4,), np.float32, 'cuda')
+    with pytest.raises(RuntimeError, match='cudaSetDevice'):
+        allocate_tensor_msg((4,), np.float32, 'cuda', count.value)
+    for device in range(count.value):
+        if device != current.value:
+            with pytest.raises(RuntimeError, match='CUDA buffer is on device'):
+                allocate_tensor_msg((4,), np.float32, 'cuda', device)
+            continue
+        msg = allocate_tensor_msg((4,), np.float32, 'cuda', device)
+        with from_input_tensor_msg(msg, 0) as value:
+            assert value.__dlpack_device__() == (2, device)
+            copied = to_tensor_msg(value, stream=0)
+        with from_input_tensor_msg(copied, 0) as value:
+            assert value.__dlpack_device__() == (2, device)
+
+
+def test_cuda_views_require_an_explicit_stream():
+    msg = allocate_tensor_msg((4,), np.float32, 'cuda')
+    with pytest.raises(ValueError, match='explicit execution stream'):
+        from_input_tensor_msg(msg)
 
 
 def test_views_alias_the_device_pointer(cuda_buffer, cuda_stream):

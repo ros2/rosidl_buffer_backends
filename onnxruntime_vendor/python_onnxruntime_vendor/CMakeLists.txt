@@ -56,9 +56,9 @@ if(NOT EXISTS "${_stage_marker}")
   file(WRITE "${_stage_marker}" "")
 endif()
 
-_ament_cmake_python_register_environment_hook()
+ament_environment_hooks(environment/pythonpath.dsv.in)
 install(DIRECTORY "${_python_stage}/"
-  DESTINATION "${PYTHON_INSTALL_DIR}"
+  DESTINATION "opt/${PROJECT_NAME}/${PYTHON_INSTALL_DIR}"
   USE_SOURCE_PERMISSIONS)
 
 if(BUILD_TESTING)

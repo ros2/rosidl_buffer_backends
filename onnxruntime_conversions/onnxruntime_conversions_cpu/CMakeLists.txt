@@ -14,7 +14,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(onnxruntime_conversions REQUIRED)
-find_package(onnxruntime_cuda_vendor REQUIRED)
+find_package(onnxruntime_core_vendor REQUIRED)
 find_package(pluginlib REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED src/cpu_conversion_plugin.cpp)

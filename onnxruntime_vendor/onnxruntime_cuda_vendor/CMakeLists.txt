@@ -78,7 +78,8 @@ endif()
 
 set(_download_path
   "${CMAKE_CURRENT_BINARY_DIR}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
-set(_extract_path "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime_extracted")
+set(_extract_path
+  "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime-${ONNXRUNTIME_CUDA_VENDOR_VERSION}")
 set(_root_glob "${_extract_path}/onnxruntime-linux-x64-*")
 
 # The archive's top-level directory can differ from its filename.
@@ -103,6 +104,18 @@ list(LENGTH _onnxruntime_root _root_count)
 if(NOT _root_count EQUAL 1)
   message(FATAL_ERROR
     "${PROJECT_NAME}: expected one extracted archive root, found ${_root_count}")
+endif()
+
+file(READ "${_onnxruntime_root}/VERSION_NUMBER" _archive_version)
+string(STRIP "${_archive_version}" _archive_version)
+if(NOT _archive_version STREQUAL ONNXRUNTIME_CUDA_VENDOR_VERSION)
+  message(FATAL_ERROR
+    "${PROJECT_NAME}: expected ${ONNXRUNTIME_CUDA_VENDOR_VERSION}, "
+    "but the archive contains ${_archive_version}")
+endif()
+find_package(onnxruntime_core_vendor REQUIRED)
+if(NOT ONNXRUNTIME_CORE_VENDOR_VERSION STREQUAL ONNXRUNTIME_CUDA_VENDOR_VERSION)
+  message(FATAL_ERROR "${PROJECT_NAME}: CPU and CUDA provider versions must match")
 endif()
 
 set(_required_files

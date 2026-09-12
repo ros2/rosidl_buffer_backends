@@ -29,7 +29,9 @@ namespace
 using onnxruntime_conversions::TensorMsg;
 using onnxruntime_conversions::allocate_tensor_msg;
 using onnxruntime_conversions::backend_available;
+using onnxruntime_conversions::borrow_stream;
 using onnxruntime_conversions::configure_session_options;
+using onnxruntime_conversions::create_stream;
 using onnxruntime_conversions::from_input_tensor_msg;
 using onnxruntime_conversions::from_output_tensor_msg;
 using onnxruntime_conversions::to_tensor_msg;
@@ -224,32 +226,51 @@ TEST(OnnxRuntimeConversions, RejectsShapeArithmeticOverflow)
 TEST(OnnxRuntimeConversions, RunsInferenceWithPreallocatedMessageBuffers)
 {
   Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_conversions_test");
+  auto stream = create_stream(env);
+  EXPECT_EQ(stream.backend(), onnxruntime_conversions::default_backend());
   Ort::SessionOptions session_options;
-  configure_session_options(session_options, "cpu");
+  configure_session_options(session_options, stream);
   Ort::Session session(
     env, identity_model, sizeof(identity_model), session_options);
   Ort::IoBinding binding(session);
 
   auto input = allocate_tensor_msg(
-    {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
+    {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, stream);
   auto output = allocate_tensor_msg(
-    {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
-  auto * input_data = reinterpret_cast<float *>(input->data.data());
-  for (size_t index = 0; index < 6; ++index) {
-    input_data[index] = static_cast<float>(index + 1);
-  }
+    {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, stream);
+  std::vector<float> values{1, 2, 3, 4, 5, 6};
+  auto source = host_value(values, {2, 3});
+  to_tensor_msg(*input, source, stream);
 
-  auto input_view = from_input_tensor_msg(*input);
-  auto output_view = from_output_tensor_msg(*output);
+  auto input_view = from_input_tensor_msg(*input, stream);
+  auto output_view = from_output_tensor_msg(*output, stream);
   binding.BindInput("input", input_view.value());
   binding.BindOutput("output", output_view.value());
   session.Run(Ort::RunOptions{}, binding);
 
-  const auto * output_data =
-    reinterpret_cast<const float *>(output->data.data());
+  auto copied = to_tensor_msg(output_view.value(), stream);
+  auto copied_view = from_input_tensor_msg(*copied, stream);
+  auto host = allocate_tensor_msg({2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
+  to_tensor_msg(*host, copied_view.value(), stream);
+  const auto * output_data = reinterpret_cast<const float *>(host->data.data());
   for (size_t index = 0; index < 6; ++index) {
-    EXPECT_EQ(output_data[index], input_data[index]);
+    EXPECT_EQ(output_data[index], values[index]);
   }
+}
+
+TEST(OnnxRuntimeConversions, CpuStreamsAreEmptyAndValidateArguments)
+{
+  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "cpu_stream_test");
+  auto stream = create_stream(env, "cpu");
+  EXPECT_EQ(stream.backend(), "cpu");
+  EXPECT_EQ(stream.device_id(), 0);
+  EXPECT_EQ(stream.handle(), nullptr);
+  EXPECT_FALSE(stream.owns_stream());
+  EXPECT_EQ(borrow_stream(nullptr, "cpu").handle(), nullptr);
+  EXPECT_THROW(create_stream(env, "cpu", 1), std::invalid_argument);
+  EXPECT_THROW(borrow_stream(reinterpret_cast<void *>(1), "cpu"), std::invalid_argument);
+  EXPECT_THROW(create_stream(env, "unavailable"), std::runtime_error);
+  EXPECT_THROW(borrow_stream(nullptr, ""), std::runtime_error);
 }
 
 TEST(OnnxRuntimeConversions, ValidatesSessionProviderArguments)

@@ -40,10 +40,10 @@ public:
 
   virtual ~ConversionPlugin() = default;
   virtual std::string backend() const = 0;
-  virtual OrtMemoryInfoDeviceType device_type() const = 0;
+  virtual bool supports(const Ort::ConstMemoryInfo & memory) const = 0;
   virtual bool available() const = 0;
   virtual int priority() const = 0;
-  virtual void allocate(TensorMsg & msg, size_t byte_count) = 0;
+  virtual void allocate(TensorMsg & msg, size_t byte_count, int device_id) = 0;
   virtual ConversionView from_input(
     const TensorMsg & msg, void * execution_stream) = 0;
   virtual ConversionView from_output(
@@ -54,6 +54,8 @@ public:
   virtual void configure_session(
     Ort::SessionOptions & options, int device_id,
     void * execution_stream) = 0;
+  virtual Ort::SyncStream create_stream(Ort::Env & env, int device_id) = 0;
+  virtual void validate_stream(int device_id, void * execution_stream) const = 0;
 };
 
 }  // namespace onnxruntime_conversions

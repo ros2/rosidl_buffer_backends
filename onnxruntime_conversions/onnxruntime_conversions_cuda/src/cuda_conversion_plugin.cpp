@@ -16,6 +16,7 @@
 #include <onnxruntime_cxx_api.h>
 
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -34,9 +35,10 @@ class CudaConversionPlugin final
 {
 public:
   std::string backend() const override {return "cuda";}
-  OrtMemoryInfoDeviceType device_type() const override
+  bool supports(const Ort::ConstMemoryInfo & memory) const override
   {
-    return OrtMemoryInfoDeviceType_GPU;
+    return memory.GetDeviceType() == OrtMemoryInfoDeviceType_GPU &&
+           memory.GetAllocatorName() == "Cuda";
   }
   bool available() const override
   {
@@ -45,15 +47,58 @@ public:
   }
   int priority() const override {return 100;}
 
-  void allocate(TensorMsg & msg, size_t byte_count) override
+  Ort::SyncStream create_stream(Ort::Env & env, int device_id) override
   {
+    DeviceGuard guard(device_id);
+    static std::mutex registration_mutex;
+    std::lock_guard<std::mutex> lock(registration_mutex);
+    auto devices = env.GetEpDevices();
+    bool registered = false;
+    for (const auto & device : devices) {
+      registered = registered || std::string(device.EpName()) == "CUDAExecutionProvider";
+    }
+    if (!registered) {
+      env.RegisterExecutionProviderLibrary(
+        "CUDAExecutionProvider", "libonnxruntime_providers_cuda.so");
+      devices = env.GetEpDevices();
+    }
+    for (const auto & device : devices) {
+      if (std::string(device.EpName()) == "CUDAExecutionProvider" &&
+        device.GetMemoryInfo(OrtDeviceMemoryType_DEFAULT).GetDeviceId() == device_id)
+      {
+        return device.CreateSyncStream();
+      }
+    }
+    throw std::runtime_error("ONNX Runtime has no stream provider for the requested CUDA device");
+  }
+
+  void validate_stream(int device_id, void * execution_stream) const override
+  {
+    if (execution_stream == nullptr) {
+      throw std::invalid_argument("CUDA streams require a non-null native handle");
+    }
+    DeviceGuard guard(device_id);
+    unsigned int flags = 0;
+    check_cuda(cudaStreamGetFlags(stream(execution_stream), &flags));
+  }
+
+  void allocate(TensorMsg & msg, size_t byte_count, int device_id) override
+  {
+    if (device_id == -1) {
+      check_cuda(cudaGetDevice(&device_id));
+    }
+    DeviceGuard guard(device_id);
     msg.data = cuda_buffer_backend::allocate_buffer(byte_count);
+    if (byte_count > 0 && cuda_implementation(msg)->get_device_id() != device_id) {
+      throw std::runtime_error("CUDA buffer pool cannot allocate on the requested device");
+    }
   }
 
   onnxruntime_conversions::ConversionView from_input(
     const TensorMsg & msg, void * execution_stream) override
   {
     const auto * implementation = cuda_implementation(msg);
+    DeviceGuard guard(implementation->get_device_id());
     const auto cuda_stream = stream(execution_stream);
     std::shared_ptr<void> lease =
       std::make_shared<cuda_buffer_backend::ReadHandle>(
@@ -69,6 +114,7 @@ public:
     TensorMsg & msg, void * execution_stream) override
   {
     auto * implementation = cuda_implementation(msg);
+    DeviceGuard guard(implementation->get_device_id());
     const auto cuda_stream = stream(execution_stream);
     implementation->set_stream(cuda_stream);
     std::shared_ptr<void> lease =
@@ -89,6 +135,9 @@ public:
     const auto source_info = source.GetTensorMemoryInfo();
     const bool source_is_cpu =
       source_info.GetDeviceType() == OrtMemoryInfoDeviceType_CPU;
+    if (!source_is_cpu && !supports(source_info)) {
+      throw std::invalid_argument("CUDA plugin cannot read this memory provider");
+    }
     if (msg.data.get_backend_type() == "cpu") {
       if (source_is_cpu) {
         throw std::runtime_error(
@@ -103,6 +152,9 @@ public:
     }
 
     auto * implementation = cuda_implementation(msg);
+    if (!source_is_cpu && source_info.GetDeviceId() != implementation->get_device_id()) {
+      throw std::invalid_argument("CUDA copies require matching source and destination devices");
+    }
     DeviceGuard guard(implementation->get_device_id());
     auto write_handle = cuda_buffer_backend::from_output_buffer(
       msg.data, cuda_stream);
@@ -110,6 +162,7 @@ public:
       cudaMemcpyHostToDevice : cudaMemcpyDeviceToDevice;
     cuda_buffer_backend::to_buffer(
       source.GetTensorRawData(), byte_count, write_handle, cuda_stream, kind);
+    check_cuda(cudaStreamSynchronize(cuda_stream));
   }
 
   void configure_session(
@@ -158,12 +211,13 @@ private:
 
   static cudaStream_t stream(void * value)
   {
-    return reinterpret_cast<cudaStream_t>(value);
+    return value ? reinterpret_cast<cudaStream_t>(value) : cudaStreamLegacy;
   }
 
   static void check_cuda(cudaError_t result)
   {
     if (result != cudaSuccess) {
+      (void)cudaGetLastError();
       throw std::runtime_error(
               std::string("CUDA conversion plugin: ") +
               cudaGetErrorString(result));

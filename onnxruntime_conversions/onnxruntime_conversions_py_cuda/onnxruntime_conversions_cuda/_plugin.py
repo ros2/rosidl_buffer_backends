@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from contextlib import contextmanager
 import ctypes
+from pathlib import Path
+from threading import Lock
 from typing import Optional
 
 from cuda_buffer import CudaBuffer
@@ -27,6 +30,12 @@ from onnxruntime_conversions._plugin import TensorMetadata
 _CUDA = ctypes.CDLL('libcudart.so')
 _CUDA.cudaGetDeviceCount.argtypes = [ctypes.POINTER(ctypes.c_int)]
 _CUDA.cudaGetDeviceCount.restype = ctypes.c_int
+_CUDA.cudaGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
+_CUDA.cudaGetDevice.restype = ctypes.c_int
+_CUDA.cudaSetDevice.argtypes = [ctypes.c_int]
+_CUDA.cudaSetDevice.restype = ctypes.c_int
+_CUDA.cudaGetLastError.argtypes = []
+_CUDA.cudaGetLastError.restype = ctypes.c_int
 _CUDA.cudaMemcpyAsync.argtypes = [
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
     ctypes.c_int, ctypes.c_void_p,
@@ -34,15 +43,52 @@ _CUDA.cudaMemcpyAsync.argtypes = [
 _CUDA.cudaMemcpyAsync.restype = ctypes.c_int
 _CUDA.cudaStreamSynchronize.argtypes = [ctypes.c_void_p]
 _CUDA.cudaStreamSynchronize.restype = ctypes.c_int
+_CUDA.cudaStreamGetFlags.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint)]
+_CUDA.cudaStreamGetFlags.restype = ctypes.c_int
+
+_REGISTRATION_LOCK = Lock()
 
 _HOST_TO_DEVICE = 1
 _DEVICE_TO_HOST = 2
 _DEVICE_TO_DEVICE = 3
+_LEGACY_DEFAULT_STREAM = 1
 
 
 def _check(result: int, operation: str) -> None:
     if result != 0:
+        _CUDA.cudaGetLastError()
         raise RuntimeError(f'{operation} failed with CUDA error {result}')
+
+
+@contextmanager
+def _device(device_id: Optional[int]):
+    previous = _current_device()
+    _check(_CUDA.cudaSetDevice(previous if device_id is None else device_id),
+           'cudaSetDevice')
+    try:
+        yield
+    finally:
+        _check(_CUDA.cudaSetDevice(previous), 'cudaSetDevice')
+
+
+def _current_device() -> int:
+    device = ctypes.c_int()
+    _check(_CUDA.cudaGetDevice(ctypes.byref(device)), 'cudaGetDevice')
+    return device.value
+
+
+def _check_device(handle: object) -> None:
+    current = _current_device()
+    if handle.device_id != current:
+        handle.close()
+        raise RuntimeError(
+            f'CUDA buffer is on device {handle.device_id}, but current device is {current}')
+
+
+def _stream(stream: Optional[int]) -> int:
+    if stream is None:
+        raise ValueError("Backend 'cuda' requires an explicit execution stream")
+    return stream or _LEGACY_DEFAULT_STREAM
 
 
 class _Lease:
@@ -53,15 +99,37 @@ class _Lease:
         self._data = data
 
     def __del__(self) -> None:
-        self._handle.close()
+        with _device(self._handle.device_id):
+            self._handle.close()
 
 
 class CudaConversionPlugin:
     """Direct OrtValue views over CUDA-backed tensor message storage."""
 
     backends = ('cuda',)
-    device_types = ('cuda',)
+    device_types = (2,)
     priority = 100
+
+    def create_stream(self, device_id: int) -> object:
+        with _device(device_id), _REGISTRATION_LOCK:
+            devices = ort.get_ep_devices()
+            if not any(ep.ep_name == 'CUDAExecutionProvider' for ep in devices):
+                library = Path(ort.__file__).parent / 'capi' / 'libonnxruntime_providers_cuda.so'
+                ort.register_execution_provider_library('CUDAExecutionProvider', str(library))
+                devices = ort.get_ep_devices()
+            for ep in devices:
+                if (ep.ep_name == 'CUDAExecutionProvider' and
+                        int(ep.ep_options['device_id']) == device_id):
+                    return ep.create_sync_stream()
+        raise RuntimeError('ONNX Runtime has no stream provider for the requested CUDA device')
+
+    def validate_stream(self, device_id: int, stream: Optional[int]) -> None:
+        if not isinstance(stream, int) or isinstance(stream, bool) or stream < 0:
+            raise ValueError('CUDA streams require a nonnegative integer native handle')
+        with _device(device_id):
+            flags = ctypes.c_uint()
+            _check(_CUDA.cudaStreamGetFlags(ctypes.c_void_p(stream), ctypes.byref(flags)),
+                   'cudaStreamGetFlags')
 
     def is_available(self) -> bool:
         count = ctypes.c_int()
@@ -71,9 +139,16 @@ class CudaConversionPlugin:
         del data
         return False
 
-    def allocate(self, byte_count: int, backend: str) -> object:
+    def allocate(
+        self, byte_count: int, backend: str, device_id: Optional[int]
+    ) -> object:
         del backend
-        return CudaBuffer.allocate_buffer(byte_count)
+        with _device(device_id):
+            data = CudaBuffer.allocate_buffer(byte_count)
+            if byte_count:
+                with CudaBuffer.from_input_buffer(data, 0) as handle:
+                    _check_device(handle)
+            return data
 
     @staticmethod
     def _value(
@@ -100,14 +175,16 @@ class CudaConversionPlugin:
     def from_input(
         self, data: object, metadata: TensorMetadata, stream: Optional[int]
     ) -> tuple[object, object]:
-        return self._value(
-            CudaBuffer.from_input_buffer(data, stream), data, metadata)
+        handle = CudaBuffer.from_input_buffer(data, _stream(stream))
+        _check_device(handle)
+        return self._value(handle, data, metadata)
 
     def from_output(
         self, data: object, metadata: TensorMetadata, stream: Optional[int]
     ) -> tuple[object, object]:
-        return self._value(
-            CudaBuffer.from_output_buffer(data, stream), data, metadata)
+        handle = CudaBuffer.from_output_buffer(data, _stream(stream))
+        _check_device(handle)
+        return self._value(handle, data, metadata)
 
     def copy_to(
         self,
@@ -116,21 +193,25 @@ class CudaConversionPlugin:
         source: object,
         stream: Optional[int],
     ) -> None:
-        cuda_stream = ctypes.c_void_p(stream or 0)
+        cuda_stream = ctypes.c_void_p(_stream(stream))
         source_is_cpu = source.device_name().lower() == 'cpu'
         if hasattr(data, 'backend_type') and data.backend_type == 'cuda':
-            with CudaBuffer.from_output_buffer(data, stream) as handle:
+            with CudaBuffer.from_output_buffer(data, _stream(stream)) as handle:
+                _check_device(handle)
+                if not source_is_cpu and source.__dlpack_device__() != (2, handle.device_id):
+                    raise ValueError(
+                        'CUDA copies require matching source and destination devices')
                 source_array = source.numpy() if source_is_cpu else None
                 source_pointer = (
                     source_array.ctypes.data if source_is_cpu
                     else source.data_ptr()
                 )
                 kind = _HOST_TO_DEVICE if source_is_cpu else _DEVICE_TO_DEVICE
-                _check(_CUDA.cudaMemcpyAsync(
-                    ctypes.c_void_p(handle.device_ptr + metadata.byte_offset),
-                    ctypes.c_void_p(source_pointer), metadata.byte_count,
-                    kind, cuda_stream), 'cudaMemcpyAsync')
-                if source_is_cpu:
+                with _device(handle.device_id):
+                    _check(_CUDA.cudaMemcpyAsync(
+                        ctypes.c_void_p(handle.device_ptr + metadata.byte_offset),
+                        ctypes.c_void_p(source_pointer), metadata.byte_count,
+                        kind, cuda_stream), 'cudaMemcpyAsync')
                     _check(_CUDA.cudaStreamSynchronize(cuda_stream),
                            'cudaStreamSynchronize')
             return
@@ -139,12 +220,13 @@ class CudaConversionPlugin:
             raise RuntimeError(
                 'CUDA plugin expected a CUDA source for a CPU destination')
         destination = (ctypes.c_ubyte * len(data)).from_buffer(data)
-        _check(_CUDA.cudaMemcpyAsync(
-            ctypes.cast(destination, ctypes.c_void_p),
-            ctypes.c_void_p(source.data_ptr()), metadata.byte_count,
-            _DEVICE_TO_HOST, cuda_stream), 'cudaMemcpyAsync')
-        _check(_CUDA.cudaStreamSynchronize(cuda_stream),
-               'cudaStreamSynchronize')
+        with _device(source.__dlpack_device__()[1]):
+            _check(_CUDA.cudaMemcpyAsync(
+                ctypes.cast(destination, ctypes.c_void_p),
+                ctypes.c_void_p(source.data_ptr()), metadata.byte_count,
+                _DEVICE_TO_HOST, cuda_stream), 'cudaMemcpyAsync')
+            _check(_CUDA.cudaStreamSynchronize(cuda_stream),
+                   'cudaStreamSynchronize')
 
     def session_providers(
         self, device_id: int, stream: Optional[int]

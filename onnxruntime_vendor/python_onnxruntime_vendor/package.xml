@@ -15,10 +15,6 @@
 
   <build_depend>python3-pip</build_depend>
 
-  <!-- These packages install the same onnxruntime Python module. -->
-  <conflict>python3-onnxruntime</conflict>
-  <conflict>python_onnxruntime_cuda_vendor</conflict>
-
   <exec_depend>python3-flatbuffers</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-packaging</exec_depend>

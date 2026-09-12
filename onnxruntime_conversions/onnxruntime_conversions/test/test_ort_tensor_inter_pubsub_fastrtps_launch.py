@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import ctypes
 import time
 import unittest
 
@@ -29,24 +28,9 @@ import rclpy
 from std_msgs.msg import UInt32
 
 
-def _cuda_available():
-    try:
-        runtime = ctypes.CDLL('libcudart.so')
-    except OSError:
-        return False
-    count = ctypes.c_int()
-    return runtime.cudaGetDeviceCount(ctypes.byref(count)) == 0 and count.value > 0
-
-
-CUDA_AVAILABLE = _cuda_available()
-
-
 @pytest.mark.launch_test
 @launch_testing.markers.keep_alive
 def generate_test_description():
-    if not CUDA_AVAILABLE:
-        return LaunchDescription([launch_testing.actions.ReadyToTest()])
-
     subscriber = Node(
         package='onnxruntime_conversions',
         executable='ort_tensor_subscriber_node',
@@ -67,8 +51,7 @@ def generate_test_description():
     ])
 
 
-@unittest.skipUnless(CUDA_AVAILABLE, 'CUDA device is unavailable')
-class TestCudaTensorInterProcessInference(unittest.TestCase):
+class TestTensorInterProcessInference(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -79,7 +62,7 @@ class TestCudaTensorInterProcessInference(unittest.TestCase):
         rclpy.shutdown()
 
     def setUp(self):
-        self.node = rclpy.create_node('test_cuda_tensor_inter_process_inference')
+        self.node = rclpy.create_node('test_tensor_inter_process_inference')
         self.validation_count = 0
         self.node.create_subscription(
             UInt32, 'validation_count', self._validation_result, 10)
@@ -90,7 +73,7 @@ class TestCudaTensorInterProcessInference(unittest.TestCase):
     def _validation_result(self, message):
         self.validation_count = message.data
 
-    def test_received_cuda_inference_output(self):
+    def test_received_inference_output(self):
         deadline = time.time() + 20.0
         while self.validation_count < 5 and time.time() < deadline:
             rclpy.spin_once(self.node, timeout_sec=0.1)
@@ -98,7 +81,7 @@ class TestCudaTensorInterProcessInference(unittest.TestCase):
 
 
 @launch_testing.post_shutdown_test()
-class TestCudaTensorInterProcessShutdown(unittest.TestCase):
+class TestTensorInterProcessShutdown(unittest.TestCase):
 
     def test_exit_codes(self, proc_info):
         launch_testing.asserts.assertExitCodes(

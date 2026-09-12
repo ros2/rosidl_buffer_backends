@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from contextlib import contextmanager
-import ctypes
 import os
 from pathlib import Path
 import subprocess
@@ -27,69 +25,32 @@ import numpy as np
 import onnxruntime as ort
 
 from onnxruntime_conversions import allocate_tensor_msg
-from onnxruntime_conversions import available_backends
+from onnxruntime_conversions import create_stream
 from onnxruntime_conversions import from_input_tensor_msg
 from onnxruntime_conversions import from_output_tensor_msg
 from onnxruntime_conversions import session_providers
-
-import pytest
+from onnxruntime_conversions import to_tensor_msg
 
 import rclpy
 from rclpy.node import Node
-from rosidl_buffer import Buffer
 from tensor_msgs.msg import ExperimentalTensor
-
-
-@contextmanager
-def _cuda_stream():
-    runtime = ctypes.CDLL('libcudart.so')
-    runtime.cudaStreamCreateWithFlags.argtypes = [
-        ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
-    runtime.cudaStreamCreateWithFlags.restype = ctypes.c_int
-    runtime.cudaStreamDestroy.argtypes = [ctypes.c_void_p]
-    runtime.cudaStreamDestroy.restype = ctypes.c_int
-    stream = ctypes.c_void_p()
-    result = runtime.cudaStreamCreateWithFlags(ctypes.byref(stream), 1)
-    if result != 0:
-        raise RuntimeError(
-            f'cudaStreamCreateWithFlags failed with error {result}')
-    try:
-        yield stream.value
-    finally:
-        if runtime.cudaStreamDestroy(stream) != 0:
-            raise RuntimeError('cudaStreamDestroy failed')
-
-
-def _cuda_unavailable_reason():
-    if 'cuda' not in available_backends():
-        return 'the CUDA conversion plugin is unavailable'
-    if 'CUDAExecutionProvider' not in ort.get_available_providers():
-        return 'this ONNX Runtime build has no CUDA execution provider'
-    from cuda_buffer import CudaBuffer
-    try:
-        with _cuda_stream():
-            probe = CudaBuffer.from_cpu(b'\x00')
-            probe.to_bytes()
-    except (OSError, RuntimeError) as error:
-        return f'CUDA device is unavailable: {error}'
-    return None
 
 
 def _subscriber(topic, stream):
     session = ort.InferenceSession(
         identity_model((2, 3)),
-        providers=session_providers('cuda', 0, stream),
+        providers=session_providers(stream=stream),
     )
-    node = Node('onnxruntime_cuda_tensor_subscriber')
+    node = Node('onnxruntime_tensor_subscriber')
     received = []
 
     def callback(msg):
         message_index = len(received)
-        if not isinstance(msg.data, Buffer) or msg.data.backend_type != 'cuda':
+        if getattr(msg.data, 'backend_type', 'cpu') != stream.backend:
             received.append(False)
             return
 
-        output_msg = allocate_tensor_msg((2, 3), np.float32, 'cuda')
+        output_msg = allocate_tensor_msg((2, 3), np.float32, stream=stream)
         input_view = from_input_tensor_msg(msg, stream)
         output_view = from_output_tensor_msg(output_msg, stream)
         binding = session.io_binding()
@@ -103,15 +64,17 @@ def _subscriber(topic, stream):
             input_view.close()
             output_view.close()
 
-        actual = np.frombuffer(
-            output_msg.data.to_bytes(), dtype=np.float32).reshape(2, 3)
+        host = allocate_tensor_msg((2, 3), np.float32, 'cpu')
+        with from_input_tensor_msg(output_msg, stream) as value:
+            to_tensor_msg(host, value, stream)
+        actual = np.frombuffer(host.data, dtype=np.float32).reshape(2, 3)
         expected = np.arange(6, dtype=np.float32).reshape(2, 3)
         expected += message_index * 10
         received.append(np.array_equal(actual, expected))
 
     node.create_subscription(
         ExperimentalTensor, topic, callback, 10,
-        acceptable_buffer_backends='cuda',
+        acceptable_buffer_backends=stream.backend,
     )
     try:
         deadline = time.monotonic() + 12.0
@@ -122,11 +85,11 @@ def _subscriber(topic, stream):
         assert all(received), 'one or more inference outputs were invalid'
     finally:
         node.destroy_node()
-    print('SUBSCRIBER_CUDA_ONNX_OK')
+    print('SUBSCRIBER_ONNX_OK')
 
 
 def _publisher(topic, stream):
-    node = Node('onnxruntime_cuda_tensor_publisher')
+    node = Node('onnxruntime_tensor_publisher')
     publisher = node.create_publisher(ExperimentalTensor, topic, 10)
     try:
         deadline = time.monotonic() + 8.0
@@ -137,24 +100,19 @@ def _publisher(topic, stream):
         time.sleep(1.0)
 
         for message_index in range(5):
-            msg = allocate_tensor_msg((2, 3), np.float32, 'cuda')
+            msg = allocate_tensor_msg((2, 3), np.float32, stream=stream)
             values = np.arange(6, dtype=np.float32).reshape(2, 3)
             values += message_index * 10
-            output_view = from_output_tensor_msg(msg, stream)
-            output_view.value.update_inplace(values)
-            output_view.close()
-            assert output_view.closed
+            value = ort.OrtValue.ortvalue_from_numpy(values)
+            to_tensor_msg(msg, value, stream)
             publisher.publish(msg)
             time.sleep(0.1)
     finally:
         node.destroy_node()
-    print('PUBLISHER_CUDA_ONNX_OK')
+    print('PUBLISHER_ONNX_OK')
 
 
-def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
-    unavailable_reason = _cuda_unavailable_reason()
-    if unavailable_reason is not None:
-        pytest.skip(unavailable_reason)
+def test_onnx_inference_crosses_fastrtps_process_boundary():
     topic = f'onnxruntime_tensor_{uuid.uuid4().hex}'
     environment = os.environ.copy()
     environment['RMW_IMPLEMENTATION'] = 'rmw_fastrtps_cpp'
@@ -187,16 +145,16 @@ def test_cuda_onnx_inference_crosses_fastrtps_process_boundary():
 
     assert publisher.returncode == 0, publisher_output
     assert subscriber.returncode == 0, subscriber_output
-    assert 'PUBLISHER_CUDA_ONNX_OK' in publisher_output
-    assert 'SUBSCRIBER_CUDA_ONNX_OK' in subscriber_output
+    assert 'PUBLISHER_ONNX_OK' in publisher_output
+    assert 'SUBSCRIBER_ONNX_OK' in subscriber_output
     assert 'cudaEventSynchronize on the publish path' not in publisher_output
 
 
 if __name__ == '__main__':
     worker = {'publisher': _publisher, 'subscriber': _subscriber}[sys.argv[1]]
-    with _cuda_stream() as stream:
-        rclpy.init(args=[])
-        try:
-            worker(sys.argv[2], stream)
-        finally:
-            rclpy.shutdown()
+    stream = create_stream()
+    rclpy.init(args=[])
+    try:
+        worker(sys.argv[2], stream)
+    finally:
+        rclpy.shutdown()

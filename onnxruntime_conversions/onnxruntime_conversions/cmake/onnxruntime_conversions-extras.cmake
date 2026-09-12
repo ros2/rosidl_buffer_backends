@@ -15,5 +15,5 @@
 if(NOT TARGET onnxruntime::onnxruntime)
   message(FATAL_ERROR
     "onnxruntime_conversions requires its ABI-matched "
-    "onnxruntime_cuda_vendor provider")
+    "onnxruntime_core_vendor provider")
 endif()

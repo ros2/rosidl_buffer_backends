@@ -18,9 +18,7 @@
   <!-- Supplies the CUDA runtime version required by the wheel. -->
   <exec_depend>onnxruntime_cuda_vendor</exec_depend>
 
-  <!-- These packages install the same onnxruntime Python module. -->
-  <conflict>python3-onnxruntime</conflict>
-  <conflict>python_onnxruntime_vendor</conflict>
+  <exec_depend>python_onnxruntime_vendor</exec_depend>
 
   <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
 

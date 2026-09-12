@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cuda_runtime.h>
-
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -44,33 +43,23 @@ public:
   explicit OrtTensorSubscriber(const rclcpp::NodeOptions & options)
   : Node("onnxruntime_tensor_subscriber", options),
     env_(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_tensor_subscriber"),
+    stream_(onnxruntime_conversions::create_stream(env_)),
     session_(nullptr)
   {
-    if (cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking) != cudaSuccess) {
-      throw std::runtime_error("Failed to create subscriber CUDA stream");
-    }
     Ort::SessionOptions session_options;
     onnxruntime_conversions::configure_session_options(
-      session_options, "cuda", 0, stream_);
+      session_options, stream_);
     session_ = Ort::Session(
       env_, identity_model, sizeof(identity_model), session_options);
 
     rclcpp::SubscriptionOptions subscription_options;
     subscription_options.acceptable_buffer_backends = "any";
     subscription_ = create_subscription<onnxruntime_conversions::TensorMsg>(
-      "test_onnxruntime_cuda_tensor", 10,
+      "test_onnxruntime_tensor", 10,
       std::bind(&OrtTensorSubscriber::receive, this, std::placeholders::_1),
       subscription_options);
     result_publisher_ =
       create_publisher<std_msgs::msg::UInt32>("validation_count", 10);
-  }
-
-  ~OrtTensorSubscriber() override
-  {
-    session_ = Ort::Session(nullptr);
-    if (stream_) {
-      cudaStreamDestroy(stream_);
-    }
   }
 
 private:
@@ -78,11 +67,11 @@ private:
   {
     bool valid = true;
     try {
-      if (message->data.get_backend_type() != "cuda") {
-        throw std::runtime_error("Received tensor is not CUDA-backed");
+      if (message->data.get_backend_type() != stream_.backend()) {
+        throw std::runtime_error("Received tensor uses an unexpected backend");
       }
       auto output = onnxruntime_conversions::allocate_tensor_msg(
-        {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cuda");
+        {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, stream_);
       {
         Ort::IoBinding binding(session_);
         auto input_view =
@@ -95,29 +84,21 @@ private:
         session_.Run(run_options, binding);
       }
 
-      std::vector<float> input_values(6);
-      std::vector<float> output_values(6);
+      auto input_host = onnxruntime_conversions::allocate_tensor_msg(
+        {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
+      auto output_host = onnxruntime_conversions::allocate_tensor_msg(
+        {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
       {
         auto input_view =
           onnxruntime_conversions::from_input_tensor_msg(*message, stream_);
         auto output_view =
           onnxruntime_conversions::from_input_tensor_msg(*output, stream_);
-        if (cudaMemcpyAsync(
-            input_values.data(), input_view.value().GetTensorRawData(),
-            input_values.size() * sizeof(float), cudaMemcpyDeviceToHost, stream_) !=
-          cudaSuccess ||
-          cudaMemcpyAsync(
-            output_values.data(), output_view.value().GetTensorRawData(),
-            output_values.size() * sizeof(float), cudaMemcpyDeviceToHost, stream_) !=
-          cudaSuccess)
-        {
-          throw std::runtime_error("Failed to copy CUDA inference result");
-        }
+        onnxruntime_conversions::to_tensor_msg(*input_host, input_view.value(), stream_);
+        onnxruntime_conversions::to_tensor_msg(*output_host, output_view.value(), stream_);
       }
-      if (cudaStreamSynchronize(stream_) != cudaSuccess) {
-        throw std::runtime_error("Failed to synchronize inference result");
-      }
-      valid = input_values == output_values;
+      valid = std::equal(
+        input_host->data.data(), input_host->data.data() + input_host->data.size(),
+        output_host->data.data());
     } catch (const std::exception & error) {
       RCLCPP_ERROR(get_logger(), "%s", error.what());
       valid = false;
@@ -131,8 +112,8 @@ private:
   }
 
   Ort::Env env_;
+  onnxruntime_conversions::Stream stream_;
   Ort::Session session_;
-  cudaStream_t stream_{nullptr};
   rclcpp::Subscription<onnxruntime_conversions::TensorMsg>::SharedPtr subscription_;
   rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr result_publisher_;
   uint32_t received_count_{0};

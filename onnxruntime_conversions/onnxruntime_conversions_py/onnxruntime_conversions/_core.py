@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from dataclasses import dataclass
+from dataclasses import field
 from math import prod
 from types import TracebackType
 from typing import Optional
@@ -57,6 +59,48 @@ _FROM_MESSAGE = {
 ElementType = Union[int, numpy.dtype, type]
 _REGISTRY = ConversionRegistry()
 load_external_plugins(_REGISTRY)
+
+
+@dataclass(frozen=True)
+class Stream:
+    """Retain a stream until its sessions, views, and queued work finish."""
+
+    backend: str
+    device_id: int
+    handle: Optional[int]
+    _owner: object = field(default=None, repr=False, compare=False)
+
+    @property
+    def owns_stream(self) -> bool:
+        return self._owner is not None
+
+
+def create_stream(backend: Optional[str] = None, device_id: int = 0) -> Stream:
+    """Create an ORT-owned accelerator stream, or an empty CPU stream."""
+    plugin = _REGISTRY.for_backend(backend or _REGISTRY.default_backend())
+    owner = plugin.create_stream(device_id)
+    handle = owner.get_handle() if owner is not None else None
+    plugin.validate_stream(device_id, handle)
+    return Stream(plugin.backends[0], device_id, handle, owner)
+
+
+def borrow_stream(handle: Optional[int], backend: str, device_id: int = 0) -> Stream:
+    """Wrap a native stream without ownership; the caller must keep it alive."""
+    plugin = _REGISTRY.for_backend(backend)
+    plugin.validate_stream(device_id, handle)
+    return Stream(plugin.backends[0], device_id, handle)
+
+
+def _stream_selection(
+    backend: Optional[str], device_id: Optional[int], stream: Union[Stream, int, None],
+) -> tuple[Optional[str], Optional[int], Optional[int]]:
+    if isinstance(stream, Stream):
+        if backend is not None and backend != stream.backend:
+            raise ValueError('Backend must match the stream backend')
+        if device_id is not None and device_id != stream.device_id:
+            raise ValueError('Device must match the stream device')
+        return stream.backend, stream.device_id, stream.handle
+    return backend, device_id, stream
 
 
 def _element_type(element_type: ElementType) -> int:
@@ -159,7 +203,13 @@ def allocate_tensor_msg(
     shape: Sequence[int],
     element_type: ElementType,
     backend: Optional[str] = None,
+    device_id: Optional[int] = None,
+    *,
+    stream: Optional[Stream] = None,
 ) -> ExperimentalTensor:
+    if stream is not None and not isinstance(stream, Stream):
+        raise TypeError('Allocation requires a Stream object, not a native handle')
+    backend, device_id, _ = _stream_selection(backend, device_id, stream)
     resolved = _element_type(element_type)
     code, bits, numpy_dtype = _ELEMENT_TYPES[resolved]
     dimensions = list(shape)
@@ -172,18 +222,20 @@ def allocate_tensor_msg(
     msg.dtype_code, msg.dtype_bits, msg.dtype_lanes = code, bits, 1
     msg.byte_offset = 0
     msg.data = plugin.allocate(prod(dimensions) * numpy_dtype.itemsize,
-                               plugin.backends[0])
+                               plugin.backends[0], device_id)
     return msg
 
 
 def _view(
     msg: ExperimentalTensor,
-    stream: Optional[int],
+    stream: Union[Stream, int, None],
     output: bool,
 ) -> Optional[OrtTensorView]:
     if len(msg.data) == 0:
         return None
     plugin = _REGISTRY.for_data(msg.data)
+    if isinstance(stream, Stream):
+        stream = stream.handle
     conversion = plugin.from_output if output else plugin.from_input
     value, lease = conversion(msg.data, _metadata(msg), stream)
     return OrtTensorView(value, lease)
@@ -191,14 +243,14 @@ def _view(
 
 def from_input_tensor_msg(
     msg: ExperimentalTensor,
-    stream: Optional[int] = None,
+    stream: Union[Stream, int, None] = None,
 ) -> Optional[OrtTensorView]:
     return _view(msg, stream, False)
 
 
 def from_output_tensor_msg(
     msg: ExperimentalTensor,
-    stream: Optional[int] = None,
+    stream: Union[Stream, int, None] = None,
 ) -> Optional[OrtTensorView]:
     return _view(msg, stream, True)
 
@@ -206,9 +258,11 @@ def from_output_tensor_msg(
 def to_tensor_msg(
     destination_or_value: Union[ExperimentalTensor, ort.OrtValue],
     value: Optional[ort.OrtValue] = None,
-    stream: Optional[int] = None,
+    stream: Union[Stream, int, None] = None,
     backend: Optional[str] = None,
 ) -> ExperimentalTensor:
+    if isinstance(stream, Stream):
+        stream = stream.handle
     if value is None:
         value = destination_or_value
         destination = None
@@ -222,11 +276,12 @@ def to_tensor_msg(
     _, _, numpy_dtype = _ELEMENT_TYPES[_element_type(element_type)]
     byte_count = prod(shape) * numpy_dtype.itemsize
     if destination is None:
+        device_type, device_id = value.__dlpack_device__()
         selected = backend
         if selected is None:
-            selected = _REGISTRY.for_device(
-                value.device_name().lower()).backends[0]
-        destination = allocate_tensor_msg(shape, element_type, selected)
+            selected = _REGISTRY.for_device(device_type).backends[0]
+        destination = allocate_tensor_msg(
+            shape, element_type, selected, device_id if backend is None else None)
     if not isinstance(destination, ExperimentalTensor):
         raise TypeError('destination must be an ExperimentalTensor')
     if byte_count > len(destination.data):
@@ -244,16 +299,17 @@ def to_tensor_msg(
     metadata = _metadata(destination)
     source_device = value.device_name().lower()
     plugin = _REGISTRY.for_data(destination.data) if source_device == 'cpu' \
-        else _REGISTRY.for_device(source_device)
+        else _REGISTRY.for_device(value.__dlpack_device__()[0])
     plugin.copy_to(destination.data, metadata, value, stream)
     return destination
 
 
 def session_providers(
     backend: Optional[str] = None,
-    device_id: int = 0,
-    stream: Optional[int] = None,
+    device_id: Optional[int] = None,
+    stream: Union[Stream, int, None] = None,
 ) -> list:
+    backend, device_id, stream = _stream_selection(backend, device_id, stream)
     selected = backend or _REGISTRY.default_backend()
     if selected not in _REGISTRY.backends():
         if selected != 'cpu' and stream is None:
@@ -263,4 +319,4 @@ def session_providers(
             f'No ONNX Runtime execution provider is installed for backend '
             f'{selected!r}; install its conversion plugin')
     plugin = _REGISTRY.for_backend(selected)
-    return plugin.session_providers(device_id, stream)
+    return plugin.session_providers(0 if device_id is None else device_id, stream)
