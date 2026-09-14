@@ -25,86 +25,30 @@ allocating on a particular device; copies into new messages preserve the source
 device index. Additional accelerators can supply their own plugins and
 compatible framework providers.
 
-## ONNX Runtime provider boundary
+## Tensor layout
 
-All four providers use ONNX Runtime 1.26.0. The accelerator providers require
-CUDA 12 and cuDNN 9.
+Both the C++ and Python APIs require contiguous, row-major tensor layouts on
+CPU and CUDA. An empty message `strides` field implies this layout. Explicit
+strides must exactly match the contiguous strides computed from `shape`, even
+for dimensions of size one. Transposed or sliced layouts with other strides
+are rejected; make the tensor contiguous before creating the message.
 
-The C++ core depends on `onnxruntime_core_vendor`; the Python core depends on
-`python_onnxruntime_vendor`. Both use CPU-only distributions and require no
-accelerator runtime or driver.
-
-The CUDA plugins add `onnxruntime_cuda_vendor` and
-`python_onnxruntime_cuda_vendor`, respectively. These depend on the CPU
-providers and install matching CUDA-capable distributions in separate
-directories. ROS environment hooks select the CUDA provider for newly started
-processes after the environment is sourced again. Both plugins then share that
-provider; CPU execution remains available.
-
-Each process uses one ONNX Runtime distribution per language. CPU and
-accelerator providers must have matching versions and compatible exported
-symbols.
-
-## Storage lifetime
-
-C++ views borrow message storage on both CPU and CUDA: keep the message alive
-and do not replace or resize its buffer while a view exists. A CUDA access
-handle does not own the buffer. Python views retain their backing buffer, but
-it must not be resized while a view exists.
-
-Queue all producer writes on the conversion's execution stream before
-publishing, and do not write to the published storage afterward. The CUDA
-backend finalizes an outstanding writer when exporting the message or acquiring
-a read handle, recording the event that readers wait on. Output values and I/O
-bindings may remain alive during publication; destroying them is not required
-to finalize the writer. Do not run inference again with a published message
-still bound as an output.
-
-The C++ examples publish by reference to keep the message alive while borrowed
-views exist. Release those views before transferring message ownership with
-`publish(std::move(msg))`. Python native values retain their backing buffer.
+A nonzero `byte_offset` is supported when the entire contiguous tensor fits
+within the message's allocated storage.
 
 ## Execution streams
 
-`create_stream()` selects a conversion plugin using the same backend argument,
-environment override, and priorities as allocation. The CPU plugin returns an
-empty stream; accelerator plugins create an ONNX Runtime-owned stream. The
-handle carries its backend and device index so allocation and session setup
-can use the same selection on either device.
+`create_stream()` returns an empty CPU stream or an ONNX Runtime-owned
+accelerator stream. Use `borrow_stream()` to wrap a caller-owned stream.
 
-Pass the `Stream` object directly to allocation, session setup, views, and
-copies. Its backend and device accessors are for inspection; use `handle()` in
-C++ or `handle` in Python when a native API needs the underlying handle.
+Pass the same `Stream` to allocation, views, and copies. Bind it to the session
+using `configure_session_options()` in C++ or `session_providers()` in Python.
+Passing another stream to a conversion does not change the session's stream;
+synchronize explicitly when using different streams.
 
-Bind the execution stream when creating the session, using
-`configure_session_options()` in C++ or `session_providers()` in Python. Pass
-the same stream to conversions and subsequent operations, or explicitly
-synchronize between streams. Passing a different stream to a conversion does
-not change an existing session's stream.
-
-The raw-handle APIs accept `nullptr` in C++ or `None` in Python for CPU session
-setup. CUDA session setup requires a native handle; Python CUDA views and
-copies accept a stream integer (`0` selects the legacy default). C++ views and
-copies use the legacy default when the stream is omitted.
-
-For a caller-owned stream, use `borrow_stream(native_handle, backend, device_id)`.
-It does not create, replace, or destroy the native stream. The existing raw-handle
-session and conversion APIs remain available. The CUDA plugin implements stream
-creation through a registered `OrtEpDevice::CreateSyncStream()`; applications do
-not need CUDA headers or their own provider-registration code.
-
-Keep the stream owner alive until the session is destroyed, all views are
-released, and queued work completes. In C++, keep `Ort::Env` alive longer than
-its owned streams. Copies into messages complete before returning; zero-copy
-views remain asynchronous.
-
-Select the buffer's CUDA device before conversion and keep it selected when
-releasing views. The existing CUDA buffer pool supports one allocation device
-per process; choose that device before the first allocation. A request for a
-different device fails instead of returning storage on the wrong GPU.
-
-Copies between different GPU indices are rejected. Transfer the value
-explicitly before copying it into storage on another device.
+Keep the stream owner alive until sessions and views are released and queued
+work finishes. In C++, `Ort::Env` must outlive its owned streams. Copies complete
+before returning; zero-copy views remain asynchronous.
 
 ## C++
 
@@ -199,13 +143,6 @@ into a message. Use the stream associated with its producer:
 ```cpp
 auto outgoing = onnxruntime_conversions::to_tensor_msg(ort_value, stream);
 publisher->publish(std::move(outgoing));
-```
-
-To reuse an existing message allocation with sufficient capacity:
-
-```cpp
-onnxruntime_conversions::to_tensor_msg(*preallocated, ort_value, stream);
-publisher->publish(std::move(preallocated));
 ```
 
 Copies complete before returning. Passing a stream here does not change the
@@ -319,13 +256,6 @@ from onnxruntime_conversions import to_tensor_msg
 
 outgoing = to_tensor_msg(ort_value, stream=stream)
 publisher.publish(outgoing)
-```
-
-To reuse an existing message allocation with sufficient capacity:
-
-```python
-to_tensor_msg(preallocated, ort_value, stream=stream)
-publisher.publish(preallocated)
 ```
 
 Copies complete before returning. Passing a stream here does not change the

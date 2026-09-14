@@ -23,88 +23,21 @@ An explicit device such as `cuda:1` preserves its device index. Additional
 accelerators can provide plugins without adding device-specific logic to the
 core; their framework providers must satisfy the core's ABI contract.
 
-## Torch provider boundary
-
-The core and C++ plugins share LibTorch's C++ ABI. A CPU installation uses
-`libtorch_vendor`, which installs the official CPU LibTorch 2.9.1 distribution.
-The CUDA plugin depends on `libtorch_cuda_vendor`, which installs a matching
-CUDA LibTorch 2.9.1 tree and places it ahead of the system libraries for newly
-started ROS processes.
-Only one set of LibTorch SONAMEs is loaded in a process.
-
-Python follows the same layout: `python3_torch_vendor` installs the official
-CPU Torch wheel, while the CUDA plugin installs `python3_torch_cuda_vendor` as a
-higher-priority ROS-prefix overlay. After the CUDA overlay is installed, both
-CPU and CUDA conversion plugins use that CUDA-capable Torch distribution.
-
-The dependency boundary is:
-
-| Package | Required framework package | CUDA dependency |
-| --- | --- | --- |
-| `torch_conversions` | `libtorch_vendor` | No |
-| `torch_conversions_cpu` | inherited from `torch_conversions` | No |
-| `torch_conversions_cuda` | `libtorch_cuda_vendor` | Yes |
-| `torch_conversions_py` | `python3_torch_vendor` | No |
-| `torch_conversions_py_cpu` | inherited from `torch_conversions_py` | No |
-| `torch_conversions_py_cuda` | `python3_torch_cuda_vendor` | Yes |
-
-The CUDA providers depend on their CPU counterparts; both package sets can
-coexist. ROS environment hooks select the CUDA overlay for newly started
-processes. CPU-only installations do not require CUDA runtime dependencies.
-
-## Storage lifetime
-
-C++ views borrow message storage on both CPU and CUDA: keep the message alive
-and do not replace or resize its buffer while a view exists. A CUDA access
-handle does not own the buffer. The default input conversion clones the tensor;
-`clone=false` returns a borrowed view. Python views retain their backing buffer,
-but it must not be resized while a view exists.
-
-Queue all producer writes on the conversion's execution stream before
-publishing, and do not write to the published storage afterward. The CUDA
-backend finalizes an outstanding writer when exporting the message or acquiring
-a read handle, recording the event that readers wait on. Output tensors may
-remain alive during publication; their destruction is not required to finalize
-the writer.
-
-The C++ examples publish by reference to keep the message alive while borrowed
-views exist. Release those views before transferring message ownership with
-`publish(std::move(msg))`. Python views retain their backing buffer.
-
 ## Execution streams
 
 Conversions use Torch's current stream on the buffer or source tensor's device
-unless an execution stream is passed explicitly. The same conversion calls
-work on CPU and CUDA without passing a CUDA stream or including CUDA headers.
+unless a stream is passed explicitly. Applications already managing a Torch
+stream do not need `set_stream()`.
 
 Use `auto guard = torch_conversions::set_stream()` in C++, or `with set_stream():`
-in Python, to scope tensor operations to a plugin-selected stream. CPU is a
-no-op; CUDA selects a pooled stream. The previous stream and device are restored
-when the scope exits, including on exceptions. Selection follows the allocation
-policy: an explicit device first, then `ROSIDL_TENSOR_BACKEND`, then plugin
-priority. Pass the same explicit device to `set_stream(device)` and allocation
-when overriding the default. Both helpers affect the calling thread only.
+in Python, to select a stream. CPU is a no-op; CUDA selects a pooled stream.
+The previous stream and device are restored when the scope exits. Keep
+allocation, conversions, tensor operations, and publication inside the scope.
 
-The guard does not synchronize on exit. Keep conversions, subsequent tensor
-operations, and publication inside its scope. If the application already
-manages a Torch stream, conversions can use that stream without `set_stream()`.
-Work on other streams requires explicit synchronization.
-In C++, an explicit `nullptr` also selects Torch's current stream;
-`cudaStreamLegacy` selects the legacy default stream.
-Copies into messages complete before returning, including any contiguous
-temporary; zero-copy views and input clones can still have queued GPU work.
-
-Caller-provided streams must remain alive until all views are released and
-their work completes. Application operations and model tensors must support
-the selected device; stream selection does not move them between devices.
-
-Select the buffer's CUDA device before conversion and keep it selected when
-releasing views. The existing CUDA buffer pool supports one allocation device
-per process; choose that device before the first allocation. A request for a
-different device fails instead of returning storage on the wrong GPU.
-
-Copies between different GPU indices are rejected. Allocate and copy on the
-source device, or perform an explicit device transfer in Torch first.
+The guard does not synchronize on exit; synchronize explicitly when using
+different streams. Keep caller-owned streams alive until all views are released
+and queued work finishes. Copies complete before returning; zero-copy views and
+input clones may still have queued GPU work.
 
 ## C++
 
@@ -186,13 +119,6 @@ message. Run these calls on the tensor producer's current stream:
 ```cpp
 auto outgoing = torch_conversions::to_tensor_msg(tensor);
 publisher->publish(std::move(outgoing));
-```
-
-To reuse an existing message allocation with sufficient capacity:
-
-```cpp
-torch_conversions::to_tensor_msg(*preallocated, tensor);
-publisher->publish(std::move(preallocated));
 ```
 
 Copies complete before returning. If the tensor was produced on another
@@ -286,13 +212,6 @@ from torch_conversions import to_tensor_msg
 
 outgoing = to_tensor_msg(tensor)
 publisher.publish(outgoing)
-```
-
-To reuse an existing message allocation with sufficient capacity:
-
-```python
-to_tensor_msg(preallocated, tensor)
-publisher.publish(preallocated)
 ```
 
 Copies complete before returning. If the tensor was produced on another
