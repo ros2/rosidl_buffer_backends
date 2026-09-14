@@ -26,7 +26,6 @@ import launch_testing.asserts
 import launch_testing.markers
 import pytest
 import rclpy
-from rosidl_buffer import Buffer
 from tensor_msgs.msg import ExperimentalTensor
 import torch
 import torch_conversions
@@ -34,9 +33,6 @@ from torch_conversions import from_input_tensor_msg
 from torch_conversions import set_stream
 
 
-CUDA_AVAILABLE = (
-    torch_conversions.backend_available('cuda') and torch.cuda.is_available()
-)
 TENSOR_SHAPE = (2, 3, 4)
 TENSOR_VALUES = (
     3, 17, 29, 43, 59, 71, 89, 101, 113, 127, 139, 149,
@@ -55,11 +51,6 @@ def _expected_tensor(device):
 @pytest.mark.launch_test
 @launch_testing.markers.keep_alive
 def generate_test_description():
-    if not CUDA_AVAILABLE:
-        return LaunchDescription([
-            launch_testing.actions.ReadyToTest(),
-        ])
-
     publisher = Node(
         package='torch_conversions_py',
         executable='torch_tensor_publisher_node',
@@ -79,7 +70,6 @@ def generate_test_description():
     ])
 
 
-@unittest.skipUnless(CUDA_AVAILABLE, 'CUDA support is unavailable')
 class TestTorchTensorInterProcess(unittest.TestCase):
 
     @classmethod
@@ -113,8 +103,7 @@ class TestTorchTensorInterProcess(unittest.TestCase):
             and msg.dtype_code == 1
             and msg.dtype_bits == 8
             and msg.dtype_lanes == 1
-            and isinstance(msg.data, Buffer)
-            and msg.data.backend_type == 'cuda'
+            and getattr(msg.data, 'backend_type', 'cpu') == torch_conversions.default_backend()
             and len(msg.data) > 0
         )
 
@@ -123,7 +112,7 @@ class TestTorchTensorInterProcess(unittest.TestCase):
                 tensor = from_input_tensor_msg(msg, clone=False)
                 valid = (
                     tensor is not None
-                    and tensor.is_cuda
+                    and tensor.device.type == torch_conversions.default_backend()
                     and tensor.dtype == torch.uint8
                     and torch.equal(
                         tensor,
@@ -143,7 +132,6 @@ class TestTorchTensorInterProcess(unittest.TestCase):
 
 
 @launch_testing.post_shutdown_test()
-@unittest.skipUnless(CUDA_AVAILABLE, 'CUDA support is unavailable')
 class TestTorchTensorInterProcessShutdown(unittest.TestCase):
 
     def test_exit_codes(self, proc_info):

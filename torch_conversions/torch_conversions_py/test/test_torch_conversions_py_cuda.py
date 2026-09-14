@@ -122,7 +122,7 @@ def test_conversions_use_the_active_torch_stream():
     )
 
 
-def test_clone_waits_on_the_supplied_consumer_stream():
+def test_clone_finalizes_live_output_on_the_supplied_consumer_stream():
     producer = torch.cuda.Stream()
     consumer = torch.cuda.Stream()
     msg = allocate_tensor_msg((4,), torch.float32, 'cuda')
@@ -132,7 +132,6 @@ def test_clone_waits_on_the_supplied_consumer_stream():
         producer.synchronize()
         torch.cuda._sleep(200_000_000)
         output.fill_(7)
-        del output
 
     result = from_input_tensor_msg(msg, stream=consumer.cuda_stream)
     consumer.synchronize()
