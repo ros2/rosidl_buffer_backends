@@ -49,10 +49,20 @@ symbols.
 
 C++ views borrow message storage on both CPU and CUDA: keep the message alive
 and do not replace or resize its buffer while a view exists. A CUDA access
-handle does not own the buffer. Release output views before publishing so their
-write handles record completion on the execution stream. Python views retain
-their backing buffer, but it must not be resized while a view exists. Release
-output values and their I/O bindings before publishing.
+handle does not own the buffer. Python views retain their backing buffer, but
+it must not be resized while a view exists.
+
+Queue all producer writes on the conversion's execution stream before
+publishing, and do not write to the published storage afterward. The CUDA
+backend finalizes an outstanding writer when exporting the message or acquiring
+a read handle, recording the event that readers wait on. Output values and I/O
+bindings may remain alive during publication; destroying them is not required
+to finalize the writer. Do not run inference again with a published message
+still bound as an output.
+
+The C++ examples publish by reference to keep the message alive while borrowed
+views exist. Release those views before transferring message ownership with
+`publish(std::move(msg))`. Python native values retain their backing buffer.
 
 ## Execution streams
 
@@ -123,9 +133,12 @@ For a CPU-only build, restrict rosdep to `tensor_msgs`,
 `onnxruntime_vendor/onnxruntime_core_vendor`, and the C++ core/CPU plugin
 directories, then build only `onnxruntime_conversions_cpu`.
 
-Create a stream, configure inference, and bind message storage without copying.
-`env`, `model`, and `input_value` belong to the application; tensor shapes and
-binding names must match the model.
+### Publisher
+
+Create the stream and session once in the publisher. `env`, the serialized
+`model`, and `input_value` belong to the application. The shape, dtype, and
+binding names must match the model; the input must be ready on the session's
+stream. These examples assume valid, nonempty messages.
 
 ```cpp
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
@@ -137,44 +150,79 @@ Ort::Session session(env, model, model_size, options);
 
 auto msg = onnxruntime_conversions::allocate_tensor_msg(
   {480, 640, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, stream);
-{
-  auto output = onnxruntime_conversions::from_output_tensor_msg(*msg, stream);
-  Ort::IoBinding binding(session);
-  binding.BindInput("input", input_value);
-  binding.BindOutput("output", output.value());
-  session.Run(Ort::RunOptions{}, binding);
-}
-publisher->publish(std::move(*msg));
+auto output = onnxruntime_conversions::from_output_tensor_msg(*msg, stream);
+Ort::IoBinding binding(session);
+binding.BindInput("input", input_value);
+binding.BindOutput("output", output.value());
+session.Run(Ort::RunOptions{}, binding);
+publisher->publish(*msg);
 ```
 
-This code runs on CPU or an installed accelerator. To use an existing stream,
-replace only its creation with:
+Allocation, conversion, and the session use the same stream. Inference writes
+directly into message storage; no `to_tensor_msg()` copy is needed.
+
+To borrow a caller-owned stream, replace only stream creation:
 
 ```cpp
 auto stream = onnxruntime_conversions::borrow_stream(
   existing_stream, "cuda", /*device_id=*/0);
 ```
 
-For received messages and existing values:
+Keep the native stream owner alive until the session, views, and queued work
+finish; the borrowed wrapper does not extend that ownership.
+
+### Subscriber
+
+Create a stream once in the subscriber and capture it in the callback. The
+application function `consume()` must treat the input as read-only and use the
+supplied stream, or a session configured with that stream.
 
 ```cpp
-auto input = onnxruntime_conversions::from_input_tensor_msg(received, stream);
-my_pipeline(input.value());
+#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
 
-auto outgoing = onnxruntime_conversions::to_tensor_msg(ort_value, stream);
-onnxruntime_conversions::to_tensor_msg(*preallocated, ort_value, stream);
+auto stream = onnxruntime_conversions::create_stream(env);
+auto callback = [&stream](const onnxruntime_conversions::TensorMsg::ConstSharedPtr & received) {
+    auto view = onnxruntime_conversions::from_input_tensor_msg(*received, stream);
+    consume(view.value(), stream);
+  };
 ```
 
-The C++ plugin constructs an `Ort::Value` over the storage pointer with
-`Ort::Value::CreateTensor`.
+Keep `env` and `stream` alive for the subscription and its queued work. Keep
+the C++ view and message alive until `consume()` finishes using them.
+An `Ort::Value` alone does not retain the C++ view's access handle.
+
+### Existing tensors
+
+Use `to_tensor_msg()` only when copying an already-existing ONNX Runtime tensor
+into a message. Use the stream associated with its producer:
+
+```cpp
+auto outgoing = onnxruntime_conversions::to_tensor_msg(ort_value, stream);
+publisher->publish(std::move(outgoing));
+```
+
+To reuse an existing message allocation with sufficient capacity:
+
+```cpp
+onnxruntime_conversions::to_tensor_msg(*preallocated, ort_value, stream);
+publisher->publish(std::move(preallocated));
+```
+
+Copies complete before returning. Passing a stream here does not change the
+producer session's stream; synchronize explicitly if they differ.
 
 ## Python
 
-Install CPU support, then optionally add CUDA:
+Install CPU support:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py \
   ros-$ROS_DISTRO-onnxruntime-conversions-py-cpu
+```
+
+Add CUDA support later:
+
+```bash
 sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cuda
 ```
 
@@ -190,42 +238,98 @@ For a Python CPU-only build, restrict rosdep to `tensor_msgs`,
 `onnxruntime_vendor/python_onnxruntime_vendor`, and the Python core/CPU plugin
 directories, then build only `onnxruntime_conversions_py_cpu`.
 
+### Publisher
+
+Create the stream and session once in the publisher. `model` is the
+application's model path or serialized model. The shape, dtype, and binding
+names must match the model; `input_value` must be ready on the session's stream.
+
 ```python
 import numpy as np
 import onnxruntime as ort
 from onnxruntime_conversions import allocate_tensor_msg
 from onnxruntime_conversions import create_stream
-from onnxruntime_conversions import from_input_tensor_msg
 from onnxruntime_conversions import from_output_tensor_msg
 from onnxruntime_conversions import session_providers
-from onnxruntime_conversions import to_tensor_msg
 
 stream = create_stream()
 session = ort.InferenceSession(
     model, providers=session_providers(stream=stream))
 
-msg = allocate_tensor_msg(
-    (480, 640, 3), np.float32, stream=stream)
-with from_output_tensor_msg(msg, stream) as output:
-    binding = session.io_binding()
-    binding.bind_ortvalue_input('input', input_value)
-    binding.bind_ortvalue_output('output', output)
-    session.run_with_iobinding(binding)
-    del binding, output
-
-with from_input_tensor_msg(msg, stream) as value:
-    consume(value)
-
-outgoing = to_tensor_msg(ort_value, stream=stream)
+msg = allocate_tensor_msg((480, 640, 3), np.float32, stream=stream)
+output = from_output_tensor_msg(msg, stream)
+binding = session.io_binding()
+binding.bind_ortvalue_input('input', input_value)
+binding.bind_ortvalue_output('output', output.value)
+session.run_with_iobinding(binding)
+publisher.publish(msg)
 ```
 
-For a caller-owned stream, replace `create_stream()` with
-`borrow_stream(existing_stream, 'cuda', device_id=0)`. The native handle is an
-integer. Keep its owner alive for the full session lifetime; the borrowed
-wrapper does not extend that ownership.
+Allocation, conversion, and the session use the same stream. Inference writes
+directly into message storage; no `to_tensor_msg()` copy is needed.
 
-Python plugins use `OrtValue.from_dlpack` with a private capsule helper that
-retains the storage and its access handle.
+To borrow a caller-owned stream, replace only stream creation:
+
+```python
+from onnxruntime_conversions import borrow_stream
+
+stream = borrow_stream(existing_stream, 'cuda', device_id=0)
+```
+
+The native handle is an integer. Keep its owner alive until the session, views,
+and queued work finish; the borrowed wrapper does not extend that ownership.
+
+### Subscriber
+
+Create a stream once in the subscriber and use it in the callback. The
+application function `consume()` must treat the input as read-only and use the
+supplied stream, or a session configured with that stream.
+
+```python
+from onnxruntime_conversions import create_stream
+from onnxruntime_conversions import from_input_tensor_msg
+
+stream = create_stream()
+
+
+def callback(received):
+    view = from_input_tensor_msg(received, stream)
+    consume(view.value, stream)
+```
+
+Keep `stream` alive for the subscription and its queued work.
+
+Both conversion functions return an `OrtTensorView` whose `.value` is a native
+`OrtValue`; empty buffers return `None`. Unlike C++, the Python native value
+retains the storage and access handle through DLPack, even after the wrapper
+is released.
+
+The wrapper's `with` syntax is optional. It drops the wrapper's references on
+exit, but does not release values or I/O bindings retained elsewhere, and does
+not synchronize the stream. The examples need neither `with` for views nor
+explicit `del` statements.
+
+### Existing tensors
+
+Use `to_tensor_msg()` only when copying an already-existing ONNX Runtime tensor
+into a message. Use the stream associated with its producer:
+
+```python
+from onnxruntime_conversions import to_tensor_msg
+
+outgoing = to_tensor_msg(ort_value, stream=stream)
+publisher.publish(outgoing)
+```
+
+To reuse an existing message allocation with sufficient capacity:
+
+```python
+to_tensor_msg(preallocated, ort_value, stream=stream)
+publisher.publish(preallocated)
+```
+
+Copies complete before returning. Passing a stream here does not change the
+producer session's stream; synchronize explicitly if they differ.
 
 ## License
 

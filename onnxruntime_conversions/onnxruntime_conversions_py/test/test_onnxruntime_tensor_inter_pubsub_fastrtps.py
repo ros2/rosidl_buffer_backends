@@ -31,6 +31,8 @@ from onnxruntime_conversions import from_output_tensor_msg
 from onnxruntime_conversions import session_providers
 from onnxruntime_conversions import to_tensor_msg
 
+import pytest
+
 import rclpy
 from rclpy.node import Node
 from tensor_msgs.msg import ExperimentalTensor
@@ -89,8 +91,11 @@ def _subscriber(topic, stream):
 
 
 def _publisher(topic, stream):
+    session = ort.InferenceSession(
+        identity_model((2, 3)), providers=session_providers(stream=stream))
     node = Node('onnxruntime_tensor_publisher')
     publisher = node.create_publisher(ExperimentalTensor, topic, 10)
+    retained_outputs = []
     try:
         deadline = time.monotonic() + 8.0
         while publisher.get_subscription_count() < 1 and time.monotonic() < deadline:
@@ -104,15 +109,25 @@ def _publisher(topic, stream):
             values = np.arange(6, dtype=np.float32).reshape(2, 3)
             values += message_index * 10
             value = ort.OrtValue.ortvalue_from_numpy(values)
-            to_tensor_msg(msg, value, stream)
+            output = from_output_tensor_msg(msg, stream)
+            binding = session.io_binding()
+            binding.bind_ortvalue_input('input', value)
+            binding.bind_ortvalue_output('output', output.value)
+            session.run_with_iobinding(binding)
+            retained_outputs.append((msg, output, binding))
             publisher.publish(msg)
+            if stream.backend == 'cuda':
+                with pytest.raises(RuntimeError, match='write already finalized'):
+                    from_output_tensor_msg(msg, stream)
             time.sleep(0.1)
+        # Keep the writers alive until the subscriber has validated all messages.
+        assert sys.stdin.readline().strip() == 'done'
     finally:
         node.destroy_node()
     print('PUBLISHER_ONNX_OK')
 
 
-def test_onnx_inference_crosses_fastrtps_process_boundary():
+def test_onnx_inference_publishes_with_live_output_bindings():
     topic = f'onnxruntime_tensor_{uuid.uuid4().hex}'
     environment = os.environ.copy()
     environment['RMW_IMPLEMENTATION'] = 'rmw_fastrtps_cpp'
@@ -121,7 +136,7 @@ def test_onnx_inference_crosses_fastrtps_process_boundary():
     def start(role):
         return subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), role, topic],
-            env=environment, stdout=subprocess.PIPE,
+            env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True)
 
     processes = []
@@ -131,8 +146,8 @@ def test_onnx_inference_crosses_fastrtps_process_boundary():
         time.sleep(0.5)
         publisher = start('publisher')
         processes.append(publisher)
-        publisher_output, _ = publisher.communicate(timeout=15)
         subscriber_output, _ = subscriber.communicate(timeout=15)
+        publisher_output, _ = publisher.communicate(input='done\n', timeout=15)
     finally:
         for process in processes:
             if process.poll() is None:

@@ -243,7 +243,13 @@ TEST_F(CudaConversions, CopiesCompleteBeforeSourceStorageIsReleased)
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
       }, nullptr), cudaSuccess);
     to_tensor_msg(*destination, view.value(), stream());
-    EXPECT_EQ(cudaStreamQuery(stream_), cudaSuccess);
+    // Reusing the source on another stream must not change the completed copy.
+    cudaStream_t reuse_stream = nullptr;
+    ASSERT_EQ(cudaStreamCreateWithFlags(&reuse_stream, cudaStreamNonBlocking), cudaSuccess);
+    ASSERT_EQ(cudaMemsetAsync(
+        view.value().GetTensorMutableRawData(), 0, 4 * sizeof(float), reuse_stream), cudaSuccess);
+    ASSERT_EQ(cudaStreamSynchronize(reuse_stream), cudaSuccess);
+    ASSERT_EQ(cudaStreamDestroy(reuse_stream), cudaSuccess);
   }
   source.reset();
   auto result = from_input_tensor_msg(*destination, stream());
