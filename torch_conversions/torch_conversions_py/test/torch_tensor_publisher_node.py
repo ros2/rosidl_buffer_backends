@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import deque
 from math import prod
 
 import rclpy
@@ -38,20 +39,24 @@ class TorchTensorPublisher(Node):
                 'tensor_values length must match the tensor shape')
         self._publisher = self.create_publisher(
             ExperimentalTensor, 'test_torch_tensor', 10)
+        self._retained_outputs = deque(maxlen=32)
         self._timer = self.create_timer(0.1, self._timer_callback)
 
     def _timer_callback(self):
         with set_stream():
             msg = allocate_tensor_msg(
-                self._tensor_shape, torch.uint8, 'cuda')
+                self._tensor_shape, torch.uint8)
             output = from_output_tensor_msg(msg)
             tensor = torch.tensor(
                 self._tensor_values,
                 dtype=torch.uint8,
                 device=output.device,
             ).reshape_as(output)
+            if output.is_cuda:
+                torch.cuda._sleep(200_000_000)
             output.copy_(tensor)
-        self._publisher.publish(msg)
+            self._retained_outputs.append((msg, output))
+            self._publisher.publish(msg)
 
 
 def main(args=None):

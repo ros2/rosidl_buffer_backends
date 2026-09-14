@@ -58,8 +58,18 @@ C++ views borrow message storage on both CPU and CUDA: keep the message alive
 and do not replace or resize its buffer while a view exists. A CUDA access
 handle does not own the buffer. The default input conversion clones the tensor;
 `clone=false` returns a borrowed view. Python views retain their backing buffer,
-but it must not be resized while a view exists. Release every output view before
-publishing so its write handle records completion.
+but it must not be resized while a view exists.
+
+Queue all producer writes on the conversion's execution stream before
+publishing, and do not write to the published storage afterward. The CUDA
+backend finalizes an outstanding writer when exporting the message or acquiring
+a read handle, recording the event that readers wait on. Output tensors may
+remain alive during publication; their destruction is not required to finalize
+the writer.
+
+The C++ examples publish by reference to keep the message alive while borrowed
+views exist. Release those views before transferring message ownership with
+`publish(std::move(msg))`. Python views retain their backing buffer.
 
 ## Execution streams
 
@@ -75,10 +85,10 @@ policy: an explicit device first, then `ROSIDL_TENSOR_BACKEND`, then plugin
 priority. Pass the same explicit device to `set_stream(device)` and allocation
 when overriding the default. Both helpers affect the calling thread only.
 
-The guard does not synchronize on exit. Keep conversions and subsequent tensor
-operations inside its scope, and release views before leaving it. If the
-application already manages a Torch stream, conversions can use that stream
-without `set_stream()`. Work on other streams requires explicit synchronization.
+The guard does not synchronize on exit. Keep conversions, subsequent tensor
+operations, and publication inside its scope. If the application already
+manages a Torch stream, conversions can use that stream without `set_stream()`.
+Work on other streams requires explicit synchronization.
 In C++, an explicit `nullptr` also selects Torch's current stream;
 `cudaStreamLegacy` selects the legacy default stream.
 Copies into messages complete before returning, including any contiguous
@@ -134,33 +144,59 @@ colcon build --merge-install --packages-up-to torch_conversions_cpu
 
 ### Publisher
 
+These examples assume valid, nonempty messages. Select a stream for the
+publisher's conversion and pipeline operations:
+
 ```cpp
 #include "torch_conversions/torch_conversions.hpp"
 
 auto guard = torch_conversions::set_stream();
 auto msg = torch_conversions::allocate_tensor_msg(
   {480, 640, 3}, torch::kUInt8);
-{
-  at::Tensor output = torch_conversions::from_output_tensor_msg(*msg);
-  my_pipeline(output);
-}
-publisher->publish(std::move(msg));
+auto output = torch_conversions::from_output_tensor_msg(*msg);
+produce(output);
+publisher->publish(*msg);
 ```
 
-### Subscriber and existing tensors
+The guard covers allocation, conversion, and the application's `produce()`,
+which fills the output in place. Do not use `output` for further writes after
+publishing.
+
+### Subscriber
+
+Select a stream inside the subscriber callback:
 
 ```cpp
+#include "torch_conversions/torch_conversions.hpp"
+
 auto guard = torch_conversions::set_stream();
-auto tensor = torch_conversions::from_input_tensor_msg(
-  *received, /*clone=*/true);
-auto view = torch_conversions::from_input_tensor_msg(
-  *received, /*clone=*/false);
-auto outgoing = torch_conversions::to_tensor_msg(tensor);
-torch_conversions::to_tensor_msg(*preallocated, tensor);
+auto input = torch_conversions::from_input_tensor_msg(*received, /*clone=*/false);
+consume(input);
 ```
 
-Every conversion accepts an optional execution stream. When omitted, the CUDA
-plugin uses Torch's current stream on the buffer or source tensor's device.
+The guard covers both the input conversion and the application's read-only
+`consume()`. Omit `/*clone=*/false` to get an independent tensor instead of a
+zero-copy view.
+
+### Existing tensors
+
+Use `to_tensor_msg()` only when copying an already-existing tensor into a
+message. Run these calls on the tensor producer's current stream:
+
+```cpp
+auto outgoing = torch_conversions::to_tensor_msg(tensor);
+publisher->publish(std::move(outgoing));
+```
+
+To reuse an existing message allocation with sufficient capacity:
+
+```cpp
+torch_conversions::to_tensor_msg(*preallocated, tensor);
+publisher->publish(std::move(preallocated));
+```
+
+Copies complete before returning. If the tensor was produced on another
+stream, synchronize with it or perform the copy on that stream.
 
 ## Python
 
@@ -197,29 +233,70 @@ rosdep install --from-paths \
 colcon build --merge-install --packages-up-to torch_conversions_py_cpu
 ```
 
+### Publisher
+
+Select a stream for the publisher's conversion and pipeline operations:
+
 ```python
 import torch
 from torch_conversions import allocate_tensor_msg
-from torch_conversions import from_input_tensor_msg
 from torch_conversions import from_output_tensor_msg
 from torch_conversions import set_stream
-from torch_conversions import to_tensor_msg
 
 with set_stream():
     msg = allocate_tensor_msg((480, 640, 3), torch.uint8)
     output = from_output_tensor_msg(msg)
-    my_pipeline(output)
-    del output
-
-    view = from_input_tensor_msg(msg, clone=False)
-    outgoing = to_tensor_msg(view + 1)
-    del view
+    produce(output)
+    publisher.publish(msg)
 ```
 
-Python uses Torch's current CUDA stream when no explicit `stream=` integer is
-provided. `to_tensor_msg(msg, tensor)` reuses preallocated message storage. The
-CUDA plugin constructs zero-copy views through a private DLPack capsule bridge
-that retains the buffer and its access handle.
+The stream scope covers allocation, conversion, and the application's
+`produce()`, which fills the output in place. Do not use `output` for further
+writes after publishing.
+
+### Subscriber
+
+Select a stream inside the subscriber callback:
+
+```python
+from torch_conversions import from_input_tensor_msg
+from torch_conversions import set_stream
+
+with set_stream():
+    input_tensor = from_input_tensor_msg(received, clone=False)
+    consume(input_tensor)
+```
+
+The stream scope covers both the input conversion and the application's
+read-only `consume()`. Omit `clone=False` to get an independent tensor instead
+of a zero-copy view.
+
+`with set_stream():` selects a stream; it is not a view context manager.
+Conversions use that current stream without needing a `stream=` argument.
+If the application already manages the current Torch stream, use its existing
+scope instead.
+
+### Existing tensors
+
+Use `to_tensor_msg()` only when copying an already-existing tensor into a
+message. Run these calls on the tensor producer's current stream:
+
+```python
+from torch_conversions import to_tensor_msg
+
+outgoing = to_tensor_msg(tensor)
+publisher.publish(outgoing)
+```
+
+To reuse an existing message allocation with sufficient capacity:
+
+```python
+to_tensor_msg(preallocated, tensor)
+publisher.publish(preallocated)
+```
+
+Copies complete before returning. If the tensor was produced on another
+stream, synchronize with it or perform the copy on that stream.
 
 ## License
 

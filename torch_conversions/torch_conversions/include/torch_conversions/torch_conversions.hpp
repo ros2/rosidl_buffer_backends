@@ -67,7 +67,7 @@ TORCH_CONVERSIONS_PUBLIC std::unique_ptr<TensorMsg> allocate_tensor_msg(
   at::ScalarType dtype,
   std::optional<c10::Device> device = std::nullopt);
 
-/// Views borrow msg storage. Keep msg alive and release views before publishing.
+/// Views borrow msg storage. Keep msg alive and do not write after publication.
 TORCH_CONVERSIONS_PUBLIC at::Tensor from_output_tensor_msg(
   TensorMsg & msg,
   void * execution_stream = nullptr);
