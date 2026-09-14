@@ -13,19 +13,15 @@ ONNX Runtime conversion libraries built on the same buffer infrastructure.
 - **cuda_buffer_backend** -- BufferBackend plugin for CUDA IPC transport.
 - **cuda_buffer_backend_msgs** -- ROS 2 message definitions for CUDA buffer
   descriptors.
-- **libtorch_vendor** -- Official CPU LibTorch 2.9.1 provider.
-- **libtorch_cuda_vendor** -- Optional CUDA LibTorch 2.9.1 overlay for C++
-  conversions, supporting `cu126`, `cu128`, and `cu130`.
-- **python3_torch_vendor** -- Official CPU Python Torch 2.9.1 provider.
-- **python3_torch_cuda_vendor** -- Optional CUDA Python Torch 2.9.1 overlay.
-  It selects an official `cu126`, `cu128`, or `cu130` wheel from the detected
-  CUDA Toolkit; JetPack provides the required installation on Tegra.
+- **libtorch_vendor** -- CPU LibTorch provider.
+- **libtorch_cuda_vendor** -- CUDA LibTorch provider.
+- **python3_torch_vendor** -- CPU Python Torch provider.
+- **python3_torch_cuda_vendor** -- CUDA Python Torch provider.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
-- **onnxruntime_core_vendor** -- CPU-only ONNX Runtime 1.26.0 C++ provider.
-- **onnxruntime_cuda_vendor** -- ONNX Runtime 1.26.0 C++ provider for CUDA 12.
-- **python_onnxruntime_vendor** -- CPU-only ONNX Runtime 1.26.0 Python provider.
-- **python_onnxruntime_cuda_vendor** -- ONNX Runtime 1.26.0 Python provider for
-  CUDA 12.
+- **onnxruntime_core_vendor** -- CPU ONNX Runtime C++ provider.
+- **onnxruntime_cuda_vendor** -- CUDA ONNX Runtime C++ provider.
+- **python_onnxruntime_vendor** -- CPU ONNX Runtime Python provider.
+- **python_onnxruntime_cuda_vendor** -- CUDA ONNX Runtime Python provider.
 - **onnxruntime_conversions** -- C++ `Ort::Value` API and plugin registry.
 - **onnxruntime_conversions_cpu** -- C++ host-memory implementation.
 - **onnxruntime_conversions_cuda** -- C++ CUDA implementation.
@@ -67,13 +63,6 @@ ONNX Runtime conversion libraries built on the same buffer infrastructure.
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- CPU LibTorch and Python Torch 2.9.1 providers for CPU conversions.
-- A CUDA Toolkit in the 12 or 13 series for the CUDA buffer and Torch
-  accelerator packages, declared through the upstream `nvidia-cuda` rosdep
-  key. The Torch vendors select a `cu126`, `cu128`, or `cu130` distribution. A
-  Torch CPU-only installation does not require CUDA packages, a GPU, or a
-  driver.
-- ONNX Runtime accelerator packages require CUDA 12 and cuDNN 9.
 
 Per-package build, test, and run details live in each package's README:
 

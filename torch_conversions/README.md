@@ -23,6 +23,42 @@ An explicit device such as `cuda:1` preserves its device index. Additional
 accelerators can provide plugins without adding device-specific logic to the
 core; their framework providers must satisfy the core's ABI contract.
 
+## Dependencies and source builds
+
+Debians target Ubuntu 26.04 (Resolute) and bundle Torch **2.14.0**; sourcing ROS
+selects that installation. Build from source to reuse an existing Torch
+installation or on earlier Ubuntu releases. Ubuntu 24.04, including JetPack,
+also requires [ROS Lyrical built from source](https://github.com/ros2/ros2_documentation/blob/lyrical/source/Releases/lyrical/supported-platforms.rst).
+
+Source builds reuse detected CUDA and **Torch/LibTorch >=2.5.0**. CUDA plugins
+require CUDA-enabled Torch. If no compatible installation is found, the fallback
+is **2.14.0**; its CUDA build uses `cu130` and requires an installed
+**CUDA >=13.1,<14** toolkit.
+
+From this repository's root, after sourcing ROS, build with an existing CUDA
+toolkit (including on Ubuntu before Resolute):
+
+```bash
+rosdep install --from-paths torch_vendor torch_conversions \
+  tensor_msgs cuda_buffer_backend --ignore-src -y --skip-keys cuda-toolkit
+colcon build --merge-install --packages-up-to \
+  torch_conversions_cpu torch_conversions_cuda \
+  torch_conversions_py_cpu torch_conversions_py_cuda
+source install/setup.bash
+```
+
+On Resolute, omit `--skip-keys cuda-toolkit` to install the toolkit through rosdep/APT.
+Append `--cmake-args` to `colcon build` with any of these overrides:
+
+- `-DFORCE_BUILD_VENDOR_PKG=ON`: select the pinned fallback.
+- `-DTorch_DIR=/path/to/libtorch/share/cmake/Torch`: select a C++ SDK.
+- `-DPython3_EXECUTABLE=/path/to/python`: select Python; its major/minor version must match ROS.
+- `-DCUDAToolkit_ROOT=/path/to/cuda`: select the CUDA toolkit.
+
+C++ requires C++20 and the libstdc++ C++11 ABI. Use fresh build directories and
+rebuild native vendors, conversions and applications together when changing the
+Torch release.
+
 ## Execution streams
 
 Conversions use Torch's current stream on the buffer or source tensor's device
@@ -52,14 +88,6 @@ Add CUDA later:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-torch-conversions-cuda
-```
-
-Source build:
-
-```bash
-rosdep install --from-paths . --ignore-src -y
-colcon build --merge-install --packages-up-to \
-  torch_conversions_cpu torch_conversions_cuda
 ```
 
 For a CPU-only source build, restrict rosdep to the CPU source packages as
@@ -137,14 +165,6 @@ Add CUDA later:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-torch-conversions-py-cuda
-```
-
-Source build:
-
-```bash
-rosdep install --from-paths . --ignore-src -y
-colcon build --merge-install --packages-up-to \
-  torch_conversions_py_cpu torch_conversions_py_cuda
 ```
 
 For a Python CPU-only source build, restrict both commands to the CPU stack:

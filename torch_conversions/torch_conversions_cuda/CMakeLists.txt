@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 project(torch_conversions_cuda)
 
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD 20)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -14,6 +14,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(CUDAToolkit REQUIRED)
+message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
 find_package(cuda_buffer REQUIRED)
 find_package(libtorch_cuda_vendor REQUIRED)
 find_package(Torch REQUIRED)

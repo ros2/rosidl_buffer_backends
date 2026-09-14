@@ -12,7 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-include(CMakeFindDependencyMacro)
+cmake_minimum_required(VERSION 3.20)
+project(libtorch_vendor_selection_test LANGUAGES CXX)
 
-find_dependency(libtorch_vendor)
-find_dependency(Torch)
+# Check CUDA SDK selection after loading CPU vendor metadata.
+find_package(libtorch_vendor REQUIRED)
+find_package(libtorch_cuda_vendor REQUIRED)
+find_package(Torch ${LIBTORCH_VENDOR_SELECTED_VERSION} EXACT REQUIRED)
+if(NOT TARGET torch_cuda)
+  message(FATAL_ERROR "The CUDA vendor imported CPU-only Torch targets")
+endif()
