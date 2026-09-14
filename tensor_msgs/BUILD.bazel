@@ -1,0 +1,17 @@
+load(
+    "@isaac_ros2_rules//ros:defs.bzl",
+    "cc_ros2_interface_library",
+    "ros2_interface",
+)
+
+package(default_visibility = ["//visibility:public"])
+
+ros2_interface(
+    name = "tensor_msgs",
+    srcs = ["msg/ExperimentalTensor.msg"],
+)
+
+cc_ros2_interface_library(
+    name = "tensor_msgs_cc",
+    deps = [":tensor_msgs"],
+)
