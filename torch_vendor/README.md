@@ -64,7 +64,7 @@ toolkit and the rejected Torch CUDA build.
 Set `-DCUDAToolkit_ROOT=/usr/local/cuda-13.1` in a fresh build to select a toolkit.
 A configured CUDA compiler can take precedence; check the version and path in
 CMake's output. When supplying the toolkit yourself, use
-`--skip-keys cuda-toolkit-13-1` with `rosdep install`.
+`--skip-keys cuda-toolkit` with `rosdep install`.
 
 At runtime, Torch and ROS must load CUDA libraries that provide the symbols
 required by both. Library search paths and libraries already loaded in the
@@ -72,8 +72,10 @@ process affect selection. GPU execution requires a compatible NVIDIA driver.
 
 ## Debian installation
 
-The Ubuntu Resolute dependency is `cuda-toolkit-13-1` (>=13.1,<13.2). APT checks
-installed Debian package names and versions.
+The Ubuntu Resolute dependency is `cuda-toolkit` (>=13.1,<14). APT checks
+installed Debian package names and versions. The metapackage selects the
+repository's toolkit release. Generated Debians also depend on the CUDA runtime
+packages required by their linked libraries.
 
 Vendor Debians contain the fallback framework under the ROS prefix. Existing
 pip or Conda installations can coexist with them. Sourcing ROS selects the
