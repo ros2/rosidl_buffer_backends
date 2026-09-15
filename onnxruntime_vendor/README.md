@@ -42,7 +42,7 @@ Source builds require CUDA **>=12,<14**. CUDA providers must match the selected
 toolkit's major. Set `-DCUDAToolkit_ROOT=/usr/local/cuda-13.1` in a fresh build to
 select a toolkit. A configured CUDA compiler can take precedence; check the
 version and path in CMake's output. When supplying the toolkit yourself, use
-`--skip-keys cuda-toolkit-13-1` with `rosdep install`.
+`--skip-keys cuda-toolkit` with `rosdep install`.
 
 CUDA 13 Python wheels come from PyPI. CUDA 12 wheels come from the
 [ONNX Runtime CUDA 12 feed](https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/).
@@ -63,8 +63,10 @@ compatible NVIDIA driver.
 
 ## Debian installation
 
-The Ubuntu Resolute dependency is `cuda-toolkit-13-1` (>=13.1,<13.2). APT checks
-installed Debian package names and versions.
+The Ubuntu Resolute dependency is `cuda-toolkit` (>=13.1,<14). APT checks
+installed Debian package names and versions. The metapackage selects the
+repository's toolkit release. Generated Debians also depend on the CUDA runtime
+packages required by their linked libraries.
 
 Vendor Debians contain the fallback framework under the ROS prefix. Existing
 pip or Conda installations can coexist with them. Sourcing ROS selects the
