@@ -12,14 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(LIBTORCH_CUDA_VENDOR_ACTIVE TRUE)
-set(LIBTORCH_CUDA_VENDOR_SELECTED_VERSION "@LIBTORCH_CUDA_VENDOR_SELECTED_VERSION@")
-if(NOT "@LIBTORCH_CUDA_VENDOR_TORCH_DIR@" STREQUAL "")
-  set(Torch_DIR "@LIBTORCH_CUDA_VENDOR_TORCH_DIR@")
-else()
-  set(Torch_DIR "${libtorch_cuda_vendor_DIR}/../../../opt/libtorch_cuda_vendor/share/cmake/Torch")
-endif()
-find_package(libtorch_vendor REQUIRED)
-include("${libtorch_vendor_DIR}/libtorch_vendor_cuda.cmake")
+include(CMakeFindDependencyMacro)
 
-include("${libtorch_vendor_DIR}/libtorch_vendor_select.cmake")
+find_dependency(libtorch_vendor)
+find_dependency(Torch @Torch_VERSION@ EXACT)

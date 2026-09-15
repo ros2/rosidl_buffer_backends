@@ -1,0 +1,3 @@
+cuda-toolkit-13-1:
+  ubuntu:
+    resolute: [cuda-toolkit-13-1]

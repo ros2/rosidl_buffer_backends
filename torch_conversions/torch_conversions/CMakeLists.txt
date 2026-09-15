@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(torch_conversions)
 
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD 20)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -23,6 +23,8 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
+
 target_link_libraries(${PROJECT_NAME}
   PUBLIC
     torch
@@ -119,4 +121,4 @@ if(BUILD_TESTING)
     RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
-ament_package(CONFIG_EXTRAS_POST cmake/torch_conversions-extras.cmake)
+ament_package(CONFIG_EXTRAS_POST cmake/torch_conversions-extras.cmake.in)

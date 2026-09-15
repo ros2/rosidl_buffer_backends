@@ -3,7 +3,7 @@
 <package format="3">
   <name>libtorch_cuda_vendor</name>
   <version>0.1.2</version>
-  <description>CUDA LibTorch 2.9.1 distribution for C++ Torch conversions.</description>
+  <description>CUDA LibTorch 2.14.0 distribution for C++ Torch conversions.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
   <license>Apache-2.0</license>
@@ -12,7 +12,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
 
-  <depend version_gte="12" version_lt="14">nvidia-cuda</depend>
+  <depend version_gte="13.1" version_lt="13.2">cuda-toolkit-13-1</depend>
   <depend>libtorch_vendor</depend>
 
   <test_depend>ament_cmake_xmllint</test_depend>

@@ -10,7 +10,7 @@ find_package(ament_cmake_vendor_package REQUIRED)
 include(cmake/libtorch_cuda_vendor_policy.cmake)
 
 set(LIBTORCH_CUDA_VENDOR_VARIANT "" CACHE STRING
-  "CUDA variant override (cu126, cu128, cu130). Auto-detected if empty.")
+  "CUDA variant override (cu126, cu130, cu132). Auto-detected if empty.")
 
 option(FORCE_BUILD_VENDOR_PKG
   "Disable reuse of a platform-provided LibTorch distribution"
@@ -21,71 +21,55 @@ if(LIBTORCH_CUDA_VENDOR_VARIANT)
     "${LIBTORCH_CUDA_VENDOR_VARIANT}")
 endif()
 
-find_package(CUDAToolkit REQUIRED)
+set(_requested_variant "${LIBTORCH_CUDA_VENDOR_VARIANT}")
+find_package(CUDAToolkit 12.6 REQUIRED)
+if(NOT CUDAToolkit_VERSION VERSION_LESS "14.0")
+  message(FATAL_ERROR "${PROJECT_NAME}: require CUDA >=12.6,<14; select it with CUDAToolkit_ROOT")
+endif()
+message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
 libtorch_cuda_vendor_variant_for_cuda(
   "${CUDAToolkit_VERSION}" _detected_variant)
-if(LIBTORCH_CUDA_VENDOR_VARIANT AND
-    NOT LIBTORCH_CUDA_VENDOR_VARIANT STREQUAL _detected_variant)
-  message(FATAL_ERROR
-    "${PROJECT_NAME}: requested ${LIBTORCH_CUDA_VENDOR_VARIANT}, but CUDA "
-    "${CUDAToolkit_VERSION} requires ${_detected_variant}")
-endif()
-set(LIBTORCH_CUDA_VENDOR_VARIANT "${_detected_variant}")
-
-# On aarch64, reuse JetPack's LibTorch and identify Tegra from the device tree.
-string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
-if(_system_arch MATCHES "aarch64|arm64")
-  set(_is_aarch64 TRUE)
-  set(_is_tegra FALSE)
-  if(EXISTS "/proc/device-tree/compatible")
-    file(READ "/proc/device-tree/compatible" _dt_compat_hex HEX)
-    string(HEX "nvidia,tegra" _tegra_needle_hex)
-    if(_dt_compat_hex MATCHES "${_tegra_needle_hex}")
-      set(_is_tegra TRUE)
-    endif()
-  endif()
+if(LIBTORCH_CUDA_VENDOR_VARIANT)
+  libtorch_cuda_vendor_validate_variant_for_cuda(
+    "${LIBTORCH_CUDA_VENDOR_VARIANT}" "${CUDAToolkit_VERSION}")
 else()
-  set(_is_aarch64 FALSE)
-  set(_is_tegra FALSE)
+  set(LIBTORCH_CUDA_VENDOR_VARIANT "${_detected_variant}")
 endif()
 
-set(LIBTORCH_CUDA_VENDOR_TORCH_DIR "")
-if(_is_aarch64)
-  if(NOT _is_tegra)
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: CUDA aarch64 support is only available on NVIDIA Tegra")
+# Probe the caller's SDK paths before applying the CPU vendor defaults.
+set(_requested_torch_dir "${Torch_DIR}")
+find_package(libtorch_vendor REQUIRED)
+set(Torch_DIR "${_requested_torch_dir}")
+libtorch_vendor_find_compatible(TRUE LIBTORCH_CUDA_VENDOR_TORCH_DIR _system_variant
+  LIBTORCH_CUDA_VENDOR_SELECTED_VERSION "${LIBTORCH_VENDOR_SELECTED_VERSION}")
+if(LIBTORCH_CUDA_VENDOR_TORCH_DIR)
+  libtorch_cuda_vendor_cuda_compatible(
+    "${_system_variant}" "${CUDAToolkit_VERSION}" _reuse_cuda_compatible _reuse_cuda_reason)
+  if(NOT _reuse_cuda_compatible)
+    message(STATUS "${PROJECT_NAME}: ${_reuse_cuda_reason} Staging pinned fallback.")
+    set(LIBTORCH_CUDA_VENDOR_TORCH_DIR "")
   endif()
-  if(FORCE_BUILD_VENDOR_PKG)
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: no CUDA LibTorch archive is published for aarch64; "
-      "the JetPack PyTorch installation must be reused")
+endif()
+if(LIBTORCH_CUDA_VENDOR_TORCH_DIR AND _requested_variant AND NOT _system_variant STREQUAL _requested_variant)
+  message(STATUS "${PROJECT_NAME}: installed Torch build ${_system_variant} differs from "
+    "explicitly requested ${_requested_variant}; staging pinned fallback")
+  set(LIBTORCH_CUDA_VENDOR_TORCH_DIR "")
+endif()
+if(LIBTORCH_CUDA_VENDOR_TORCH_DIR)
+  set(LIBTORCH_CUDA_VENDOR_VARIANT "${_system_variant}")
+endif()
+if(NOT LIBTORCH_CUDA_VENDOR_TORCH_DIR)
+  set(LIBTORCH_CUDA_VENDOR_SELECTED_VERSION "${LIBTORCH_CUDA_VENDOR_VERSION}")
+  if(NOT LIBTORCH_VENDOR_SELECTED_VERSION STREQUAL LIBTORCH_CUDA_VENDOR_SELECTED_VERSION)
+    message(FATAL_ERROR "${PROJECT_NAME}: no compatible CUDA provider for the selected CPU/core LibTorch "
+      "${LIBTORCH_VENDOR_SELECTED_VERSION}; the pinned CUDA fallback is ${LIBTORCH_CUDA_VENDOR_SELECTED_VERSION}. "
+      "Select a matching CUDA SDK with Torch_DIR, or rebuild all Torch vendors and conversions "
+      "with -DFORCE_BUILD_VENDOR_PKG=ON.")
   endif()
-
-  execute_process(
-    COMMAND python3 -c
-      "import os, torch; cuda=torch.version.cuda or ''; print(torch.__version__.split('+')[0] + ';cu' + cuda.replace('.', '') + ';' + os.path.join(os.path.dirname(torch.__file__), 'share', 'cmake', 'Torch'))"
-    OUTPUT_VARIABLE _system_torch
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE _system_torch_rc
-    ERROR_QUIET
-  )
-  if(NOT _system_torch_rc EQUAL 0)
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: JetPack CUDA-enabled PyTorch ${LIBTORCH_CUDA_VENDOR_VERSION} is required")
+  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
+  if(NOT _system_arch MATCHES "^(x86_64|amd64)$")
+    message(FATAL_ERROR "${PROJECT_NAME}: supply a compatible CUDA LibTorch SDK through Torch_DIR")
   endif()
-  list(GET _system_torch 0 _system_torch_version)
-  list(GET _system_torch 1 _system_torch_variant)
-  list(GET _system_torch 2 _system_torch_dir)
-  if(NOT _system_torch_version STREQUAL LIBTORCH_CUDA_VENDOR_VERSION OR
-      NOT _system_torch_variant STREQUAL LIBTORCH_CUDA_VENDOR_VARIANT OR
-      NOT EXISTS "${_system_torch_dir}/TorchConfig.cmake")
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: JetPack Torch ${_system_torch_version}+"
-      "${_system_torch_variant} does not match required "
-      "${LIBTORCH_CUDA_VENDOR_VERSION}+${LIBTORCH_CUDA_VENDOR_VARIANT}")
-  endif()
-  set(LIBTORCH_CUDA_VENDOR_TORCH_DIR "${_system_torch_dir}")
-else()
   set(_archive_prefix "libtorch-shared-with-deps")
   string(CONCAT _url
     "https://download.pytorch.org/libtorch/${LIBTORCH_CUDA_VENDOR_VARIANT}/"
@@ -93,7 +77,7 @@ else()
     "${LIBTORCH_CUDA_VENDOR_VARIANT}.zip")
 
   set(_archive "${CMAKE_CURRENT_BINARY_DIR}/libtorch_archive")
-  set(_extract_dir "${CMAKE_CURRENT_BINARY_DIR}/libtorch_extracted")
+  set(_extract_dir "${CMAKE_CURRENT_BINARY_DIR}/libtorch-${LIBTORCH_CUDA_VENDOR_VERSION}-${LIBTORCH_CUDA_VENDOR_VARIANT}")
   set(_torch_root "${_extract_dir}/libtorch")
 
   if(NOT EXISTS "${_torch_root}/share/cmake/Torch/TorchConfig.cmake")
@@ -113,15 +97,11 @@ else()
     message(STATUS "${PROJECT_NAME}: using cached LibTorch at ${_torch_root}")
   endif()
 
-  # Omit the optional GPUDirect Storage RDMA transport and its RDMA dependencies.
   file(GLOB _unused_cufile_rdma "${_torch_root}/lib/libcufile_rdma*")
   if(_unused_cufile_rdma)
     file(REMOVE ${_unused_cufile_rdma})
   endif()
 
-  # Exclude the Python binding, upstream test fixtures, and the NNAPI plugin
-  # that links the Python binding. Python bindings are supplied by the Python
-  # vendors.
   set(_non_cpp_provider_libraries
     libtorch_python.so
     libc10d_cuda_test.so
@@ -139,7 +119,6 @@ else()
     USE_SOURCE_PERMISSIONS
   )
 
-  # Strip upstream debug sections before debhelper generates dbgsym packages.
   install(CODE "
     file(GLOB_RECURSE _elfs
       \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/*.so\"
@@ -168,9 +147,24 @@ else()
   )
 endif()
 
+if(LIBTORCH_CUDA_VENDOR_TORCH_DIR)
+  get_filename_component(_reused_root "${LIBTORCH_CUDA_VENDOR_TORCH_DIR}/../../.." ABSOLUTE)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/reused_libtorch.dsv"
+    "prepend-non-duplicate;LD_LIBRARY_PATH;${_reused_root}/lib\n")
+  ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/reused_libtorch.dsv")
+endif()
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+  add_test(
+    NAME libtorch_cuda_vendor_selection
+    COMMAND "${CMAKE_COMMAND}"
+      -S "${CMAKE_CURRENT_SOURCE_DIR}/test/consumer"
+      -B "${CMAKE_CURRENT_BINARY_DIR}/selection_test"
+      "-DCMAKE_PREFIX_PATH=${CMAKE_INSTALL_PREFIX};${CMAKE_PREFIX_PATH}"
+      "-DCUDAToolkit_ROOT=${CUDAToolkit_ROOT}"
+  )
   add_test(
     NAME libtorch_cuda_vendor_policy
     COMMAND "${CMAKE_COMMAND}" -P

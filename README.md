@@ -13,13 +13,10 @@ conversion libraries built on the same buffer infrastructure.
 - **cuda_buffer_backend** -- BufferBackend plugin for CUDA IPC transport.
 - **cuda_buffer_backend_msgs** -- ROS 2 message definitions for CUDA buffer
   descriptors.
-- **libtorch_vendor** -- Official CPU LibTorch 2.9.1 provider.
-- **libtorch_cuda_vendor** -- Optional CUDA LibTorch 2.9.1 overlay for C++
-  conversions, supporting `cu126`, `cu128`, and `cu130`.
-- **python3_torch_vendor** -- Official CPU Python Torch 2.9.1 provider.
-- **python3_torch_cuda_vendor** -- Optional CUDA Python Torch 2.9.1 overlay.
-  It selects an official `cu126`, `cu128`, or `cu130` wheel from the detected
-  CUDA Toolkit; JetPack provides the required installation on Tegra.
+- **libtorch_vendor** -- CPU LibTorch provider.
+- **libtorch_cuda_vendor** -- CUDA LibTorch provider.
+- **python3_torch_vendor** -- CPU Python Torch provider.
+- **python3_torch_cuda_vendor** -- CUDA Python Torch provider.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
 - **torch_conversions** -- C++ `at::Tensor` API and runtime plugin registry.
 - **torch_conversions_cpu** -- C++ host-memory implementation.
@@ -56,11 +53,6 @@ conversion libraries built on the same buffer infrastructure.
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   guide for the canonical source-build flow, or use the pixi workflow
   shipped by the [`ros2/ros2`](https://github.com/ros2/ros2) meta-repo.
-- CPU LibTorch and Python Torch 2.9.1 providers for CPU conversions.
-- A CUDA Toolkit in the 12 or 13 series only for the CUDA buffer, provider,
-  and conversion packages, declared through the upstream `nvidia-cuda` rosdep
-  key. The CUDA vendors select a `cu126`, `cu128`, or `cu130` distribution. A
-  CPU-only installation does not require CUDA packages, a GPU, or a driver.
 
 Per-package build, test, and run details live in each package's README:
 

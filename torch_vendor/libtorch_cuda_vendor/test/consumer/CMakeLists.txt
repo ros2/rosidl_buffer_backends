@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(LIBTORCH_CUDA_VENDOR_ACTIVE TRUE)
-set(LIBTORCH_CUDA_VENDOR_SELECTED_VERSION "@LIBTORCH_CUDA_VENDOR_SELECTED_VERSION@")
-if(NOT "@LIBTORCH_CUDA_VENDOR_TORCH_DIR@" STREQUAL "")
-  set(Torch_DIR "@LIBTORCH_CUDA_VENDOR_TORCH_DIR@")
-else()
-  set(Torch_DIR "${libtorch_cuda_vendor_DIR}/../../../opt/libtorch_cuda_vendor/share/cmake/Torch")
-endif()
-find_package(libtorch_vendor REQUIRED)
-include("${libtorch_vendor_DIR}/libtorch_vendor_cuda.cmake")
+cmake_minimum_required(VERSION 3.20)
+project(libtorch_vendor_selection_test LANGUAGES CXX)
 
-include("${libtorch_vendor_DIR}/libtorch_vendor_select.cmake")
+# Check CUDA SDK selection after loading CPU vendor metadata.
+find_package(libtorch_vendor REQUIRED)
+find_package(libtorch_cuda_vendor REQUIRED)
+find_package(Torch ${LIBTORCH_VENDOR_SELECTED_VERSION} EXACT REQUIRED)
+if(NOT TARGET torch_cuda)
+  message(FATAL_ERROR "The CUDA vendor imported CPU-only Torch targets")
+endif()

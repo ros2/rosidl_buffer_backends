@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(LIBTORCH_CUDA_VENDOR_ACTIVE TRUE)
-set(LIBTORCH_CUDA_VENDOR_SELECTED_VERSION "@LIBTORCH_CUDA_VENDOR_SELECTED_VERSION@")
-if(NOT "@LIBTORCH_CUDA_VENDOR_TORCH_DIR@" STREQUAL "")
-  set(Torch_DIR "@LIBTORCH_CUDA_VENDOR_TORCH_DIR@")
-else()
-  set(Torch_DIR "${libtorch_cuda_vendor_DIR}/../../../opt/libtorch_cuda_vendor/share/cmake/Torch")
+find_package(CUDAToolkit 12.6 REQUIRED)
+if(NOT CUDAToolkit_VERSION VERSION_LESS "14.0")
+  message(FATAL_ERROR "LibTorch requires CUDA >=12.6,<14")
 endif()
-find_package(libtorch_vendor REQUIRED)
-include("${libtorch_vendor_DIR}/libtorch_vendor_cuda.cmake")
 
-include("${libtorch_vendor_DIR}/libtorch_vendor_select.cmake")
+# Caffe2's prebuilt CUDA targets use torch::cudart.
+if(NOT TARGET torch::cudart)
+  add_library(torch::cudart INTERFACE IMPORTED)
+  set_property(TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES CUDA::cudart)
+endif()

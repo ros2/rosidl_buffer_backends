@@ -15,23 +15,11 @@ find_package(cuda_buffer_backend_msgs REQUIRED)
 find_package(rmw REQUIRED)
 find_package(rcutils REQUIRED)
 
-# Workaround for CMake's FindCUDAToolkit on Ubuntu's split nvidia-cuda-dev
-# layout in the bloom build pipeline. Pre-populate the cache variable to
-# skip the broken auto-detection.
-# Related: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=995122
-find_path(_CUDA_RUNTIME_DIR
-  NAMES cuda_runtime.h
-  HINTS
-    ENV CUDA_HOME
-    ENV CUDA_PATH
-    /usr/local/cuda/include
-    /usr/include
-)
-if(_CUDA_RUNTIME_DIR AND NOT DEFINED CUDAToolkit_INCLUDE_DIRECTORIES)
-  set(CUDAToolkit_INCLUDE_DIRECTORIES "${_CUDA_RUNTIME_DIR}" CACHE PATH
-    "CUDA include dir (FindCUDAToolkit nvidia-cuda-dev workaround)")
+find_package(CUDAToolkit 12 REQUIRED)
+if(NOT CUDAToolkit_VERSION VERSION_LESS "14.0")
+  message(FATAL_ERROR "${PROJECT_NAME}: require CUDA >=12,<14; select it with CUDAToolkit_ROOT")
 endif()
-find_package(CUDAToolkit REQUIRED)
+message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
 
 add_library(${PROJECT_NAME} SHARED
   src/cuda_buffer.cpp

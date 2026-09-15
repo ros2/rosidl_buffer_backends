@@ -11,9 +11,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 include(cmake/python3_torch_cuda_vendor_policy.cmake)
 
 set(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT "" CACHE STRING
-  "CUDA wheel variant override (cu126, cu128, cu130).")
+  "CUDA wheel variant override (cu126, cu130, cu132).")
 option(FORCE_BUILD_PYTHON3_TORCH_CUDA_VENDOR_PKG
-  "Disable reuse of the JetPack-provided Python Torch distribution"
+  "Disable reuse of the installed Python Torch distribution"
   OFF)
 
 if(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL "cpu")
@@ -24,104 +24,59 @@ elseif(NOT PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL "")
     "${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT}")
 endif()
 
-string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
-if(_system_arch MATCHES "aarch64|arm64")
-  set(_is_aarch64 TRUE)
-  set(_is_tegra FALSE)
-  if(EXISTS "/proc/device-tree/compatible")
-    file(READ "/proc/device-tree/compatible" _dt_compat_hex HEX)
-    string(HEX "nvidia,tegra" _tegra_needle_hex)
-    if(_dt_compat_hex MATCHES "${_tegra_needle_hex}")
-      set(_is_tegra TRUE)
-    endif()
-  endif()
+set(_requested_variant "${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT}")
+find_package(CUDAToolkit 12.6 REQUIRED)
+if(NOT CUDAToolkit_VERSION VERSION_LESS "14.0")
+  message(FATAL_ERROR "${PROJECT_NAME}: require CUDA >=12.6,<14; select it with CUDAToolkit_ROOT")
+endif()
+message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
+python3_torch_cuda_vendor_variant_for_cuda("${CUDAToolkit_VERSION}" _detected_variant)
+if(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT)
+  python3_torch_cuda_vendor_validate_variant_for_cuda(
+    "${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT}" "${CUDAToolkit_VERSION}")
 else()
-  set(_is_aarch64 FALSE)
-  set(_is_tegra FALSE)
+  set(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT "${_detected_variant}")
 endif()
 
-set(_reuse_system_torch FALSE)
-if(_is_tegra)
-  set(_system_torch_query
-    "import torch
-cuda = torch.version.cuda
-variant = 'cpu'
-if cuda is not None:
-  variant = 'cu' + cuda.replace('.', '')
-print(torch.__version__.split('+')[0] + ';' + variant)")
-  execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "${_system_torch_query}"
-    OUTPUT_VARIABLE _system_torch
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE _system_torch_rc
-    ERROR_QUIET
-  )
-  set(_system_torch_compatible FALSE)
-  if(_system_torch_rc EQUAL 0)
-    list(GET _system_torch 0 _system_torch_version)
-    list(GET _system_torch 1 _system_torch_variant)
-    python3_torch_cuda_vendor_can_reuse(
-      "${_system_torch_version}"
-      "${_system_torch_variant}"
-      _system_torch_compatible)
-  endif()
-
-  if(FORCE_BUILD_PYTHON3_TORCH_CUDA_VENDOR_PKG)
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: CUDA PyTorch wheels are not staged on Tegra; "
-      "the JetPack-provided installation must be reused")
-  elseif(NOT _system_torch_rc EQUAL 0 OR _system_torch_variant STREQUAL "cpu")
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: JetPack CUDA-enabled Python Torch is required on "
-      "NVIDIA Tegra but was not found")
-  elseif(NOT _system_torch_version STREQUAL
-      PYTHON3_TORCH_CUDA_VENDOR_TORCH_VERSION)
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: JetPack provides PyTorch ${_system_torch_version}; "
-      "exactly ${PYTHON3_TORCH_CUDA_VENDOR_TORCH_VERSION} is required")
-  elseif(NOT _system_torch_compatible)
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: JetPack provides unsupported CUDA variant "
-      "${_system_torch_variant}")
-  elseif(NOT PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL "" AND
-      NOT PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL _system_torch_variant)
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: JetPack provides ${_system_torch_variant}, which does "
-      "not match requested variant ${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT}")
-  else()
-    set(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT "${_system_torch_variant}")
-    set(_reuse_system_torch TRUE)
+option(FORCE_BUILD_VENDOR_PKG "Stage the pinned Python provider instead of reusing it" OFF)
+if(FORCE_BUILD_PYTHON3_TORCH_CUDA_VENDOR_PKG)
+  set(FORCE_BUILD_VENDOR_PKG ON)
+endif()
+find_package(python3_torch_vendor REQUIRED)
+include("${python3_torch_vendor_DIR}/python_provider_reuse.cmake")
+python_provider_find_compatible(torch "${PYTHON3_TORCH_VENDOR_SELECTED_VERSION}" TRUE
+  _reuse_root _reuse_variant PYTHON3_TORCH_CUDA_VENDOR_SELECTED_VERSION)
+if(_reuse_root)
+  python3_torch_cuda_vendor_cuda_compatible(
+    "${_reuse_variant}" "${CUDAToolkit_VERSION}" _reuse_cuda_compatible _reuse_cuda_reason)
+  if(NOT _reuse_cuda_compatible)
+    message(STATUS "${PROJECT_NAME}: ${_reuse_cuda_reason} Staging pinned fallback.")
+    set(_reuse_root "")
   endif()
 endif()
-
-if(_reuse_system_torch)
-  message(STATUS
-    "${PROJECT_NAME}: system CUDA Python Torch "
-    "${PYTHON3_TORCH_CUDA_VENDOR_TORCH_VERSION}+${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT} "
-    "found, skipping wheel installation")
+if(_reuse_root AND _requested_variant AND NOT _reuse_variant STREQUAL _requested_variant)
+  message(STATUS "${PROJECT_NAME}: installed Torch build ${_reuse_variant} differs from "
+    "explicitly requested ${_requested_variant}; staging pinned fallback")
+  set(_reuse_root "")
+endif()
+if(_reuse_root)
+  set(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT "${_reuse_variant}")
+  python_provider_reuse_hooks("${_reuse_root}")
 else()
-  if(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT STREQUAL "")
-    find_package(CUDAToolkit QUIET)
-    if(NOT CUDAToolkit_FOUND)
-      message(FATAL_ERROR
-        "${PROJECT_NAME}: no CUDA Toolkit was found. Install a supported "
-        "CUDA Toolkit or set PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT explicitly.")
-    else()
-      python3_torch_cuda_vendor_variant_for_cuda(
-        "${CUDAToolkit_VERSION}"
-        PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT)
-    endif()
+  set(PYTHON3_TORCH_CUDA_VENDOR_SELECTED_VERSION "${PYTHON3_TORCH_CUDA_VENDOR_TORCH_VERSION}")
+  if(NOT PYTHON3_TORCH_VENDOR_SELECTED_VERSION STREQUAL PYTHON3_TORCH_CUDA_VENDOR_SELECTED_VERSION)
+    message(FATAL_ERROR "${PROJECT_NAME}: no compatible CUDA provider for the selected Python torch "
+      "${PYTHON3_TORCH_VENDOR_SELECTED_VERSION}; the pinned CUDA fallback is ${PYTHON3_TORCH_CUDA_VENDOR_SELECTED_VERSION}. "
+      "Select a matching installation with Python3_EXECUTABLE, or rebuild both Python vendors "
+      "with -DFORCE_BUILD_VENDOR_PKG=ON.")
   endif()
-
-  if(_is_aarch64)
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: no CUDA Python Torch wheel is provided for non-Tegra "
-      "aarch64; install a compatible platform package and rebuild")
+  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
+  if(NOT _system_arch MATCHES "^(x86_64|amd64)$")
+    message(FATAL_ERROR "${PROJECT_NAME}: provide compatible Python Torch with Python3_EXECUTABLE")
   endif()
-
   set(_index_url
     "https://download.pytorch.org/whl/${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT}")
-  set(_wheel_dir "${CMAKE_CURRENT_BINARY_DIR}/wheel")
+  set(_wheel_dir "${CMAKE_CURRENT_BINARY_DIR}/wheel-${PYTHON3_TORCH_CUDA_VENDOR_TORCH_VERSION}-${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT}")
   set(_stage_dir "${CMAKE_CURRENT_BINARY_DIR}/stage")
   set(_marker
     "${_stage_dir}/.torch-${PYTHON3_TORCH_CUDA_VENDOR_TORCH_VERSION}-${PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT}")
@@ -172,6 +127,8 @@ else()
     )
 
     file(GLOB _all_wheels "${_wheel_dir}/*.whl")
+    # setuptools is supplied by the system package.
+    list(FILTER _all_wheels EXCLUDE REGEX "/setuptools-[^/]*[.]whl$")
     execute_process(
       COMMAND "${Python3_EXECUTABLE}" -m pip install
         --disable-pip-version-check
@@ -213,9 +170,9 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     file(WRITE "${_marker}" "")
   endif()
 
-  # Omit optional HPC transports; retain NVSHMEM core and CUDA libraries.
   file(GLOB _unused_transport_plugins
     "${_stage_dir}/nvidia/cufile/lib/libcufile_rdma*"
+    "${_stage_dir}/nvidia/cu13/lib/libcufile_rdma*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_transport_ib*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_transport_libfabric*"
     "${_stage_dir}/nvidia/nvshmem/lib/nvshmem_transport_ucx*"
@@ -229,12 +186,17 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
 
   ament_get_python_install_dir(PYTHON_INSTALL_DIR)
   set(_vendor_python_dir "opt/${PROJECT_NAME}/${PYTHON_INSTALL_DIR}")
+
   install(DIRECTORY "${_stage_dir}/"
     DESTINATION "${_vendor_python_dir}"
     PATTERN ".torch-*" EXCLUDE
+    PATTERN "setuptools" EXCLUDE
+    PATTERN "setuptools-*.dist-info" EXCLUDE
+    PATTERN "_distutils_hack" EXCLUDE
+    PATTERN "pkg_resources" EXCLUDE
+    PATTERN "distutils-precedence.pth" EXCLUDE
   )
 
-  # Strip upstream debug sections before debhelper generates dbgsym packages.
   install(CODE "
     file(GLOB_RECURSE _elfs
       \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_vendor_python_dir}/*.so\"

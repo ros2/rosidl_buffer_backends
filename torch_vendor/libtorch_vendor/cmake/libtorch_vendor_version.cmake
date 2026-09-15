@@ -12,7 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-include(CMakeFindDependencyMacro)
-
-find_dependency(libtorch_vendor)
-find_dependency(Torch)
+set(LIBTORCH_VENDOR_FALLBACK_VERSION "2.14.0")
+set(LIBTORCH_VENDOR_MIN_VERSION "2.9.0")
