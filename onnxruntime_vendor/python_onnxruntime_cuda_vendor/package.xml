@@ -15,12 +15,11 @@
 
   <build_depend>python3-pip</build_depend>
 
-  <!-- Supplies the CUDA runtime version required by the wheel. -->
   <exec_depend>onnxruntime_cuda_vendor</exec_depend>
 
-  <exec_depend>python_onnxruntime_vendor</exec_depend>
+  <depend>python_onnxruntime_vendor</depend>
 
-  <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
+  <depend version_gte="13.1" version_lt="13.2">cuda-toolkit-13-1</depend>
 
   <exec_depend>python3-flatbuffers</exec_depend>
   <exec_depend>python3-numpy</exec_depend>

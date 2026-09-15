@@ -238,6 +238,7 @@ class CudaConversionPlugin:
             ('CUDAExecutionProvider', {
                 'device_id': str(device_id),
                 'user_compute_stream': str(stream),
+                'has_user_compute_stream': '1',
             }),
             'CPUExecutionProvider',
         ]

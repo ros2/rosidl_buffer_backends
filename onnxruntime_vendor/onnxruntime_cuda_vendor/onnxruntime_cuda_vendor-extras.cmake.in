@@ -14,6 +14,7 @@
 
 set(onnxruntime_cuda_vendor_VERSION "@ONNXRUNTIME_CUDA_VENDOR_VERSION@")
 set(ONNXRUNTIME_CUDA_VENDOR_VERSION "@ONNXRUNTIME_CUDA_VENDOR_VERSION@")
+set(ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION "@ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION@")
 
 get_filename_component(
   _onnxruntime_cuda_vendor_prefix
@@ -28,15 +29,22 @@ set(onnxruntime_cuda_vendor_LIBRARY_DIRS
 set(onnxruntime_cuda_vendor_LIBRARY
   "${onnxruntime_cuda_vendor_LIBRARY_DIRS}/libonnxruntime_providers_cuda.so")
 
+if(NOT "@ONNXRUNTIME_REUSED_LIBRARY_DIR@" STREQUAL "")
+  set(onnxruntime_cuda_vendor_INCLUDE_DIRS "@ONNXRUNTIME_REUSED_INCLUDE_DIR@")
+  set(onnxruntime_cuda_vendor_LIBRARY_DIRS "@ONNXRUNTIME_REUSED_LIBRARY_DIR@")
+  set(onnxruntime_cuda_vendor_LIBRARY "@ONNXRUNTIME_REUSED_LIBRARY_DIR@/libonnxruntime_providers_cuda.so")
+endif()
+
 if(NOT TARGET onnxruntime::onnxruntime)
   add_library(onnxruntime::onnxruntime SHARED IMPORTED)
-  set_target_properties(onnxruntime::onnxruntime PROPERTIES
+endif()
+# CUDA vendor library paths take precedence.
+set_target_properties(onnxruntime::onnxruntime PROPERTIES
     IMPORTED_LOCATION
       "${onnxruntime_cuda_vendor_LIBRARY_DIRS}/libonnxruntime.so"
     INTERFACE_INCLUDE_DIRECTORIES
       "${onnxruntime_cuda_vendor_INCLUDE_DIRS}"
     INTERFACE_LINK_OPTIONS
       "$<$<PLATFORM_ID:Linux>:LINKER:-rpath,${onnxruntime_cuda_vendor_LIBRARY_DIRS}>")
-endif()
 
 unset(_onnxruntime_cuda_vendor_prefix)

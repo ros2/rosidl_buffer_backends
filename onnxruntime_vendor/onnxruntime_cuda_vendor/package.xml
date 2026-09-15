@@ -16,8 +16,7 @@
 
   <build_depend>python3-pip</build_depend>
 
-  <depend version_gte="12" version_lt="13">nvidia-cuda</depend>
-  <depend version_gte="9" version_lt="10">nvidia-cudnn</depend>
+  <depend version_gte="13.1" version_lt="13.2">cuda-toolkit-13-1</depend>
 
   <depend>onnxruntime_core_vendor</depend>
   <conflict>onnxruntime_vendor</conflict>

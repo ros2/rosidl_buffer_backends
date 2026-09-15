@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if(NOT TARGET onnxruntime::onnxruntime)
-  message(FATAL_ERROR
-    "onnxruntime_conversions requires its ABI-matched "
-    "onnxruntime_core_vendor provider")
+cmake_minimum_required(VERSION 3.20)
+project(onnxruntime_vendor_selection_test LANGUAGES CXX)
+
+find_package(onnxruntime_core_vendor REQUIRED)
+find_package(onnxruntime_cuda_vendor REQUIRED)
+get_target_property(selected_library onnxruntime::onnxruntime IMPORTED_LOCATION)
+if(NOT selected_library STREQUAL "${onnxruntime_cuda_vendor_LIBRARY_DIRS}/libonnxruntime.so")
+  message(FATAL_ERROR "The CUDA vendor retained the CPU runtime target")
 endif()

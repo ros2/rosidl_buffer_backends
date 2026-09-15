@@ -14,6 +14,7 @@
 
 set(onnxruntime_core_vendor_VERSION "@ONNXRUNTIME_CORE_VENDOR_VERSION@")
 set(ONNXRUNTIME_CORE_VENDOR_VERSION "@ONNXRUNTIME_CORE_VENDOR_VERSION@")
+set(ONNXRUNTIME_CORE_VENDOR_SELECTED_VERSION "@ONNXRUNTIME_CORE_VENDOR_SELECTED_VERSION@")
 set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM
   "@ONNXRUNTIME_CORE_VENDOR_ARCHIVE_STEM@")
 set(ONNXRUNTIME_CORE_VENDOR_ARCHIVE "@ONNXRUNTIME_CORE_VENDOR_ARCHIVE@")
@@ -29,6 +30,11 @@ set(onnxruntime_core_vendor_INCLUDE_DIRS
   "${onnxruntime_core_vendor_ROOT}/include")
 set(onnxruntime_core_vendor_LIBRARY_DIRS
   "${onnxruntime_core_vendor_ROOT}/lib")
+
+if(NOT "@ONNXRUNTIME_REUSED_LIBRARY_DIR@" STREQUAL "")
+  set(onnxruntime_core_vendor_INCLUDE_DIRS "@ONNXRUNTIME_REUSED_INCLUDE_DIR@")
+  set(onnxruntime_core_vendor_LIBRARY_DIRS "@ONNXRUNTIME_REUSED_LIBRARY_DIR@")
+endif()
 
 if(NOT TARGET onnxruntime::onnxruntime)
   add_library(onnxruntime::onnxruntime SHARED IMPORTED)

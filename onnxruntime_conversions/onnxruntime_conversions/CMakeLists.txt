@@ -113,4 +113,4 @@ if(BUILD_TESTING)
     RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
-ament_package(CONFIG_EXTRAS_POST cmake/onnxruntime_conversions-extras.cmake)
+ament_package(CONFIG_EXTRAS_POST cmake/onnxruntime_conversions-extras.cmake.in)
