@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
+#include "test_models.hpp"
 
 namespace
 {
@@ -44,14 +45,6 @@ Ort::Value host_value(
   return Ort::Value::CreateTensor<float>(
     info, data.data(), data.size(), shape.data(), shape.size());
 }
-
-const uint8_t identity_model[] = {
-  8, 10, 58, 88, 10, 25, 10, 5, 105, 110, 112, 117, 116, 18, 6, 111,
-  117, 116, 112, 117, 116, 34, 8, 73, 100, 101, 110, 116, 105, 116, 121,
-  18, 8, 105, 100, 101, 110, 116, 105, 116, 121, 90, 23, 10, 5, 105,
-  110, 112, 117, 116, 18, 14, 10, 12, 8, 1, 18, 8, 10, 2, 8, 2, 10,
-  2, 8, 3, 98, 24, 10, 6, 111, 117, 116, 112, 117, 116, 18, 14, 10,
-  12, 8, 1, 18, 8, 10, 2, 8, 2, 10, 2, 8, 3, 66, 4, 10, 0, 16, 18};
 
 TEST(OnnxRuntimeConversions, AllocatePopulatesMetadata)
 {
@@ -231,7 +224,7 @@ TEST(OnnxRuntimeConversions, RunsInferenceWithPreallocatedMessageBuffers)
   Ort::SessionOptions session_options;
   configure_session_options(session_options, stream);
   Ort::Session session(
-    env, identity_model, sizeof(identity_model), session_options);
+    env, test_models::identity_model({2, 3}), session_options);
   Ort::IoBinding binding(session);
 
   auto input = allocate_tensor_msg(

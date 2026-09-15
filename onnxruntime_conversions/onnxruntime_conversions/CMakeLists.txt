@@ -89,6 +89,7 @@ if(BUILD_TESTING)
 
   add_library(ort_tensor_subscriber_component SHARED
     test/src/ort_tensor_subscriber_node.cpp)
+  target_include_directories(ort_tensor_subscriber_component PRIVATE test)
   target_link_libraries(ort_tensor_subscriber_component
     ${PROJECT_NAME}
     rclcpp::rclcpp

@@ -23,19 +23,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include "std_msgs/msg/u_int32.hpp"
-
-namespace
-{
-
-const uint8_t identity_model[] = {
-  8, 10, 58, 88, 10, 25, 10, 5, 105, 110, 112, 117, 116, 18, 6, 111,
-  117, 116, 112, 117, 116, 34, 8, 73, 100, 101, 110, 116, 105, 116, 121,
-  18, 8, 105, 100, 101, 110, 116, 105, 116, 121, 90, 23, 10, 5, 105,
-  110, 112, 117, 116, 18, 14, 10, 12, 8, 1, 18, 8, 10, 2, 8, 2, 10,
-  2, 8, 3, 98, 24, 10, 6, 111, 117, 116, 112, 117, 116, 18, 14, 10,
-  12, 8, 1, 18, 8, 10, 2, 8, 2, 10, 2, 8, 3, 66, 4, 10, 0, 16, 18};
-
-}  // namespace
+#include "test_models.hpp"
 
 class OrtTensorSubscriber : public rclcpp::Node
 {
@@ -50,7 +38,7 @@ public:
     onnxruntime_conversions::configure_session_options(
       session_options, stream_);
     session_ = Ort::Session(
-      env_, identity_model, sizeof(identity_model), session_options);
+      env_, test_models::identity_model({2, 3}), session_options);
 
     rclcpp::SubscriptionOptions subscription_options;
     subscription_options.acceptable_buffer_backends = "any";

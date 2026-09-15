@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
+#include "test_models.hpp"
 
 namespace
 {
@@ -39,24 +40,6 @@ using onnxruntime_conversions::create_stream;
 using onnxruntime_conversions::from_input_tensor_msg;
 using onnxruntime_conversions::from_output_tensor_msg;
 using onnxruntime_conversions::to_tensor_msg;
-
-const uint8_t identity_model[] = {
-  8, 10, 58, 88, 10, 25, 10, 5, 105, 110, 112, 117, 116, 18, 6, 111,
-  117, 116, 112, 117, 116, 34, 8, 73, 100, 101, 110, 116, 105, 116, 121,
-  18, 8, 105, 100, 101, 110, 116, 105, 116, 121, 90, 23, 10, 5, 105,
-  110, 112, 117, 116, 18, 14, 10, 12, 8, 1, 18, 8, 10, 2, 8, 2, 10,
-  2, 8, 3, 98, 24, 10, 6, 111, 117, 116, 112, 117, 116, 18, 14, 10,
-  12, 8, 1, 18, 8, 10, 2, 8, 2, 10, 2, 8, 3, 66, 4, 10, 0, 16, 18};
-
-// MatMul(input, input), float32 [2, 2], IR 10, opset 18.
-const uint8_t matmul_model[] = {
-  8, 10, 58, 93, 10, 30, 10, 5, 105, 110, 112, 117, 116,
-  10, 5, 105, 110, 112, 117, 116, 18, 6, 111,
-  117, 116, 112, 117, 116, 34, 6, 77, 97, 116, 77, 117, 108,
-  18, 8, 105, 100, 101, 110, 116, 105, 116, 121, 90, 23, 10, 5, 105,
-  110, 112, 117, 116, 18, 14, 10, 12, 8, 1, 18, 8, 10, 2, 8, 2, 10,
-  2, 8, 2, 98, 24, 10, 6, 111, 117, 116, 112, 117, 116, 18, 14, 10,
-  12, 8, 1, 18, 8, 10, 2, 8, 2, 10, 2, 8, 2, 66, 4, 10, 0, 16, 18};
 
 class CudaConversions : public ::testing::Test
 {
@@ -156,7 +139,7 @@ TEST_F(CudaConversions, OwnedAndBorrowedStreamsOrderMatMulInference)
     const auto native = static_cast<cudaStream_t>(selected.handle());
     Ort::SessionOptions options;
     configure_session_options(options, selected);
-    Ort::Session session(env, matmul_model, sizeof(matmul_model), options);
+    Ort::Session session(env, test_models::matmul_model(), options);
     auto input = allocate_tensor_msg({2, 2}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, selected);
     auto output = allocate_tensor_msg({2, 2}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, selected);
     const std::vector<float> values(4, 7.0F);
@@ -325,7 +308,7 @@ TEST_F(CudaConversions, ConfiguresTheProviderAndRunsInferenceOnDeviceStorage)
   Ort::SessionOptions session_options;
   configure_session_options(session_options, "cuda", 0, stream());
   Ort::Session session(
-    env, identity_model, sizeof(identity_model), session_options);
+    env, test_models::identity_model({2, 3}), session_options);
   Ort::IoBinding binding(session);
 
   const std::vector<float> host{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
