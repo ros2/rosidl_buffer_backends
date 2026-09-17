@@ -17,9 +17,9 @@ set(LIBTORCH_CUDA_VENDOR_SELECTED_VERSION "@LIBTORCH_CUDA_VENDOR_SELECTED_VERSIO
 if(NOT "@LIBTORCH_CUDA_VENDOR_TORCH_DIR@" STREQUAL "")
   set(Torch_DIR "@LIBTORCH_CUDA_VENDOR_TORCH_DIR@")
 else()
-  set(Torch_DIR "${libtorch_cuda_vendor_DIR}/../../../opt/libtorch_cuda_vendor/share/cmake/Torch")
+  set(Torch_DIR "${libtorch_cuda_vendor_DIR}/../../../opt/libtorch_cuda_vendor@LIBTORCH_CUDA_VENDOR_SDK_SUBDIR@/share/cmake/Torch")
 endif()
 find_package(libtorch_vendor REQUIRED)
-include("${libtorch_vendor_DIR}/libtorch_vendor_cuda.cmake")
+libtorch_vendor_find_cuda()
 
-include("${libtorch_vendor_DIR}/libtorch_vendor_select.cmake")
+libtorch_vendor_select_sdk()

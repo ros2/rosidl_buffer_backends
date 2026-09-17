@@ -10,7 +10,7 @@ find_package(ament_cmake_vendor_package REQUIRED)
 include(cmake/libtorch_cuda_vendor_policy.cmake)
 
 set(LIBTORCH_CUDA_VENDOR_VARIANT "" CACHE STRING
-  "CUDA variant override (cu126, cu130, cu132). Auto-detected if empty.")
+  "Fallback CUDA variant override (cu130, cu132).")
 
 option(FORCE_BUILD_VENDOR_PKG
   "Disable reuse of a platform-provided LibTorch distribution"
@@ -22,19 +22,7 @@ if(LIBTORCH_CUDA_VENDOR_VARIANT)
 endif()
 
 set(_requested_variant "${LIBTORCH_CUDA_VENDOR_VARIANT}")
-find_package(CUDAToolkit 12.6 REQUIRED)
-if(NOT CUDAToolkit_VERSION VERSION_LESS "14.0")
-  message(FATAL_ERROR "${PROJECT_NAME}: require CUDA >=12.6,<14; select it with CUDAToolkit_ROOT")
-endif()
-message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
-libtorch_cuda_vendor_variant_for_cuda(
-  "${CUDAToolkit_VERSION}" _detected_variant)
-if(LIBTORCH_CUDA_VENDOR_VARIANT)
-  libtorch_cuda_vendor_validate_variant_for_cuda(
-    "${LIBTORCH_CUDA_VENDOR_VARIANT}" "${CUDAToolkit_VERSION}")
-else()
-  set(LIBTORCH_CUDA_VENDOR_VARIANT "${_detected_variant}")
-endif()
+find_package(CUDAToolkit QUIET)
 
 # Probe the caller's SDK paths before applying the CPU vendor defaults.
 set(_requested_torch_dir "${Torch_DIR}")
@@ -42,14 +30,6 @@ find_package(libtorch_vendor REQUIRED)
 set(Torch_DIR "${_requested_torch_dir}")
 libtorch_vendor_find_compatible(TRUE LIBTORCH_CUDA_VENDOR_TORCH_DIR _system_variant
   LIBTORCH_CUDA_VENDOR_SELECTED_VERSION "${LIBTORCH_VENDOR_SELECTED_VERSION}")
-if(LIBTORCH_CUDA_VENDOR_TORCH_DIR)
-  libtorch_cuda_vendor_cuda_compatible(
-    "${_system_variant}" "${CUDAToolkit_VERSION}" _reuse_cuda_compatible _reuse_cuda_reason)
-  if(NOT _reuse_cuda_compatible)
-    message(STATUS "${PROJECT_NAME}: ${_reuse_cuda_reason} Staging pinned fallback.")
-    set(LIBTORCH_CUDA_VENDOR_TORCH_DIR "")
-  endif()
-endif()
 if(LIBTORCH_CUDA_VENDOR_TORCH_DIR AND _requested_variant AND NOT _system_variant STREQUAL _requested_variant)
   message(STATUS "${PROJECT_NAME}: installed Torch build ${_system_variant} differs from "
     "explicitly requested ${_requested_variant}; staging pinned fallback")
@@ -59,6 +39,17 @@ if(LIBTORCH_CUDA_VENDOR_TORCH_DIR)
   set(LIBTORCH_CUDA_VENDOR_VARIANT "${_system_variant}")
 endif()
 if(NOT LIBTORCH_CUDA_VENDOR_TORCH_DIR)
+  if(NOT CUDAToolkit_FOUND)
+    message(FATAL_ERROR "${PROJECT_NAME}: the pinned CUDA fallback requires a CUDA 13.1 toolkit. "
+      "Install it through rosdep/APT and select it with -DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
+  endif()
+  libtorch_cuda_vendor_variant_for_cuda("${CUDAToolkit_VERSION}" _fallback_variant)
+  if(_requested_variant)
+    libtorch_cuda_vendor_validate_variant_for_cuda("${_requested_variant}" "${CUDAToolkit_VERSION}")
+    set(LIBTORCH_CUDA_VENDOR_VARIANT "${_requested_variant}")
+  else()
+    set(LIBTORCH_CUDA_VENDOR_VARIANT "${_fallback_variant}")
+  endif()
   set(LIBTORCH_CUDA_VENDOR_SELECTED_VERSION "${LIBTORCH_CUDA_VENDOR_VERSION}")
   if(NOT LIBTORCH_VENDOR_SELECTED_VERSION STREQUAL LIBTORCH_CUDA_VENDOR_SELECTED_VERSION)
     message(FATAL_ERROR "${PROJECT_NAME}: no compatible CUDA provider for the selected CPU/core LibTorch "
@@ -67,34 +58,43 @@ if(NOT LIBTORCH_CUDA_VENDOR_TORCH_DIR)
       "with -DFORCE_BUILD_VENDOR_PKG=ON.")
   endif()
   string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
-  if(NOT _system_arch MATCHES "^(x86_64|amd64)$")
-    message(FATAL_ERROR "${PROJECT_NAME}: supply a compatible CUDA LibTorch SDK through Torch_DIR")
-  endif()
-  set(_archive_prefix "libtorch-shared-with-deps")
-  string(CONCAT _url
-    "https://download.pytorch.org/libtorch/${LIBTORCH_CUDA_VENDOR_VARIANT}/"
-    "${_archive_prefix}-${LIBTORCH_CUDA_VENDOR_VERSION}%2B"
-    "${LIBTORCH_CUDA_VENDOR_VARIANT}.zip")
+  if(_system_arch MATCHES "^(aarch64|arm64)$")
+    include("${libtorch_vendor_DIR}/libtorch_vendor_wheel.cmake")
+    libtorch_vendor_stage_wheel("${LIBTORCH_CUDA_VENDOR_VERSION}"
+      "${LIBTORCH_CUDA_VENDOR_VARIANT}" _vendor_source_root)
+    set(_torch_root "${_vendor_source_root}/torch")
+    set(LIBTORCH_CUDA_VENDOR_SDK_SUBDIR "/torch")
+  elseif(_system_arch MATCHES "^(x86_64|amd64)$")
+    set(_archive_prefix "libtorch-shared-with-deps")
+    string(CONCAT _url
+      "https://download.pytorch.org/libtorch/${LIBTORCH_CUDA_VENDOR_VARIANT}/"
+      "${_archive_prefix}-${LIBTORCH_CUDA_VENDOR_VERSION}%2B"
+      "${LIBTORCH_CUDA_VENDOR_VARIANT}.zip")
 
-  set(_archive "${CMAKE_CURRENT_BINARY_DIR}/libtorch_archive")
-  set(_extract_dir "${CMAKE_CURRENT_BINARY_DIR}/libtorch-${LIBTORCH_CUDA_VENDOR_VERSION}-${LIBTORCH_CUDA_VENDOR_VARIANT}")
-  set(_torch_root "${_extract_dir}/libtorch")
+    set(_archive "${CMAKE_CURRENT_BINARY_DIR}/libtorch_archive")
+    set(_extract_dir "${CMAKE_CURRENT_BINARY_DIR}/libtorch-${LIBTORCH_CUDA_VENDOR_VERSION}-${LIBTORCH_CUDA_VENDOR_VARIANT}")
+    set(_torch_root "${_extract_dir}/libtorch")
 
-  if(NOT EXISTS "${_torch_root}/share/cmake/Torch/TorchConfig.cmake")
-    message(STATUS
-      "${PROJECT_NAME}: downloading LibTorch ${LIBTORCH_CUDA_VENDOR_VERSION}+"
-      "${LIBTORCH_CUDA_VENDOR_VARIANT}")
-    message(STATUS "${PROJECT_NAME}: URL: ${_url}")
-    file(DOWNLOAD "${_url}" "${_archive}" SHOW_PROGRESS STATUS _dl_status)
-    list(GET _dl_status 0 _dl_code)
-    if(NOT _dl_code EQUAL 0)
-      list(GET _dl_status 1 _dl_msg)
-      message(FATAL_ERROR "${PROJECT_NAME}: download failed: ${_dl_msg}")
+    if(NOT EXISTS "${_torch_root}/share/cmake/Torch/TorchConfig.cmake")
+      message(STATUS
+        "${PROJECT_NAME}: downloading LibTorch ${LIBTORCH_CUDA_VENDOR_VERSION}+"
+        "${LIBTORCH_CUDA_VENDOR_VARIANT}")
+      message(STATUS "${PROJECT_NAME}: URL: ${_url}")
+      file(DOWNLOAD "${_url}" "${_archive}" SHOW_PROGRESS STATUS _dl_status)
+      list(GET _dl_status 0 _dl_code)
+      if(NOT _dl_code EQUAL 0)
+        list(GET _dl_status 1 _dl_msg)
+        message(FATAL_ERROR "${PROJECT_NAME}: download failed: ${_dl_msg}")
+      endif()
+      file(ARCHIVE_EXTRACT INPUT "${_archive}" DESTINATION "${_extract_dir}")
+      file(REMOVE "${_archive}")
+    else()
+      message(STATUS "${PROJECT_NAME}: using cached LibTorch at ${_torch_root}")
     endif()
-    file(ARCHIVE_EXTRACT INPUT "${_archive}" DESTINATION "${_extract_dir}")
-    file(REMOVE "${_archive}")
+
+    set(_vendor_source_root "${_torch_root}")
   else()
-    message(STATUS "${PROJECT_NAME}: using cached LibTorch at ${_torch_root}")
+    message(FATAL_ERROR "${PROJECT_NAME}: unsupported architecture '${CMAKE_SYSTEM_PROCESSOR}'")
   endif()
 
   file(GLOB _unused_cufile_rdma "${_torch_root}/lib/libcufile_rdma*")
@@ -114,37 +114,32 @@ if(NOT LIBTORCH_CUDA_VENDOR_TORCH_DIR)
     file(REMOVE "${_torch_root}/lib/${_library}")
   endforeach()
 
-  install(DIRECTORY "${_torch_root}/"
+  install(DIRECTORY "${_vendor_source_root}/"
     DESTINATION "opt/${PROJECT_NAME}"
     USE_SOURCE_PERMISSIONS
+    PATTERN ".complete" EXCLUDE
   )
 
-  install(CODE "
-    file(GLOB_RECURSE _elfs
-      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/*.so\"
-      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/opt/${PROJECT_NAME}/*.so.*\")
-    foreach(_elf IN LISTS _elfs)
-      if(EXISTS \"\${_elf}\" AND NOT IS_SYMLINK \"\${_elf}\")
-        execute_process(
-          COMMAND \"${CMAKE_STRIP}\" --strip-unneeded \"\${_elf}\"
-          OUTPUT_QUIET ERROR_QUIET)
-      endif()
-    endforeach()
-  ")
-
-  ament_index_register_resource("vendor_packages" CONTENT "opt/${PROJECT_NAME}")
-
-  if(APPLE)
-    set(_LIBDIR_VAR_NAME "DYLD_LIBRARY_PATH")
-  elseif(WIN32)
-    set(_LIBDIR_VAR_NAME "PATH")
+  ament_index_register_resource("vendor_packages"
+    CONTENT "opt/${PROJECT_NAME}${LIBTORCH_CUDA_VENDOR_SDK_SUBDIR}")
+  if(LIBTORCH_CUDA_VENDOR_SDK_SUBDIR)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/libtorch.dsv"
+      "prepend-non-duplicate;LD_LIBRARY_PATH;opt/${PROJECT_NAME}${LIBTORCH_CUDA_VENDOR_SDK_SUBDIR}/lib\n")
+    ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/libtorch.dsv")
   else()
-    set(_LIBDIR_VAR_NAME "LD_LIBRARY_PATH")
+    if(APPLE)
+      set(_LIBDIR_VAR_NAME "DYLD_LIBRARY_PATH")
+    elseif(WIN32)
+      set(_LIBDIR_VAR_NAME "PATH")
+    else()
+      set(_LIBDIR_VAR_NAME "LD_LIBRARY_PATH")
+    endif()
+    ament_environment_hooks(
+      "${ament_cmake_vendor_package_DIR}/templates/vendor_package.sh.in"
+      "${ament_cmake_vendor_package_DIR}/templates/vendor_package.dsv.in"
+    )
   endif()
-  ament_environment_hooks(
-    "${ament_cmake_vendor_package_DIR}/templates/vendor_package.sh.in"
-    "${ament_cmake_vendor_package_DIR}/templates/vendor_package.dsv.in"
-  )
+
 endif()
 
 if(LIBTORCH_CUDA_VENDOR_TORCH_DIR)
@@ -157,13 +152,17 @@ endif()
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+  set(_cuda_root_argument)
+  if(CUDAToolkit_ROOT)
+    set(_cuda_root_argument "-DCUDAToolkit_ROOT=${CUDAToolkit_ROOT}")
+  endif()
   add_test(
     NAME libtorch_cuda_vendor_selection
     COMMAND "${CMAKE_COMMAND}"
       -S "${CMAKE_CURRENT_SOURCE_DIR}/test/consumer"
       -B "${CMAKE_CURRENT_BINARY_DIR}/selection_test"
       "-DCMAKE_PREFIX_PATH=${CMAKE_INSTALL_PREFIX};${CMAKE_PREFIX_PATH}"
-      "-DCUDAToolkit_ROOT=${CUDAToolkit_ROOT}"
+      ${_cuda_root_argument}
   )
   add_test(
     NAME libtorch_cuda_vendor_policy

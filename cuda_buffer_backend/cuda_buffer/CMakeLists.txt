@@ -15,10 +15,7 @@ find_package(cuda_buffer_backend_msgs REQUIRED)
 find_package(rmw REQUIRED)
 find_package(rcutils REQUIRED)
 
-find_package(CUDAToolkit 12 REQUIRED)
-if(NOT CUDAToolkit_VERSION VERSION_LESS "14.0")
-  message(FATAL_ERROR "${PROJECT_NAME}: require CUDA >=12,<14; select it with CUDAToolkit_ROOT")
-endif()
+find_package(CUDAToolkit REQUIRED)
 message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
 
 add_library(${PROJECT_NAME} SHARED

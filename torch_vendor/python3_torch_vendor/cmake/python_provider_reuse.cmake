@@ -15,6 +15,7 @@
 set(_python_provider_probe "${CMAKE_CURRENT_LIST_DIR}/probe_python.py")
 function(python_provider_find_compatible module version require_cuda output_root output_variant)
   set(${output_root} "" PARENT_SCOPE)
+  set(${output_variant} "" PARENT_SCOPE)
   if(ARGC GREATER 5)
     set(${ARGV5} "" PARENT_SCOPE)
   endif()
@@ -22,7 +23,7 @@ function(python_provider_find_compatible module version require_cuda output_root
     return()
   endif()
   execute_process(COMMAND "${Python3_EXECUTABLE}" "${_python_provider_probe}"
-    "${module}" "${version}" "${require_cuda}" "${CUDAToolkit_VERSION}"
+    "${module}" "${version}" "${require_cuda}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error
     OUTPUT_STRIP_TRAILING_WHITESPACE TIMEOUT 60)
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/python_reuse.log" "${output}\n${error}")
@@ -41,7 +42,7 @@ function(python_provider_find_compatible module version require_cuda output_root
     string(STRIP "${error}" error)
     string(REGEX MATCH "[^\n]+$" reason "${error}")
     if(NOT reason)
-      set(reason "${module} compatibility probe failed (${result})")
+      set(reason "${module} discovery failed (${result})")
     endif()
     message(STATUS "${PROJECT_NAME}: ${reason} Staging pinned wheel. "
       "Probe details: ${CMAKE_CURRENT_BINARY_DIR}/python_reuse.log")

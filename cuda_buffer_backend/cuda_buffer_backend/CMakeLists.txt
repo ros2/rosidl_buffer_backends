@@ -12,10 +12,7 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
-find_package(CUDAToolkit 12 REQUIRED)
-if(NOT CUDAToolkit_VERSION VERSION_LESS "14.0")
-  message(FATAL_ERROR "${PROJECT_NAME}: require CUDA >=12,<14; select it with CUDAToolkit_ROOT")
-endif()
+find_package(CUDAToolkit REQUIRED)
 message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
 
 ament_auto_add_library(${PROJECT_NAME} SHARED
