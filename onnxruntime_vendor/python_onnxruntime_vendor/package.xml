@@ -13,6 +13,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
+  <build_depend>python3-numpy</build_depend>
   <build_depend>python3-pip</build_depend>
 
   <exec_depend>python3-flatbuffers</exec_depend>

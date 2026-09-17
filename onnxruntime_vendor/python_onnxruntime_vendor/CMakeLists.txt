@@ -6,7 +6,7 @@ find_package(ament_cmake_python REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(PYTHON_ONNXRUNTIME_VENDOR_VERSION "1.29.0")
-set(PYTHON_ONNXRUNTIME_VENDOR_SUPPORTED_VERSION_RANGE ">=1.27.0")
+set(PYTHON_ONNXRUNTIME_VENDOR_SUPPORTED_VERSION_RANGE ">=1.26.0")
 
 option(FORCE_BUILD_VENDOR_PKG "Stage the pinned Python provider instead of reusing it" OFF)
 include(cmake/python_provider_reuse.cmake)
@@ -15,6 +15,9 @@ python_provider_find_compatible(onnxruntime "${PYTHON_ONNXRUNTIME_VENDOR_SUPPORT
 if(_reuse_root)
   python_provider_reuse_hooks("${_reuse_root}")
 else()
+  if(CMAKE_CROSSCOMPILING)
+    message(FATAL_ERROR "${PROJECT_NAME}: wheel staging requires a native build for the target architecture")
+  endif()
   set(PYTHON_ONNXRUNTIME_VENDOR_SELECTED_VERSION "${PYTHON_ONNXRUNTIME_VENDOR_VERSION}")
   set(_python_package "onnxruntime")
   set(_index_url "https://pypi.org/simple")
@@ -64,7 +67,7 @@ else()
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env
       "PYTHONPATH=${_python_stage}" "PYTHONNOUSERSITE=1"
       "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/probe_python.py"
-      onnxruntime "${PYTHON_ONNXRUNTIME_VENDOR_VERSION}" FALSE "${CUDAToolkit_VERSION_MAJOR}"
+      onnxruntime "${PYTHON_ONNXRUNTIME_VENDOR_VERSION}" FALSE
       COMMAND_ERROR_IS_FATAL ANY)
     file(WRITE "${_stage_marker}" "")
   endif()

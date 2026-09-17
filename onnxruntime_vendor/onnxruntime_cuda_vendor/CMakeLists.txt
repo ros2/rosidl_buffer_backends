@@ -17,11 +17,7 @@ project(onnxruntime_cuda_vendor)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_vendor_package REQUIRED)
-find_package(CUDAToolkit 12 REQUIRED)
-if(NOT CUDAToolkit_VERSION VERSION_LESS "14.0")
-  message(FATAL_ERROR "${PROJECT_NAME}: require CUDA >=12,<14; select it with CUDAToolkit_ROOT")
-endif()
-message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
+find_package(CUDAToolkit QUIET)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(ONNXRUNTIME_CUDA_VENDOR_VERSION "1.29.0")
@@ -44,6 +40,12 @@ if(ONNXRUNTIME_REUSED_LIBRARY_DIR)
     "prepend-non-duplicate;LD_LIBRARY_PATH;${ONNXRUNTIME_REUSED_LIBRARY_DIR}\n")
   ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/reused_onnxruntime.dsv")
 else()
+  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "13.1" OR
+      NOT CUDAToolkit_VERSION VERSION_LESS "14")
+    message(FATAL_ERROR "${PROJECT_NAME}: the pinned ONNX Runtime 1.29.0 CUDA fallback requires "
+      "CUDA >=13.1,<14; selected toolkit is '${CUDAToolkit_VERSION}'. Install CUDA 13.1 through "
+      "rosdep/APT and select it with -DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
+  endif()
   set(ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION "${ONNXRUNTIME_CUDA_VENDOR_VERSION}")
   if(NOT ONNXRUNTIME_CORE_VENDOR_SELECTED_VERSION STREQUAL ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION)
     message(FATAL_ERROR "${PROJECT_NAME}: no compatible CUDA provider for the selected CPU/core ONNX Runtime "
@@ -52,13 +54,19 @@ else()
       "with -DFORCE_BUILD_VENDOR_PKG=ON.")
   endif()
   string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
-  if(NOT _system_arch MATCHES "^(x86_64|amd64)$")
-    message(FATAL_ERROR
-      "${PROJECT_NAME}: ONNX Runtime GPU archives support x86_64 only")
+  if(_system_arch MATCHES "^(x86_64|amd64)$")
+    set(_archive_stem "onnxruntime-linux-x64-gpu_cuda${CUDAToolkit_VERSION_MAJOR}-${ONNXRUNTIME_CUDA_VENDOR_VERSION}")
+    set(_archive_root_pattern "onnxruntime-linux-x64-*")
+  elseif(_system_arch MATCHES "^(aarch64|arm64)$")
+    if(CMAKE_CROSSCOMPILING)
+      message(FATAL_ERROR "${PROJECT_NAME}: wheel staging requires a native build for the target architecture")
+    endif()
+    set(_archive_stem "onnxruntime-linux-aarch64-${ONNXRUNTIME_CUDA_VENDOR_VERSION}")
+    set(_archive_root_pattern "${_archive_stem}")
+  else()
+    message(FATAL_ERROR "${PROJECT_NAME}: unsupported architecture '${CMAKE_SYSTEM_PROCESSOR}'")
   endif()
-
-  set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE
-    "onnxruntime-linux-x64-gpu_cuda${CUDAToolkit_VERSION_MAJOR}-${ONNXRUNTIME_CUDA_VENDOR_VERSION}.tgz")
+  set(ONNXRUNTIME_CUDA_VENDOR_ARCHIVE "${_archive_stem}.tgz")
   set(ONNXRUNTIME_CUDA_VENDOR_URL
     "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_CUDA_VENDOR_VERSION}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
 
@@ -66,7 +74,7 @@ else()
     "${CMAKE_CURRENT_BINARY_DIR}/${ONNXRUNTIME_CUDA_VENDOR_ARCHIVE}")
   set(_extract_path
     "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime-${ONNXRUNTIME_CUDA_VENDOR_VERSION}-cuda${CUDAToolkit_VERSION_MAJOR}")
-  set(_root_glob "${_extract_path}/onnxruntime-linux-x64-*")
+  set(_root_glob "${_extract_path}/${_archive_root_pattern}")
 
   # The archive's top-level directory can differ from its filename.
   file(GLOB _onnxruntime_root LIST_DIRECTORIES true "${_root_glob}")
@@ -98,6 +106,11 @@ else()
     message(FATAL_ERROR
       "${PROJECT_NAME}: expected ${ONNXRUNTIME_CUDA_VENDOR_VERSION}, "
       "but the archive contains ${_archive_version}")
+  endif()
+
+  if(_system_arch MATCHES "^(aarch64|arm64)$")
+    include(cmake/onnxruntime_cuda_vendor_wheel.cmake)
+    onnxruntime_cuda_vendor_stage_wheel("${_onnxruntime_root}")
   endif()
 
   set(_required_files
@@ -160,9 +173,8 @@ else()
     "${ament_cmake_vendor_package_DIR}/templates/vendor_package.sh.in"
     "${ament_cmake_vendor_package_DIR}/templates/vendor_package.dsv.in")
 
+  include(cmake/cudnn.cmake)
 endif()
-include(cmake/cudnn.cmake)
-include(cmake/cuda_runtime.cmake)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

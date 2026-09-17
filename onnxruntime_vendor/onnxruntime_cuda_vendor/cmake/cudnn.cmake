@@ -12,21 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if(CUDAToolkit_VERSION_MAJOR EQUAL 12)
-  set(ONNXRUNTIME_CUDNN_VERSION "9.10.2.21")
-  set(_cudnn_min_version 91002)
-else()
-  set(ONNXRUNTIME_CUDNN_VERSION "9.24.0.43")
-  set(_cudnn_min_version 92400)
-endif()
+set(ONNXRUNTIME_CUDNN_VERSION "9.24.0.43")
+set(_cudnn_min_version 92400)
 set(_cudnn_package "nvidia-cudnn-cu${CUDAToolkit_VERSION_MAJOR}")
 find_library(_cudnn_library NAMES cudnn libcudnn.so.9
   HINTS "${CUDNN_ROOT}" ENV CUDNN_ROOT PATH_SUFFIXES lib lib64 NO_CACHE)
 set(_reuse_cudnn FALSE)
 if(_cudnn_library AND NOT FORCE_BUILD_VENDOR_PKG)
   execute_process(COMMAND "${Python3_EXECUTABLE}" -c
-    "import ctypes,sys; c=ctypes.CDLL(sys.argv[1]); c.cudnnGetVersion.restype=ctypes.c_size_t; c.cudnnGetCudartVersion.restype=ctypes.c_size_t; assert ${_cudnn_min_version} <= c.cudnnGetVersion() < 100000; assert c.cudnnGetCudartVersion() // 1000 == ${CUDAToolkit_VERSION_MAJOR}"
-    "${_cudnn_library}" RESULT_VARIABLE _cudnn_result ERROR_QUIET)
+    "import ctypes
+import sys
+library = ctypes.CDLL(sys.argv[1])
+library.cudnnGetVersion.restype = ctypes.c_size_t
+library.cudnnGetCudartVersion.restype = ctypes.c_size_t
+version_matches = int(sys.argv[2]) <= library.cudnnGetVersion() < 100000
+cuda_matches = library.cudnnGetCudartVersion() // 1000 == int(sys.argv[3])
+if not (version_matches and cuda_matches):
+    sys.exit(1)"
+    "${_cudnn_library}" "${_cudnn_min_version}" "${CUDAToolkit_VERSION_MAJOR}"
+    RESULT_VARIABLE _cudnn_result ERROR_QUIET)
   if(_cudnn_result EQUAL 0)
     set(_reuse_cudnn TRUE)
     get_filename_component(_cudnn_dir "${_cudnn_library}" DIRECTORY)

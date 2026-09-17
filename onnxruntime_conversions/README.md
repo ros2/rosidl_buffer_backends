@@ -25,6 +25,43 @@ allocating on a particular device; copies into new messages preserve the source
 device index. Additional accelerators can supply their own plugins and
 compatible framework providers.
 
+## Dependencies and source builds
+
+Debians target Ubuntu 26.04 (Resolute) and bundle ONNX Runtime **1.29.0**;
+sourcing ROS selects that installation. Build from source to reuse an existing
+ONNX Runtime installation or on earlier Ubuntu releases. Ubuntu 24.04, including
+JetPack, also requires [ROS Lyrical built from source](https://github.com/ros2/ros2_documentation/blob/lyrical/source/Releases/lyrical/supported-platforms.rst).
+
+Source builds reuse detected CUDA and **ONNX Runtime >=1.23.0 for C++ or
+>=1.26.0 for Python**. C++ requires SDK headers, libraries and version metadata
+(`onnxruntimeConfigVersion.cmake` or `VERSION_NUMBER`). CUDA plugins require a
+CUDA-enabled provider. If no compatible installation is found, the fallback is
+**1.29.0**; its CUDA build supplies cuDNN 9
+and requires an installed **CUDA >=13.1,<14** toolkit.
+
+From this repository's root, after sourcing ROS, build with an existing CUDA
+toolkit (including on Ubuntu before Resolute):
+
+```bash
+rosdep install --from-paths onnxruntime_vendor onnxruntime_conversions \
+  tensor_msgs cuda_buffer_backend --ignore-src -y --skip-keys cuda-toolkit
+colcon build --merge-install --packages-up-to \
+  onnxruntime_conversions_cpu onnxruntime_conversions_cuda \
+  onnxruntime_conversions_py_cpu onnxruntime_conversions_py_cuda
+source install/setup.bash
+```
+
+On Resolute, omit `--skip-keys cuda-toolkit` to install the toolkit through rosdep/APT.
+Append `--cmake-args` to `colcon build` with any of these overrides:
+
+- `-DFORCE_BUILD_VENDOR_PKG=ON`: select the pinned fallback.
+- `-Donnxruntime_ROOT=/path/to/onnxruntime`: select a C++ SDK.
+- `-DPython3_EXECUTABLE=/path/to/python`: select Python; its major/minor version must match ROS.
+- `-DCUDAToolkit_ROOT=/path/to/cuda`: select the CUDA toolkit.
+
+Use fresh build directories and rebuild native vendors, conversions and
+applications together when changing the ONNX Runtime release.
+
 ## Tensor layout
 
 Both the C++ and Python APIs require contiguous, row-major tensor layouts on
@@ -63,14 +100,6 @@ Add CUDA support later:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-cuda
-```
-
-Build from source:
-
-```bash
-rosdep install --from-paths . --ignore-src -y
-colcon build --merge-install --packages-up-to \
-  onnxruntime_conversions_cpu onnxruntime_conversions_cuda
 ```
 
 For a CPU-only build, restrict rosdep to `tensor_msgs`,
@@ -161,14 +190,6 @@ Add CUDA support later:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cuda
-```
-
-Build from source:
-
-```bash
-rosdep install --from-paths . --ignore-src -y
-colcon build --merge-install --packages-up-to \
-  onnxruntime_conversions_py_cpu onnxruntime_conversions_py_cuda
 ```
 
 For a Python CPU-only build, restrict rosdep to `tensor_msgs`,
