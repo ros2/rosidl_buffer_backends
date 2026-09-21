@@ -14,7 +14,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>cuda_buffer_backend_msgs</depend>
-  <depend>nvidia-cuda</depend>
+  <depend>nvidia-cuda-13</depend>
   <depend>rcutils</depend>
   <depend>rmw</depend>
   <depend>rosidl_buffer</depend>
