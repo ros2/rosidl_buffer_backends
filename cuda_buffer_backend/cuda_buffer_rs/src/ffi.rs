@@ -4,9 +4,9 @@
 //! Raw declarations for the `cuda_buffer` C ABI.
 //!
 //! `buffer` arguments are opaque `rosidl::Buffer<uint8_t> *` values and
-//! `cuda_stream` arguments are raw `cudaStream_t` values. A null stream selects
-//! the backend's internal stream in the legacy entry points. In `_on_stream`
-//! entry points null means CUDA default stream 0.
+//! `cuda_stream` arguments are raw `cudaStream_t` values. Null means CUDA default
+//! stream 0. To use the backend's internal stream, pass the pointer returned by
+//! `cuda_buffer_internal_stream`.
 
 #![allow(non_camel_case_types)]
 
@@ -52,18 +52,6 @@ extern "C" {
     ) -> cuda_buffer_ret_t;
 
     pub fn cuda_buffer_acquire_write(
-        buffer: *mut *mut c_void,
-        cuda_stream: *mut c_void,
-        handle: *mut *mut cuda_buffer_write_handle_t,
-    ) -> cuda_buffer_ret_t;
-
-    pub fn cuda_buffer_acquire_read_on_stream(
-        buffer: *const c_void,
-        cuda_stream: *mut c_void,
-        handle: *mut *mut cuda_buffer_read_handle_t,
-    ) -> cuda_buffer_ret_t;
-
-    pub fn cuda_buffer_acquire_write_on_stream(
         buffer: *mut *mut c_void,
         cuda_stream: *mut c_void,
         handle: *mut *mut cuda_buffer_write_handle_t,

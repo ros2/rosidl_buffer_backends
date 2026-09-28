@@ -79,14 +79,6 @@ cuda_buffer_ret_t guarded(Callable && fn)
   }
 }
 
-cudaStream_t resolve_stream(void * cuda_stream)
-{
-  if (cuda_stream) {
-    return static_cast<cudaStream_t>(cuda_stream);
-  }
-  return cuda_buffer_backend::get_internal_stream();
-}
-
 }  // namespace
 
 const char * cuda_buffer_error_message(void)
@@ -149,17 +141,13 @@ cuda_buffer_ret_t cuda_buffer_device_id(const void * buffer, int * device_id)
     });
 }
 
-namespace
-{
-
-cuda_buffer_ret_t acquire_read(
+cuda_buffer_ret_t cuda_buffer_acquire_read(
   const void * buffer,
   void * cuda_stream,
-  cuda_buffer_read_handle_t ** handle,
-  bool exact_stream)
+  cuda_buffer_read_handle_t ** handle)
 {
   return guarded(
-    [buffer, cuda_stream, handle, exact_stream]() {
+    [buffer, cuda_stream, handle]() {
       if (!handle) {
         return fail(CUDA_BUFFER_RET_INVALID_ARGUMENT, "handle output must not be null");
       }
@@ -173,22 +161,20 @@ cuda_buffer_ret_t acquire_read(
       }
       auto acquired = std::make_unique<cuda_buffer_read_handle_t>(
         cuda_buffer_backend::from_input_buffer(
-          *typed, exact_stream ? static_cast<cudaStream_t>(cuda_stream) :
-          resolve_stream(cuda_stream)),
+          *typed, static_cast<cudaStream_t>(cuda_stream)),
         typed->size());
       *handle = acquired.release();
       return CUDA_BUFFER_RET_OK;
     });
 }
 
-cuda_buffer_ret_t acquire_write(
+cuda_buffer_ret_t cuda_buffer_acquire_write(
   void ** buffer,
   void * cuda_stream,
-  cuda_buffer_write_handle_t ** handle,
-  bool exact_stream)
+  cuda_buffer_write_handle_t ** handle)
 {
   return guarded(
-    [buffer, cuda_stream, handle, exact_stream]() {
+    [buffer, cuda_stream, handle]() {
       if (!handle) {
         return fail(CUDA_BUFFER_RET_INVALID_ARGUMENT, "handle output must not be null");
       }
@@ -210,8 +196,7 @@ cuda_buffer_ret_t acquire_write(
         target = promoted.get();
       }
 
-      auto stream = exact_stream ? static_cast<cudaStream_t>(cuda_stream) :
-      resolve_stream(cuda_stream);
+      auto stream = static_cast<cudaStream_t>(cuda_stream);
       auto acquired = std::make_unique<cuda_buffer_write_handle_t>(
         cuda_buffer_backend::from_output_buffer(*target, stream), target->size(), stream);
 
@@ -221,32 +206,6 @@ cuda_buffer_ret_t acquire_write(
       }
       return CUDA_BUFFER_RET_OK;
     });
-}
-
-}  // namespace
-
-cuda_buffer_ret_t cuda_buffer_acquire_read(
-  const void * buffer, void * cuda_stream, cuda_buffer_read_handle_t ** handle)
-{
-  return acquire_read(buffer, cuda_stream, handle, false);
-}
-
-cuda_buffer_ret_t cuda_buffer_acquire_write(
-  void ** buffer, void * cuda_stream, cuda_buffer_write_handle_t ** handle)
-{
-  return acquire_write(buffer, cuda_stream, handle, false);
-}
-
-cuda_buffer_ret_t cuda_buffer_acquire_read_on_stream(
-  const void * buffer, void * cuda_stream, cuda_buffer_read_handle_t ** handle)
-{
-  return acquire_read(buffer, cuda_stream, handle, true);
-}
-
-cuda_buffer_ret_t cuda_buffer_acquire_write_on_stream(
-  void ** buffer, void * cuda_stream, cuda_buffer_write_handle_t ** handle)
-{
-  return acquire_write(buffer, cuda_stream, handle, true);
 }
 
 cuda_buffer_ret_t cuda_buffer_to_buffer_on_stream(

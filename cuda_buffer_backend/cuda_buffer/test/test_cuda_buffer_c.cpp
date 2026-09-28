@@ -155,7 +155,7 @@ TEST_F(CudaBufferCApiTest, AcquireReadPromotesCpuBufferWithoutTransferringOwners
   EXPECT_EQ(cpu_buffer.get_backend_type(), "cpu");
 }
 
-TEST_F(CudaBufferCApiTest, NullStreamUsesInternalStream)
+TEST_F(CudaBufferCApiTest, InternalStreamCanBePassedExplicitly)
 {
   void * internal_stream = nullptr;
   ASSERT_EQ(cuda_buffer_internal_stream(&internal_stream), CUDA_BUFFER_RET_OK);
@@ -165,7 +165,8 @@ TEST_F(CudaBufferCApiTest, NullStreamUsesInternalStream)
   ASSERT_EQ(cuda_buffer_allocate(32, &buffer), CUDA_BUFFER_RET_OK);
 
   cuda_buffer_write_handle_t * write_handle = nullptr;
-  ASSERT_EQ(cuda_buffer_acquire_write(&buffer, nullptr, &write_handle), CUDA_BUFFER_RET_OK);
+  ASSERT_EQ(
+    cuda_buffer_acquire_write(&buffer, internal_stream, &write_handle), CUDA_BUFFER_RET_OK);
   EXPECT_NE(cuda_buffer_write_handle_data(write_handle), nullptr);
   cuda_buffer_write_handle_destroy(write_handle);
 
@@ -267,7 +268,7 @@ TEST_F(CudaBufferCApiTest, ExactDefaultStreamRecordsPendingWriteEvent)
   void * buffer = nullptr;
   ASSERT_EQ(cuda_buffer_allocate(128, &buffer), CUDA_BUFFER_RET_OK);
   cuda_buffer_write_handle_t * handle = nullptr;
-  ASSERT_EQ(cuda_buffer_acquire_write_on_stream(&buffer, nullptr, &handle), CUDA_BUFFER_RET_OK);
+  ASSERT_EQ(cuda_buffer_acquire_write(&buffer, nullptr, &handle), CUDA_BUFFER_RET_OK);
   StreamGate gate;
   ASSERT_EQ(cudaLaunchHostFunc(nullptr, StreamGate::wait, &gate), cudaSuccess);
   EXPECT_EQ(cudaMemsetAsync(cuda_buffer_write_handle_data(handle), 42, 128, nullptr), cudaSuccess);
@@ -290,13 +291,13 @@ TEST_F(CudaBufferCApiTest, ExactDefaultStreamWaitsForNonblockingProducer)
   cudaEvent_t marker = nullptr;
   ASSERT_EQ(cudaEventCreateWithFlags(&marker, cudaEventDisableTiming), cudaSuccess);
   cuda_buffer_write_handle_t * writer = nullptr;
-  ASSERT_EQ(cuda_buffer_acquire_write_on_stream(&buffer, producer, &writer), CUDA_BUFFER_RET_OK);
+  ASSERT_EQ(cuda_buffer_acquire_write(&buffer, producer, &writer), CUDA_BUFFER_RET_OK);
   StreamGate gate;
   ASSERT_EQ(cudaLaunchHostFunc(producer, StreamGate::wait, &gate), cudaSuccess);
   EXPECT_EQ(cudaMemsetAsync(cuda_buffer_write_handle_data(writer), 73, 128, producer), cudaSuccess);
   cuda_buffer_write_handle_destroy(writer);
   cuda_buffer_read_handle_t * reader = nullptr;
-  EXPECT_EQ(cuda_buffer_acquire_read_on_stream(buffer, nullptr, &reader), CUDA_BUFFER_RET_OK);
+  EXPECT_EQ(cuda_buffer_acquire_read(buffer, nullptr, &reader), CUDA_BUFFER_RET_OK);
   EXPECT_EQ(cudaEventRecord(marker, nullptr), cudaSuccess);
   const auto state = cudaEventQuery(marker);
   gate.open.store(true);
@@ -314,10 +315,10 @@ TEST_F(CudaBufferCApiTest, ExactStreamRejectsInvalidArgumentsAndClearsOutputs)
 {
   cuda_buffer_read_handle_t * read = reinterpret_cast<cuda_buffer_read_handle_t *>(1);
   cuda_buffer_write_handle_t * write = reinterpret_cast<cuda_buffer_write_handle_t *>(1);
-  EXPECT_EQ(cuda_buffer_acquire_read_on_stream(nullptr, nullptr, &read),
+  EXPECT_EQ(cuda_buffer_acquire_read(nullptr, nullptr, &read),
     CUDA_BUFFER_RET_INVALID_ARGUMENT);
   EXPECT_EQ(read, nullptr);
-  EXPECT_EQ(cuda_buffer_acquire_write_on_stream(nullptr, nullptr, &write),
+  EXPECT_EQ(cuda_buffer_acquire_write(nullptr, nullptr, &write),
     CUDA_BUFFER_RET_INVALID_ARGUMENT);
   EXPECT_EQ(write, nullptr);
   int device = -1;
@@ -339,7 +340,7 @@ TEST_F(CudaBufferCApiTest, ExactDefaultStreamReadDefersRecycling)
   auto * buffer = new rosidl::Buffer<uint8_t>(
     std::make_unique<cuda_buffer_backend::CudaBufferImpl<uint8_t>>(std::move(storage), 128));
   cuda_buffer_read_handle_t * reader = nullptr;
-  ASSERT_EQ(cuda_buffer_acquire_read_on_stream(buffer, nullptr, &reader), CUDA_BUFFER_RET_OK);
+  ASSERT_EQ(cuda_buffer_acquire_read(buffer, nullptr, &reader), CUDA_BUFFER_RET_OK);
   StreamGate gate;
   ASSERT_EQ(cudaLaunchHostFunc(nullptr, StreamGate::wait, &gate), cudaSuccess);
   cuda_buffer_read_handle_destroy(reader);
@@ -362,7 +363,7 @@ TEST_F(CudaBufferCApiTest, CopyIntoOutputUsesTheExactDefaultStream)
   std::unique_ptr<void, decltype(& rosidl_buffer_uint8_destroy)> owner(
     buffer, rosidl_buffer_uint8_destroy);
   cuda_buffer_write_handle_t * raw = nullptr;
-  ASSERT_EQ(cuda_buffer_acquire_write_on_stream(&buffer, nullptr, &raw), CUDA_BUFFER_RET_OK);
+  ASSERT_EQ(cuda_buffer_acquire_write(&buffer, nullptr, &raw), CUDA_BUFFER_RET_OK);
   std::unique_ptr<cuda_buffer_write_handle_t, decltype(& cuda_buffer_write_handle_destroy)> handle(
     raw, cuda_buffer_write_handle_destroy);
   const auto source = pattern(16, 7);
@@ -380,7 +381,7 @@ TEST_F(CudaBufferCApiTest, CopyIntoOutputRejectsInvalidArguments)
   std::unique_ptr<void, decltype(& rosidl_buffer_uint8_destroy)> owner(
     buffer, rosidl_buffer_uint8_destroy);
   cuda_buffer_write_handle_t * raw = nullptr;
-  ASSERT_EQ(cuda_buffer_acquire_write_on_stream(&buffer, stream_, &raw), CUDA_BUFFER_RET_OK);
+  ASSERT_EQ(cuda_buffer_acquire_write(&buffer, stream_, &raw), CUDA_BUFFER_RET_OK);
   std::unique_ptr<cuda_buffer_write_handle_t, decltype(& cuda_buffer_write_handle_destroy)> handle(
     raw, cuda_buffer_write_handle_destroy);
   const auto source = pattern(16, 7);

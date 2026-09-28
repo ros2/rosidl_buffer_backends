@@ -138,7 +138,7 @@ For CPU-backed `msg::buffer::Image`, use `data.as_slice()` to borrow the pixels.
 - Queue kernels and memory operations on the handle's stream. A
   `cuda_core::CudaStream` default stream means CUDA stream 0. The low-level
   `cuda_buffer_rs::CudaStream::INTERNAL` instead selects the backend's internal
-  stream.
+  stream, resolved to its actual pointer before calling the C API.
 
 `as_device_buffer()` and `as_device_buffer_mut()` borrow `cuda_core::DeviceBuffer`
 views without copying. These methods are unsafe: callers must follow the

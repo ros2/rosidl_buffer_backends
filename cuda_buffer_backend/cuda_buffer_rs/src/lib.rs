@@ -51,12 +51,21 @@ impl CudaStream {
         Self(raw)
     }
 
+    /// Return the stored pointer, or null for the unresolved internal-stream sentinel.
     pub fn as_raw(self) -> *mut c_void {
         self.0
     }
 
     pub fn is_internal(self) -> bool {
         self.0.is_null()
+    }
+
+    fn resolve(self) -> Result<*mut c_void> {
+        if self.is_internal() {
+            internal_stream().map(CudaStream::as_raw)
+        } else {
+            Ok(self.as_raw())
+        }
     }
 }
 
@@ -161,7 +170,8 @@ impl ReadHandle<'_> {
     /// the stream must remain live until then.
     pub unsafe fn acquire(buffer: *const c_void, stream: CudaStream) -> Result<Self> {
         let mut raw = ptr::null_mut();
-        check(unsafe { ffi::cuda_buffer_acquire_read(buffer, stream.as_raw(), &mut raw) })?;
+        let stream = stream.resolve()?;
+        check(unsafe { ffi::cuda_buffer_acquire_read(buffer, stream, &mut raw) })?;
         NonNull::new(raw)
             .map(|raw| Self {
                 raw,
@@ -224,7 +234,8 @@ impl WriteHandle {
     /// or destroyed. The stream must remain live through handle cleanup.
     pub unsafe fn acquire(buffer: &mut *mut c_void, stream: CudaStream) -> Result<Self> {
         let mut raw = ptr::null_mut();
-        check(unsafe { ffi::cuda_buffer_acquire_write(buffer, stream.as_raw(), &mut raw) })?;
+        let stream = stream.resolve()?;
+        check(unsafe { ffi::cuda_buffer_acquire_write(buffer, stream, &mut raw) })?;
         NonNull::new(raw)
             .map(|raw| Self { raw })
             .ok_or_else(|| corrupt_abi("write acquisition returned a null handle"))
@@ -429,4 +440,33 @@ pub fn read_primitive_sequence(
         })?;
     // SAFETY: the returned handle borrows sequence, which retains the owner.
     unsafe { ReadHandle::acquire(raw, stream) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_internal_stream_is_resolved_before_acquisition() {
+        let internal = internal_stream().unwrap().as_raw();
+        assert!(!internal.is_null());
+        assert_eq!(CudaStream::INTERNAL.resolve().unwrap(), internal);
+        assert_eq!(internal_stream().unwrap().resolve().unwrap(), internal);
+
+        let mut buffer = CudaBuffer::allocate(1).unwrap();
+        let write = buffer.write(CudaStream::INTERNAL).unwrap();
+        static SOURCE: [u8; 1] = [42];
+        // SAFETY: SOURCE is static, the destination is live, and the backend's
+        // internal stream outlives the copy and the write handle.
+        check(unsafe {
+            ffi::cuda_buffer_to_buffer_on_stream(
+                SOURCE.as_ptr().cast(),
+                SOURCE.len(),
+                write.handle.raw.as_ptr(),
+                internal,
+                ffi::CUDA_BUFFER_COPY_HOST_TO_DEVICE,
+            )
+        })
+        .unwrap();
+    }
 }

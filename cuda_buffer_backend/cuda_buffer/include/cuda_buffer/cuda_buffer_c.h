@@ -69,7 +69,9 @@ bool cuda_buffer_is_cuda_backed(const void * buffer);
 CUDA_BUFFER_PUBLIC
 cuda_buffer_ret_t cuda_buffer_device_id(const void * buffer, int * device_id);
 
-/// Read a rosidl::Buffer<uint8_t> *; NULL stream selects the internal stream.
+/// Read a rosidl::Buffer<uint8_t> *; NULL selects CUDA default stream 0.
+/// The stream must match the buffer's device/context and outlive the handle.
+/// Obtain the backend's internal stream with cuda_buffer_internal_stream().
 /// Non-CUDA input is copied to a CUDA allocation retained by the read handle.
 /// Keep the source buffer alive until cuda_buffer_read_handle_destroy().
 /// Submit all reads on cuda_stream before destroying the handle.
@@ -79,7 +81,9 @@ cuda_buffer_ret_t cuda_buffer_acquire_read(
   void * cuda_stream,
   cuda_buffer_read_handle_t ** handle);
 
-/// Write a rosidl::Buffer<uint8_t> *; NULL stream selects the internal stream.
+/// Write a rosidl::Buffer<uint8_t> *; NULL selects CUDA default stream 0.
+/// The stream must match the buffer's device/context and outlive the handle.
+/// Obtain the backend's internal stream with cuda_buffer_internal_stream().
 /// Non-CUDA input is replaced on success with an uninitialized CUDA allocation
 /// of the same length. The caller owns both pointers and must release each with
 /// rosidl_buffer_uint8_destroy(). Failure leaves *buffer unchanged.
@@ -88,24 +92,6 @@ cuda_buffer_ret_t cuda_buffer_acquire_read(
 /// remains valid after the buffer finalizes the write and is destroyed.
 CUDA_BUFFER_PUBLIC
 cuda_buffer_ret_t cuda_buffer_acquire_write(
-  void ** buffer,
-  void * cuda_stream,
-  cuda_buffer_write_handle_t ** handle);
-
-/// Read with the same ownership rules as cuda_buffer_acquire_read().
-/// NULL selects CUDA default stream 0. The stream must match the buffer's
-/// device/context and outlive the handle.
-CUDA_BUFFER_PUBLIC
-cuda_buffer_ret_t cuda_buffer_acquire_read_on_stream(
-  const void * buffer,
-  void * cuda_stream,
-  cuda_buffer_read_handle_t ** handle);
-
-/// Write with the same ownership rules as cuda_buffer_acquire_write().
-/// NULL selects CUDA default stream 0. The stream must match the buffer's
-/// device/context and outlive the handle.
-CUDA_BUFFER_PUBLIC
-cuda_buffer_ret_t cuda_buffer_acquire_write_on_stream(
   void ** buffer,
   void * cuda_stream,
   cuda_buffer_write_handle_t ** handle);

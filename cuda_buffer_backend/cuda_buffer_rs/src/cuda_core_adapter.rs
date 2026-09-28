@@ -172,7 +172,7 @@ unsafe fn acquire_write<'a, T: DeviceCopy>(
     let mut raw = ptr::null_mut();
     let mut slot = buffer;
     check(unsafe {
-        ffi::cuda_buffer_acquire_write_on_stream(&mut slot, stream.cu_stream().cast(), &mut raw)
+        ffi::cuda_buffer_acquire_write(&mut slot, stream.cu_stream().cast(), &mut raw)
     })?;
     let native = WriteHandle {
         raw: NonNull::new(raw).ok_or_else(|| corrupt_abi("null native write handle"))?,
@@ -192,9 +192,7 @@ unsafe fn acquire_read<'a, T: DeviceCopy>(
 ) -> Result<CudaReadHandle<'a, T>> {
     let len = prepare::<T>(buffer, bytes, stream)?;
     let mut raw = ptr::null_mut();
-    check(unsafe {
-        ffi::cuda_buffer_acquire_read_on_stream(buffer, stream.cu_stream().cast(), &mut raw)
-    })?;
+    check(unsafe { ffi::cuda_buffer_acquire_read(buffer, stream.cu_stream().cast(), &mut raw) })?;
     let native = ReadHandle {
         _owner: PhantomData,
         raw: NonNull::new(raw).ok_or_else(|| corrupt_abi("null native read handle"))?,
