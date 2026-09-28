@@ -20,7 +20,6 @@
 #include <memory>
 #include <new>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
 #include "cuda_buffer/cuda_buffer_api.hpp"

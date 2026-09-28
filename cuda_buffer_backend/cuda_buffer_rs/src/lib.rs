@@ -3,9 +3,10 @@
 
 //! Scoped Rust access to native CUDA buffers.
 //!
-//! `CudaBuffer` owns the native allocation. Guards borrow it while native events
-//! order GPU access. The `cuda-core` feature adds typed
-//! access using retained cuda-core streams. Buffers and handles are thread-local.
+//! [`CudaBuffer`] owns a native buffer; scoped handles order GPU access through
+//! native CUDA events. The `cuda-core` feature adds typed access and retains the
+//! acquisition stream until handle cleanup. Buffers and handles are neither
+//! `Send` nor `Sync`.
 
 #![warn(unsafe_op_in_unsafe_fn)]
 
@@ -27,7 +28,10 @@ use std::ptr::{self, NonNull};
 
 use rosidl_runtime_rs::PrimitiveSequence;
 
-/// A `cudaStream_t` to order buffer access on.
+/// A borrowed CUDA stream for the low-level buffer API.
+///
+/// Null selects the backend's internal stream, not CUDA default stream 0.
+/// Use the `cuda-core` API to access buffers on the default stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CudaStream(*mut c_void);
 
@@ -35,7 +39,9 @@ impl CudaStream {
     /// Defer to the backend's process-wide internal stream.
     pub const INTERNAL: Self = Self(ptr::null_mut());
 
-    /// Adopt an existing `cudaStream_t`.
+    /// Wrap an existing `cudaStream_t` without taking ownership.
+    ///
+    /// Null is equivalent to [`Self::INTERNAL`].
     ///
     /// # Safety
     ///
@@ -133,7 +139,7 @@ pub fn allocate_buffer(byte_count: usize) -> Result<rosidl_runtime_rs::Buffer<u8
     CudaBuffer::allocate(byte_count).map(CudaBuffer::into_buffer)
 }
 
-/// Owning handle to scoped read access, released on drop.
+/// Scoped native read access, released on drop.
 ///
 /// Prefer [`CudaBuffer::read`], which ties the handle to a borrow of the buffer.
 #[must_use]
@@ -194,7 +200,7 @@ impl Drop for ReadHandle<'_> {
     }
 }
 
-/// Owning handle to scoped write access, released on drop.
+/// Native write access, released on drop.
 ///
 /// Prefer [`CudaBuffer::write`], which ties the handle to a mutable borrow of the
 /// buffer.
@@ -282,8 +288,9 @@ impl CudaBuffer {
     ///
     /// # Safety
     ///
-    /// `raw` must be a live buffer that was heap-allocated by the ROS IDL buffer
-    /// stack, `len` must be its byte length, and no other owner may exist.
+    /// `raw` must be null or a live buffer heap-allocated by the ROS IDL buffer
+    /// stack. For a non-null pointer, `len` must be its byte length and the caller
+    /// must transfer ownership of that buffer object. Null returns `None`.
     pub unsafe fn from_raw(raw: *mut c_void, len: usize) -> Option<Self> {
         NonNull::new(raw).map(|raw| Self { raw, len })
     }
@@ -295,15 +302,15 @@ impl CudaBuffer {
 
     /// Release ownership, returning the opaque buffer pointer.
     ///
-    /// The caller becomes responsible for destroying it, either through
-    /// [`CudaBuffer::from_raw`] or the C ABI.
+    /// The caller must eventually destroy it through the C ABI or transfer it
+    /// back to [`CudaBuffer::from_raw`].
     pub fn into_raw(self) -> *mut c_void {
         let raw = self.raw.as_ptr();
         std::mem::forget(self);
         raw
     }
 
-    /// Transfers this allocation into an RMW-native `uint8[]` field.
+    /// Transfer ownership into an RMW-native `uint8[]` field.
     pub fn into_primitive_sequence(self) -> PrimitiveSequence<u8> {
         let len = self.len;
         let raw = self.into_raw();
@@ -311,7 +318,7 @@ impl CudaBuffer {
             .expect("CudaBuffer always contains a non-null Buffer pointer")
     }
 
-    /// Takes a CUDA-backed allocation out of an RMW-native `uint8[]` field.
+    /// Take ownership of a CUDA-backed RMW-native `uint8[]` field.
     pub fn from_primitive_sequence(
         sequence: PrimitiveSequence<u8>,
     ) -> std::result::Result<Self, PrimitiveSequence<u8>> {
@@ -343,8 +350,9 @@ impl CudaBuffer {
     ///
     /// The handle borrows its owner through cleanup.
     pub fn read(&self, stream: CudaStream) -> Result<CudaReadGuard<'_>> {
-        let handle = unsafe { ReadHandle::acquire(self.raw.as_ptr(), stream) }?;
-        Ok(handle)
+        // SAFETY: the returned handle borrows self; stream validity is required
+        // when constructing CudaStream.
+        unsafe { ReadHandle::acquire(self.raw.as_ptr(), stream) }
     }
 
     /// Acquire scoped write access ordered on `stream`.
@@ -419,10 +427,6 @@ pub fn read_primitive_sequence(
             kind: ErrorKind::InvalidArgument,
             message: "primitive sequence is not Buffer-backed".into(),
         })?;
-    let handle = unsafe { ReadHandle::acquire(raw, stream) }?;
-    Ok(handle)
+    // SAFETY: the returned handle borrows sequence, which retains the owner.
+    unsafe { ReadHandle::acquire(raw, stream) }
 }
-
-#[cfg(doctest)]
-#[path = "../tests/compile_fail_doctests/mod.rs"]
-mod compile_fail_doctests;

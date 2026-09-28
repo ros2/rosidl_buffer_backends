@@ -10,8 +10,6 @@ copying when supported, with automatic fallback to the default CPU path.
   packages for zero-copy GPU memory sharing using CUDA VMM IPC.
 - [`qc_buffer_backend`](qc_buffer_backend/README.md) -- Qualcomm buffer backend
   packages for HTP-CPU zero-copy sharing using dma-buf memory.
-- [`cuda_core_vendor`](cuda_core_vendor/README.md) -- Pinned `cuda-core` Rust
-  sources and Cargo dependencies.
 - **libtorch_vendor** -- Vendor package that downloads and installs the
   pre-built LibTorch C++ distribution.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.

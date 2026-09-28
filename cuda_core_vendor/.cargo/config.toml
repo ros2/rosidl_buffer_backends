@@ -1,8 +1,0 @@
-# Copyright 2026 Open Source Robotics Foundation, Inc.
-# SPDX-License-Identifier: Apache-2.0
-
-[source.crates-io]
-replace-with = "cuda-core-vendor"
-
-[source.cuda-core-vendor]
-local-registry = "registry"

@@ -25,7 +25,7 @@
 extern "C" {
 #endif
 
-/// Fallible operations return a code and set cuda_buffer_error_message().
+/// Fallible operations return a code and store error text on failure.
 typedef enum cuda_buffer_ret_t
 {
   CUDA_BUFFER_RET_OK = 0,
@@ -48,7 +48,7 @@ typedef struct cuda_buffer_read_handle_t cuda_buffer_read_handle_t;
 /// Opaque scoped write access to a CUDA-backed buffer.
 typedef struct cuda_buffer_write_handle_t cuda_buffer_write_handle_t;
 
-/// Non-null, thread-local error text, valid until the next ABI call on this thread.
+/// Non-null, thread-local error text. Copy it before the next fallible ABI call.
 CUDA_BUFFER_PUBLIC
 const char * cuda_buffer_error_message(void);
 
@@ -71,7 +71,8 @@ cuda_buffer_ret_t cuda_buffer_device_id(const void * buffer, int * device_id);
 
 /// Read a rosidl::Buffer<uint8_t> *; NULL stream selects the internal stream.
 /// Non-CUDA input is copied to a CUDA allocation retained by the read handle.
-/// Release the handle with cuda_buffer_read_handle_destroy().
+/// Keep the source buffer alive until cuda_buffer_read_handle_destroy().
+/// Submit all reads on cuda_stream before destroying the handle.
 CUDA_BUFFER_PUBLIC
 cuda_buffer_ret_t cuda_buffer_acquire_read(
   const void * buffer,
@@ -82,7 +83,9 @@ cuda_buffer_ret_t cuda_buffer_acquire_read(
 /// Non-CUDA input is replaced on success with an uninitialized CUDA allocation
 /// of the same length. The caller owns both pointers and must release each with
 /// rosidl_buffer_uint8_destroy(). Failure leaves *buffer unchanged.
-/// Release the handle with cuda_buffer_write_handle_destroy().
+/// Submit all writes on cuda_stream before the buffer is read, published, or
+/// destroyed. Release the handle with cuda_buffer_write_handle_destroy(); cleanup
+/// remains valid after the buffer finalizes the write and is destroyed.
 CUDA_BUFFER_PUBLIC
 cuda_buffer_ret_t cuda_buffer_acquire_write(
   void ** buffer,
@@ -138,7 +141,7 @@ size_t cuda_buffer_write_handle_size(const cuda_buffer_write_handle_t * handle);
 CUDA_BUFFER_PUBLIC
 void cuda_buffer_read_handle_destroy(cuda_buffer_read_handle_t * handle);
 
-/// Destroy a write handle, recording its write event. Accepts NULL.
+/// Destroy a write handle, finalizing any outstanding write. Accepts NULL.
 CUDA_BUFFER_PUBLIC
 void cuda_buffer_write_handle_destroy(cuda_buffer_write_handle_t * handle);
 

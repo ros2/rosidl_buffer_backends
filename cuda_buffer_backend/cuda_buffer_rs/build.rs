@@ -23,7 +23,8 @@ fn main() {
         directories.push(PathBuf::from(prefix).join("lib"));
     }
 
-    // Resolve each library before Rustdoc sorts its search paths.
+    // Give rustdoc one directory containing the selected native libraries, so
+    // reordering search paths cannot select libraries from another ROS overlay.
     let links =
         PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set")).join("native-libraries");
     fs::create_dir_all(&links).expect("create native library directory");
@@ -33,7 +34,10 @@ fn main() {
             .iter()
             .map(|directory| directory.join(&filename))
             .find(|path| path.is_file())
-            .unwrap_or_else(|| panic!("{library} is missing from AMENT_PREFIX_PATH"));
+            .unwrap_or_else(|| {
+                panic!("{library} was not found in AMENT_PREFIX_PATH or CONDA_PREFIX")
+            });
+        println!("cargo:rerun-if-changed={}", source.display());
         let target = links.join(filename);
         if target.symlink_metadata().is_ok() {
             fs::remove_file(&target).expect("remove previous native library link");

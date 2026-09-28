@@ -13,13 +13,22 @@ SPDX-License-Identifier: Apache-2.0
   <license>Apache-2.0</license>
   <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
 
-  <depend>cuda_core_vendor</depend>
+  <buildtool_depend version_gte="1.89">cargo</buildtool_depend>
+  <buildtool_depend version_gte="1.89">rustc</buildtool_depend>
+
+  <build_depend>libclang-dev</build_depend>
+  <build_export_depend>libclang-dev</build_export_depend>
+  <depend version_gte="13">nvidia-cuda</depend>
   <depend>cuda_buffer</depend>
   <depend>cuda_buffer_backend</depend>
   <depend>rosidl_buffer</depend>
   <depend>rosidl_runtime_rs</depend>
 
   <test_depend>rmw_fastrtps_cpp</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ros</test_depend>
+  <test_depend>launch_ros</test_depend>
+  <test_depend>python3-pytest</test_depend>
   <test_depend>rclrs</test_depend>
   <test_depend>std_msgs</test_depend>
   <test_depend>sensor_msgs</test_depend>

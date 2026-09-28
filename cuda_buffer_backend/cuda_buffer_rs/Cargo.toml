@@ -27,17 +27,16 @@ ros-env = "=0.2.0"
 serde_json = "1"
 
 [[test]]
-name = "pubsub_intra_process"
-required-features = ["cuda-core"]
-
-[[test]]
-name = "pubsub_inter_process"
-required-features = ["cuda-core"]
-
-[[test]]
-name = "pubsub_cpu_fallback"
-required-features = ["cuda-core"]
+name = "unit"
+path = "test/unit.rs"
 
 [[test]]
 name = "message_compatibility"
+path = "test/message_compatibility.rs"
 required-features = ["cuda-core"]
+
+[[example]]
+name = "cuda_buffer_rs_test_runner"
+path = "test/src/cuda_buffer_rs_test_runner.rs"
+required-features = ["cuda-core"]
+test = true

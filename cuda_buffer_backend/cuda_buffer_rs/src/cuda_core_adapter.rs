@@ -73,8 +73,11 @@ impl<T: DeviceCopy, H> Access<T, H> {
                 "CUDA device address is null or misaligned for the element type",
             ));
         }
-        // SAFETY: the native handle retains this VMM allocation. ManuallyDrop
-        // suppresses cuda-core's allocator; Access::drop detaches the facade.
+        // SAFETY: callers retain the backend owner during device access and
+        // validate the element layout and context before constructing this view.
+        // This relies on cuda-core 0.3.1's raw-parts implementation: construction
+        // stores the address without touching the allocation. ManuallyDrop and
+        // into_raw_parts prevent its cuMemFree destructor from freeing VMM memory.
         let facade = ManuallyDrop::new(unsafe {
             DeviceBuffer::from_raw_parts(address as u64, len, Arc::clone(stream.context()))
         });
@@ -104,7 +107,8 @@ impl<T, H> Drop for Access<T, H> {
         self.stream
             .context()
             .record_err(self.stream.context().bind_to_thread());
-        // SAFETY: drop runs once; into_raw_parts releases the context without freeing VMM memory.
+        // SAFETY: drop takes the facade once. into_raw_parts returns its context
+        // reference without freeing the backend-owned allocation.
         let facade = unsafe { ManuallyDrop::take(&mut self.facade) };
         let (_, _, context) = facade.into_raw_parts();
         drop(context);
@@ -223,6 +227,7 @@ macro_rules! common_accessors {
         pub fn is_empty(&self) -> bool {
             self.len() == 0
         }
+        /// Number of bytes covered by this handle.
         pub fn byte_len(&self) -> usize {
             self.access.buffer().num_bytes()
         }
@@ -245,7 +250,7 @@ macro_rules! common_accessors {
                 .to_host_vec(self.stream())
                 .map_err(driver_error)
         }
-        /// Borrow the concrete cuda-oxide/cuda-core buffer without copying.
+        /// Borrow a cuda-core buffer view without copying.
         ///
         /// # Safety
         /// Submit all work on this handle's stream while its owner is borrowed.
@@ -310,12 +315,13 @@ impl<T: DeviceCopy> CudaWriteHandle<'_, T> {
         self.device_ptr() as *mut T
     }
 
-    /// Borrow a mutable concrete facade for cuda-oxide kernel arguments.
+    /// Borrow a mutable cuda-core buffer view without copying.
     ///
     /// # Safety
-    /// Follow [`Self::as_device_buffer`]'s stream and lifetime contract.
-    /// Only device contents may change. Never replace, move out, reallocate,
-    /// or destroy the facade; its pointer, length, and context must stay fixed.
+    /// Follow [`Self::as_device_buffer`]'s stream and lifetime contract;
+    /// writes to device contents are permitted through this mutable view.
+    /// Never replace, move out, reallocate, or destroy the view. Its pointer,
+    /// length, and context must stay fixed.
     pub unsafe fn as_device_buffer_mut(&mut self) -> &mut DeviceBuffer<T> {
         self.access.buffer_mut()
     }
