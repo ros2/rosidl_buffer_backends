@@ -12,6 +12,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
+  <depend>cuda-toolkit</depend>
   <depend>cuda_buffer</depend>
   <depend>rosidl_buffer</depend>
   <depend>rosidl_buffer_py</depend>

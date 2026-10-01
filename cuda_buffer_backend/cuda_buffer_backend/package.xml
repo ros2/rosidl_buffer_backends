@@ -12,6 +12,7 @@
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
+  <depend>cuda-toolkit</depend>
   <depend>cuda_buffer</depend>
   <depend>cuda_buffer_backend_msgs</depend>
   <depend>pluginlib</depend>

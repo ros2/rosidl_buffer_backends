@@ -24,8 +24,8 @@ endfunction()
 
 # The pinned fallback uses cu130 with the CUDA 13.1 toolkit baseline.
 function(python3_torch_cuda_vendor_variant_for_cuda cuda_version output_variable)
-  if(cuda_version VERSION_LESS "13.1" OR NOT cuda_version VERSION_LESS "14")
-    message(FATAL_ERROR "The pinned Torch 2.14.0 CUDA fallback requires CUDA >=13.1,<14; "
+  if(cuda_version VERSION_LESS "13.1")
+    message(FATAL_ERROR "The pinned Torch 2.14.0 CUDA fallback requires CUDA >=13.1; "
       "found ${cuda_version}. Install CUDA 13.1 through rosdep/APT and select it with "
       "-DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
   endif()
