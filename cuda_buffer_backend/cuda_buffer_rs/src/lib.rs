@@ -3,10 +3,10 @@
 
 //! Scoped Rust access to native CUDA buffers.
 //!
-//! [`CudaBuffer`] owns a native buffer; scoped handles order GPU access through
-//! native CUDA events. The `cuda-core` feature adds typed access and retains the
-//! acquisition stream until handle cleanup. Buffers and handles are neither
-//! `Send` nor `Sync`.
+//! [`rosidl_runtime_rs::Buffer`] owns message storage; scoped handles order GPU
+//! access through native CUDA events. The `cuda-core` feature adds typed access
+//! and retains the acquisition stream until handle cleanup. CUDA access handles
+//! are neither `Send` nor `Sync`.
 
 #![warn(unsafe_op_in_unsafe_fn)]
 
@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 use std::os::raw::c_void;
 use std::ptr::{self, NonNull};
 
-use rosidl_runtime_rs::PrimitiveSequence;
+use rosidl_runtime_rs::{Buffer, PrimitiveSequence};
 
 /// A borrowed CUDA stream for the low-level buffer API.
 ///
@@ -144,13 +144,19 @@ pub unsafe fn is_cuda_backed(buffer: *const c_void) -> bool {
 ///
 /// Uses the native CUDA pool without acquiring a handle or copying data.
 /// Initialize the output through `from_output_buffer` before publishing it.
-pub fn allocate_buffer(byte_count: usize) -> Result<rosidl_runtime_rs::Buffer<u8>> {
-    CudaBuffer::allocate(byte_count).map(CudaBuffer::into_buffer)
+pub fn allocate_buffer(byte_count: usize) -> Result<Buffer<u8>> {
+    let mut raw = ptr::null_mut();
+    check(unsafe { ffi::cuda_buffer_allocate(byte_count, &mut raw) })?;
+    // SAFETY: successful allocation transfers a native byte buffer of this size.
+    // The sequence takes sole ownership and releases it through rosidl_buffer.
+    unsafe { PrimitiveSequence::from_owned_rosidl_buffer(raw, byte_count) }
+        .map(Buffer::from)
+        .ok_or_else(|| corrupt_abi("allocation returned a null buffer"))
 }
 
 /// Scoped native read access, released on drop.
 ///
-/// Prefer [`CudaBuffer::read`], which ties the handle to a borrow of the buffer.
+/// Prefer [`read_buffer`], which ties the handle to a borrow of the buffer.
 #[must_use]
 pub struct ReadHandle<'a> {
     raw: NonNull<ffi::cuda_buffer_read_handle_t>,
@@ -212,7 +218,7 @@ impl Drop for ReadHandle<'_> {
 
 /// Native write access, released on drop.
 ///
-/// Prefer [`CudaBuffer::write`], which ties the handle to a mutable borrow of the
+/// Prefer [`write_buffer`], which ties the handle to a mutable borrow of the
 /// buffer.
 #[must_use]
 pub struct WriteHandle {
@@ -271,146 +277,52 @@ impl Drop for WriteHandle {
     }
 }
 
-/// An owned `rosidl::Buffer<uint8_t>` allocated or adopted from the C++ backend.
+/// Acquire raw CUDA read access from native-backed message storage.
 ///
-/// Drop releases the owner through `rosidl_buffer_uint8_destroy`.
-#[must_use]
-pub struct CudaBuffer {
-    raw: NonNull<c_void>,
-    len: usize,
+/// The handle borrows `buffer` through cleanup. For ordinary CPU storage, use
+/// the typed `from_input_buffer` API, which uploads it before returning.
+pub fn read_buffer(buffer: &Buffer<u8>, stream: CudaStream) -> Result<CudaReadGuard<'_>> {
+    read_primitive_sequence(buffer.as_sequence(), stream)
 }
 
-impl CudaBuffer {
-    /// Transfers the native owner into a backend-neutral message buffer.
-    pub fn into_buffer(self) -> rosidl_runtime_rs::Buffer<u8> {
-        self.into_primitive_sequence().into()
-    }
-
-    /// Allocate `len` CUDA-backed bytes. The contents are uninitialized.
-    pub fn allocate(len: usize) -> Result<Self> {
-        let mut raw = ptr::null_mut();
-        check(unsafe { ffi::cuda_buffer_allocate(len, &mut raw) })?;
-        NonNull::new(raw)
-            .map(|raw| Self { raw, len })
-            .ok_or_else(|| corrupt_abi("allocation returned a null buffer"))
-    }
-
-    /// Take ownership of an existing opaque `rosidl::Buffer<uint8_t> *`.
-    ///
-    /// # Safety
-    ///
-    /// `raw` must be null or a live buffer heap-allocated by the ROS IDL buffer
-    /// stack. For a non-null pointer, `len` must be its byte length and the caller
-    /// must transfer ownership of that buffer object. Null returns `None`.
-    pub unsafe fn from_raw(raw: *mut c_void, len: usize) -> Option<Self> {
-        NonNull::new(raw).map(|raw| Self { raw, len })
-    }
-
-    /// Borrow the opaque buffer pointer without releasing ownership.
-    pub fn as_ptr(&self) -> *mut c_void {
-        self.raw.as_ptr()
-    }
-
-    /// Release ownership, returning the opaque buffer pointer.
-    ///
-    /// The caller must eventually destroy it through the C ABI or transfer it
-    /// back to [`CudaBuffer::from_raw`].
-    pub fn into_raw(self) -> *mut c_void {
-        let raw = self.raw.as_ptr();
-        std::mem::forget(self);
-        raw
-    }
-
-    /// Transfer ownership into an RMW-native `uint8[]` field.
-    pub fn into_primitive_sequence(self) -> PrimitiveSequence<u8> {
-        let len = self.len;
-        let raw = self.into_raw();
-        unsafe { PrimitiveSequence::from_owned_rosidl_buffer(raw, len) }
-            .expect("CudaBuffer always contains a non-null Buffer pointer")
-    }
-
-    /// Take ownership of a CUDA-backed RMW-native `uint8[]` field.
-    pub fn from_primitive_sequence(
-        sequence: PrimitiveSequence<u8>,
-    ) -> std::result::Result<Self, PrimitiveSequence<u8>> {
-        let Some(raw) = sequence.rosidl_buffer_ptr() else {
-            return Err(sequence);
-        };
-        if !unsafe { is_cuda_backed(raw) } {
-            return Err(sequence);
+/// Acquire raw CUDA write access to a message buffer.
+///
+/// Non-CUDA storage is replaced with uninitialized CUDA storage of the same
+/// byte length. Initialize it before publishing. Failure leaves the owner unchanged.
+pub fn write_buffer(buffer: &mut Buffer<u8>, stream: CudaStream) -> Result<CudaWriteGuard<'_>> {
+    let mut promoted = None;
+    let mut raw = match buffer.as_sequence().rosidl_buffer_ptr() {
+        Some(raw) if unsafe { is_cuda_backed(raw) } => raw,
+        _ => {
+            let allocation = allocate_buffer(buffer.len())?;
+            let raw = allocation
+                .as_sequence()
+                .rosidl_buffer_ptr()
+                .expect("CUDA allocation is native-backed");
+            promoted = Some(allocation);
+            raw
         }
-        let len = sequence.len();
-        let raw = sequence.into_owned_rosidl_buffer()?;
-        Ok(unsafe { Self::from_raw(raw, len) }.expect("Buffer pointer was verified as non-null"))
+    };
+    // SAFETY: raw refers to CUDA storage owned by buffer or promoted. The
+    // returned guard borrows buffer, which receives any promoted allocation.
+    let handle = unsafe { WriteHandle::acquire(&mut raw, stream) }?;
+    if let Some(allocation) = promoted {
+        *buffer = allocation;
     }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Report whether the buffer currently uses the CUDA backend.
-    pub fn is_cuda_backed(&self) -> bool {
-        unsafe { ffi::cuda_buffer_is_cuda_backed(self.raw.as_ptr()) }
-    }
-
-    /// Acquire scoped read access ordered on `stream`.
-    ///
-    /// The handle borrows its owner through cleanup.
-    pub fn read(&self, stream: CudaStream) -> Result<CudaReadGuard<'_>> {
-        // SAFETY: the returned handle borrows self; stream validity is required
-        // when constructing CudaStream.
-        unsafe { ReadHandle::acquire(self.raw.as_ptr(), stream) }
-    }
-
-    /// Acquire scoped write access ordered on `stream`.
-    ///
-    /// If the buffer was adopted from non-CUDA storage it is promoted and this
-    /// `CudaBuffer` takes ownership of the promoted allocation, destroying the
-    /// previous one. [`CudaBuffer::as_ptr`] then reports the new pointer, which
-    /// is the one that must be published.
-    pub fn write(&mut self, stream: CudaStream) -> Result<CudaWriteGuard<'_>> {
-        let mut slot = self.raw.as_ptr();
-        let handle = unsafe { WriteHandle::acquire(&mut slot, stream) }?;
-        if slot != self.raw.as_ptr() {
-            let promoted = NonNull::new(slot)
-                .ok_or_else(|| corrupt_abi("write acquisition returned a null promoted buffer"))?;
-            let previous = std::mem::replace(&mut self.raw, promoted);
-            unsafe { ffi::rosidl_buffer_uint8_destroy(previous.as_ptr()) };
-        }
-        Ok(CudaWriteGuard {
-            handle,
-            _owner: PhantomData,
-        })
-    }
+    Ok(CudaWriteGuard {
+        handle,
+        _owner: PhantomData,
+    })
 }
 
-impl fmt::Debug for CudaBuffer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CudaBuffer")
-            .field("ptr", &self.raw.as_ptr())
-            .field("len", &self.len)
-            .finish()
-    }
-}
-
-impl Drop for CudaBuffer {
-    fn drop(&mut self) {
-        unsafe { ffi::rosidl_buffer_uint8_destroy(self.raw.as_ptr()) };
-    }
-}
-
-/// Scoped read access tied to a borrow of its [`CudaBuffer`].
+/// Scoped read access tied to a borrow of its [`Buffer`].
 pub type CudaReadGuard<'a> = ReadHandle<'a>;
 
-/// Scoped write access tied to a mutable borrow of its [`CudaBuffer`].
+/// Scoped write access tied to a mutable borrow of its [`Buffer`].
 #[derive(Debug)]
 pub struct CudaWriteGuard<'a> {
     handle: WriteHandle,
-    _owner: PhantomData<&'a mut ()>,
+    _owner: PhantomData<&'a mut Buffer<u8>>,
 }
 
 impl CudaWriteGuard<'_> {
@@ -453,8 +365,8 @@ mod tests {
         assert_eq!(CudaStream::INTERNAL.resolve().unwrap(), internal);
         assert_eq!(internal_stream().unwrap().resolve().unwrap(), internal);
 
-        let mut buffer = CudaBuffer::allocate(1).unwrap();
-        let write = buffer.write(CudaStream::INTERNAL).unwrap();
+        let mut buffer = allocate_buffer(1).unwrap();
+        let write = write_buffer(&mut buffer, CudaStream::INTERNAL).unwrap();
         static SOURCE: [u8; 1] = [42];
         // SAFETY: SOURCE is static, the destination is live, and the backend's
         // internal stream outlives the copy and the write handle.

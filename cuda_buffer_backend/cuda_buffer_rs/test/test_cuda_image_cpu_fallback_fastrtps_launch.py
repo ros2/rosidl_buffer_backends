@@ -44,8 +44,8 @@ def generate_test_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'test_runner',
-            default_value=str(Path(__file__).resolve().parents[1]
-                              / 'target/debug/examples/cuda_buffer_rs_test_runner')),
+            default_value=str(Path.cwd() / 'build/cuda_buffer_rs/debug/examples'
+                              / 'cuda_buffer_rs_test_runner')),
         SetEnvironmentVariable('RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
         EnableRmwIsolation(),
         publisher, gpu, cpu, launch_testing.actions.ReadyToTest(),

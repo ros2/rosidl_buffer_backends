@@ -14,7 +14,7 @@ use cuda_core::{CudaStream, DeviceBuffer, DeviceCopy};
 use rosidl_runtime_rs::{Buffer, PrimitiveSequence};
 
 use crate::{
-    check, corrupt_abi, ffi, CudaBuffer, CudaBufferError, ErrorKind, ReadHandle, Result,
+    allocate_buffer, check, corrupt_abi, ffi, CudaBufferError, ErrorKind, ReadHandle, Result,
     WriteHandle,
 };
 
@@ -63,7 +63,7 @@ struct Access<T, H> {
     facade: ManuallyDrop<DeviceBuffer<T>>,
     native: Option<H>,
     stream: Arc<CudaStream>,
-    promoted: Option<CudaBuffer>,
+    promoted: Option<Buffer<u8>>,
 }
 
 impl<T: DeviceCopy, H> Access<T, H> {
@@ -124,7 +124,7 @@ impl<T, H> Drop for Access<T, H> {
 #[must_use]
 pub struct CudaReadHandle<'a, T: DeviceCopy> {
     access: Access<T, ReadHandle<'a>>,
-    _owner: PhantomData<&'a CudaBuffer>,
+    _owner: PhantomData<&'a Buffer<u8>>,
 }
 
 /// Typed exclusive CUDA write access borrowing its backend owner.
@@ -135,31 +135,7 @@ pub struct CudaReadHandle<'a, T: DeviceCopy> {
 #[must_use]
 pub struct CudaWriteHandle<'a, T: DeviceCopy> {
     access: Access<T, WriteHandle>,
-    _owner: PhantomData<&'a mut CudaBuffer>,
-}
-
-impl CudaBuffer {
-    /// Acquire typed read access on the exact cuda-core stream (including 0).
-    ///
-    /// The handle borrows its owner until drop.
-    pub fn get_read_handle<T: DeviceCopy>(
-        &self,
-        stream: &Arc<CudaStream>,
-    ) -> Result<CudaReadHandle<'_, T>> {
-        // SAFETY: self retains the owner for the returned lifetime.
-        unsafe { acquire_read(self.raw.as_ptr(), self.len, stream) }
-    }
-
-    /// Acquire typed exclusive write access on the exact cuda-core stream.
-    ///
-    /// Checks element size and device before native acquisition. Rejects CPU storage.
-    pub fn get_write_handle<T: DeviceCopy>(
-        &mut self,
-        stream: &Arc<CudaStream>,
-    ) -> Result<CudaWriteHandle<'_, T>> {
-        // SAFETY: self is exclusively borrowed for the returned lifetime.
-        unsafe { acquire_write(self.raw.as_ptr(), self.len, stream) }
-    }
+    _owner: PhantomData<&'a mut Buffer<u8>>,
 }
 
 // SAFETY: buffer must remain live and exclusively borrowed for the returned lifetime.
@@ -248,16 +224,6 @@ macro_rules! common_accessors {
                 .to_host_vec(self.stream())
                 .map_err(driver_error)
         }
-        /// Borrow a cuda-core buffer view without copying.
-        ///
-        /// # Safety
-        /// Submit all work on this handle's stream while its owner is borrowed.
-        /// Complete submission before publishing the buffer or releasing the handle.
-        /// Keep the pointer, length, context, and allocation owner unchanged.
-        /// Access through this immutable facade must be read-only.
-        pub unsafe fn as_device_buffer(&self) -> &DeviceBuffer<T> {
-            self.access.buffer()
-        }
     };
 }
 
@@ -280,6 +246,17 @@ debug_handle!(CudaWriteHandle);
 
 impl<T: DeviceCopy> CudaReadHandle<'_, T> {
     common_accessors!();
+
+    /// Borrow a cuda-core buffer view without copying.
+    ///
+    /// # Safety
+    /// Submit all work on this handle's stream while its owner is borrowed.
+    /// Complete submission before publishing the buffer or releasing the handle.
+    /// Keep the pointer, length, context, and allocation owner unchanged.
+    /// Access through this immutable facade must be read-only.
+    pub unsafe fn as_device_buffer(&self) -> &DeviceBuffer<T> {
+        self.access.buffer()
+    }
 
     /// Read-only device pointer borrowed for this handle's lifetime.
     pub fn get_ptr(&self) -> *const T {
@@ -316,11 +293,11 @@ impl<T: DeviceCopy> CudaWriteHandle<'_, T> {
     /// Borrow a mutable cuda-core buffer view without copying.
     ///
     /// # Safety
-    /// Follow [`Self::as_device_buffer`]'s stream and lifetime contract;
-    /// writes to device contents are permitted through this mutable view.
+    /// Submit all work on this handle's stream while its owner is borrowed.
+    /// Complete submission before publishing the buffer or releasing the handle.
     /// Never replace, move out, reallocate, or destroy the view. Its pointer,
     /// length, and context must stay fixed.
-    pub unsafe fn as_device_buffer_mut(&mut self) -> &mut DeviceBuffer<T> {
+    pub unsafe fn as_device_buffer(&mut self) -> &mut DeviceBuffer<T> {
         self.access.buffer_mut()
     }
 }
@@ -409,12 +386,14 @@ pub fn from_input_buffer<'a, T: DeviceCopy>(
         })?),
     };
     stream.context().bind_to_thread().map_err(driver_error)?;
-    let mut promoted = CudaBuffer::allocate(buffer.len())?;
-    promoted
-        .get_write_handle::<u8>(stream)?
-        .copy_from_host(&host)?;
+    let mut promoted = allocate_buffer(buffer.len())?;
+    from_output_buffer::<u8>(&mut promoted, stream)?.copy_from_host(&host)?;
+    let raw = promoted
+        .as_sequence()
+        .rosidl_buffer_ptr()
+        .expect("CUDA allocation is native-backed");
     // SAFETY: the returned handle retains promoted until after native cleanup.
-    let mut read = unsafe { acquire_read(promoted.raw.as_ptr(), promoted.len, stream) }?;
+    let mut read = unsafe { acquire_read(raw, promoted.len(), stream) }?;
     read.access.promoted = Some(promoted);
     Ok(read)
 }
@@ -438,9 +417,13 @@ pub fn from_output_buffer<'a, T: DeviceCopy>(
         }
     }
     stream.context().bind_to_thread().map_err(driver_error)?;
-    let promoted = CudaBuffer::allocate(buffer.len())?;
+    let promoted = allocate_buffer(buffer.len())?;
+    let raw = promoted
+        .as_sequence()
+        .rosidl_buffer_ptr()
+        .expect("CUDA allocation is native-backed");
     // SAFETY: ownership is transferred into the exclusively borrowed field.
-    let write = unsafe { acquire_write(promoted.raw.as_ptr(), promoted.len, stream) }?;
-    *buffer = promoted.into_buffer();
+    let write = unsafe { acquire_write(raw, promoted.len(), stream) }?;
+    *buffer = promoted;
     Ok(write)
 }
