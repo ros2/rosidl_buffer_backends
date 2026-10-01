@@ -47,6 +47,7 @@ ament_export_targets(export_${PROJECT_NAME} NAMESPACE ${PROJECT_NAME}::)
 ament_export_dependencies(onnxruntime_core_vendor pluginlib tensor_msgs)
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_cppcheck REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   find_package(CUDAToolkit QUIET)
@@ -56,6 +57,9 @@ if(BUILD_TESTING)
   find_package(rclcpp_components REQUIRED)
   find_package(rosidl_runtime_cpp REQUIRED)
   find_package(std_msgs REQUIRED)
+  # Load GoogleTest macros when cppcheck analyzes the test sources.
+  list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_cppcheck)
+  ament_cppcheck(LIBRARIES googletest INCLUDE_DIRS include test)
   ament_lint_auto_find_test_dependencies()
 
   ament_add_gtest(test_onnxruntime_conversions

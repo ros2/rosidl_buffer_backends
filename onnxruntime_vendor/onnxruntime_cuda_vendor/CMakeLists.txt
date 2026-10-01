@@ -40,10 +40,9 @@ if(ONNXRUNTIME_REUSED_LIBRARY_DIR)
     "prepend-non-duplicate;LD_LIBRARY_PATH;${ONNXRUNTIME_REUSED_LIBRARY_DIR}\n")
   ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/reused_onnxruntime.dsv")
 else()
-  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "13.1" OR
-      NOT CUDAToolkit_VERSION VERSION_LESS "14")
+  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "13.1")
     message(FATAL_ERROR "${PROJECT_NAME}: the pinned ONNX Runtime 1.29.0 CUDA fallback requires "
-      "CUDA >=13.1,<14; selected toolkit is '${CUDAToolkit_VERSION}'. Install CUDA 13.1 through "
+      "CUDA >=13.1; selected toolkit is '${CUDAToolkit_VERSION}'. Install CUDA 13.1 through "
       "rosdep/APT and select it with -DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
   endif()
   set(ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION "${ONNXRUNTIME_CUDA_VENDOR_VERSION}")

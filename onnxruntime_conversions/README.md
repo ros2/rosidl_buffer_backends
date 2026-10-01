@@ -1,286 +1,425 @@
 # ONNX Runtime conversions
 
-Conversions between `tensor_msgs/msg/ExperimentalTensor` and ONNX Runtime
-tensors. The public packages are framework-specific and device-neutral:
-
-| Role | C++ | Python |
-| --- | --- | --- |
-| Public API and plugin registry | `onnxruntime_conversions` | `onnxruntime_conversions_py` |
-| CPU implementation | `onnxruntime_conversions_cpu` | `onnxruntime_conversions_py_cpu` |
-| CUDA implementation | `onnxruntime_conversions_cuda` | `onnxruntime_conversions_py_cuda` |
-
-Install CPU and accelerator plugins as separate Debian packages without
-rebuilding the conversion core. Plugins create device-appropriate streams;
-applications can also borrow their own native streams. C++ discovers plugins
-on first registry use; Python discovers them when the module is imported.
-Restart the application after installing a plugin or provider and source the
-ROS environment before starting it.
-
-Default allocation and session setup use the available plugin with the highest
-priority: CPU is 0 and CUDA is 100. Set `ROSIDL_TENSOR_BACKEND=cpu` or `cuda` to
-override that default, or pass a backend explicitly. Views use the message's
-storage backend; copies into a new message use the source tensor's device
-unless the Python caller specifies a destination backend. Use `device_id` when
-allocating on a particular device; copies into new messages preserve the source
-device index. Additional accelerators can supply their own plugins and
-compatible framework providers.
-
-## Dependencies and source builds
-
-Debians target Ubuntu 26.04 (Resolute) and bundle ONNX Runtime **1.29.0**;
-sourcing ROS selects that installation. Build from source to reuse an existing
-ONNX Runtime installation or on earlier Ubuntu releases. Ubuntu 24.04, including
-JetPack, also requires [ROS Lyrical built from source](https://github.com/ros2/ros2_documentation/blob/lyrical/source/Releases/lyrical/supported-platforms.rst).
-
-Source builds reuse detected CUDA and **ONNX Runtime >=1.23.0 for C++ or
->=1.26.0 for Python**. C++ requires SDK headers, libraries and version metadata
-(`onnxruntimeConfigVersion.cmake` or `VERSION_NUMBER`). CUDA plugins require a
-CUDA-enabled provider. If no compatible installation is found, the fallback is
-**1.29.0**; its CUDA build supplies cuDNN 9
-and requires an installed **CUDA >=13.1,<14** toolkit.
-
-From this repository's root, after sourcing ROS, build with an existing CUDA
-toolkit (including on Ubuntu before Resolute):
-
-```bash
-rosdep install --from-paths onnxruntime_vendor onnxruntime_conversions \
-  tensor_msgs cuda_buffer_backend --ignore-src -y --skip-keys cuda-toolkit
-colcon build --merge-install --packages-up-to \
-  onnxruntime_conversions_cpu onnxruntime_conversions_cuda \
-  onnxruntime_conversions_py_cpu onnxruntime_conversions_py_cuda
-source install/setup.bash
-```
-
-On Resolute, omit `--skip-keys cuda-toolkit` to install the toolkit through rosdep/APT.
-Append `--cmake-args` to `colcon build` with any of these overrides:
-
-- `-DFORCE_BUILD_VENDOR_PKG=ON`: select the pinned fallback.
-- `-Donnxruntime_ROOT=/path/to/onnxruntime`: select a C++ SDK.
-- `-DPython3_EXECUTABLE=/path/to/python`: select Python; its major/minor version must match ROS.
-- `-DCUDAToolkit_ROOT=/path/to/cuda`: select the CUDA toolkit.
-
-Use fresh build directories and rebuild native vendors, conversions and
-applications together when changing the ONNX Runtime release.
-
-## Tensor layout
-
-Both the C++ and Python APIs require contiguous, row-major tensor layouts on
-CPU and CUDA. An empty message `strides` field implies this layout. Explicit
-strides must exactly match the contiguous strides computed from `shape`, even
-for dimensions of size one. Transposed or sliced layouts with other strides
-are rejected; make the tensor contiguous before creating the message.
-
-A nonzero `byte_offset` is supported when the entire contiguous tensor fits
-within the message's allocated storage.
-
-## Execution streams
-
-`create_stream()` returns an empty CPU stream or an ONNX Runtime-owned
-accelerator stream. Use `borrow_stream()` to wrap a caller-owned stream.
-
-Pass the same `Stream` to allocation, views, and copies. Bind it to the session
-using `configure_session_options()` in C++ or `session_providers()` in Python.
-Passing another stream to a conversion does not change the session's stream;
-synchronize explicitly when using different streams.
-
-Keep the stream owner alive until sessions and views are released and queued
-work finishes. In C++, `Ort::Env` must outlive its owned streams. Copies complete
-before returning; zero-copy views remain asynchronous.
-
-## C++
-
-Install CPU support:
-
-```bash
-sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions \
-  ros-$ROS_DISTRO-onnxruntime-conversions-cpu
-```
-
-Add CUDA support later:
-
-```bash
-sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-cuda
-```
-
-For a CPU-only build, restrict rosdep to `tensor_msgs`,
-`onnxruntime_vendor/onnxruntime_core_vendor`, and the C++ core/CPU plugin
-directories, then build only `onnxruntime_conversions_cpu`.
-
-### Publisher
-
-Create the stream and session once in the publisher. `env`, the serialized
-`model`, and `input_value` belong to the application. The shape, dtype, and
-binding names must match the model; the input must be ready on the session's
-stream. These examples assume valid, nonempty messages.
-
-```cpp
-#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
-
-auto stream = onnxruntime_conversions::create_stream(env);
-Ort::SessionOptions options;
-onnxruntime_conversions::configure_session_options(options, stream);
-Ort::Session session(env, model, model_size, options);
-
-auto msg = onnxruntime_conversions::allocate_tensor_msg(
-  {480, 640, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, stream);
-auto output = onnxruntime_conversions::from_output_tensor_msg(*msg, stream);
-Ort::IoBinding binding(session);
-binding.BindInput("input", input_value);
-binding.BindOutput("output", output.value());
-session.Run(Ort::RunOptions{}, binding);
-publisher->publish(*msg);
-```
-
-Allocation, conversion, and the session use the same stream. Inference writes
-directly into message storage; no `to_tensor_msg()` copy is needed.
-
-To borrow a caller-owned stream, replace only stream creation:
-
-```cpp
-auto stream = onnxruntime_conversions::borrow_stream(
-  existing_stream, "cuda", /*device_id=*/0);
-```
-
-Keep the native stream owner alive until the session, views, and queued work
-finish; the borrowed wrapper does not extend that ownership.
-
-### Subscriber
-
-Create a stream once in the subscriber and capture it in the callback. The
-application function `consume()` must treat the input as read-only and use the
-supplied stream, or a session configured with that stream.
-
-```cpp
-#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
-
-auto stream = onnxruntime_conversions::create_stream(env);
-auto callback = [&stream](const onnxruntime_conversions::TensorMsg::ConstSharedPtr & received) {
-    auto view = onnxruntime_conversions::from_input_tensor_msg(*received, stream);
-    consume(view.value(), stream);
-  };
-```
-
-Keep `env` and `stream` alive for the subscription and its queued work. Keep
-the C++ view and message alive until `consume()` finishes using them.
-An `Ort::Value` alone does not retain the C++ view's access handle.
-
-### Existing tensors
-
-Use `to_tensor_msg()` only when copying an already-existing ONNX Runtime tensor
-into a message. Use the stream associated with its producer:
-
-```cpp
-auto outgoing = onnxruntime_conversions::to_tensor_msg(ort_value, stream);
-publisher->publish(std::move(outgoing));
-```
-
-Copies complete before returning. Passing a stream here does not change the
-producer session's stream; synchronize explicitly if they differ.
+Python and C++ libraries with a device-neutral API for converting between
+`tensor_msgs/msg/ExperimentalTensor` messages and ONNX Runtime tensors
+(`onnxruntime.OrtValue` in Python and `Ort::Value` in C++). CPU and accelerator
+support is provided through separately installed plugins, so applications use
+the same conversion API across devices. The API supports writing directly into
+message storage, reading received messages as tensor views, and copying existing
+tensors into messages. Accelerator plugins
+use compatible `rosidl::Buffer` backends under the hood to share device memory,
+enabling zero-copy transport between publishers and subscribers.
 
 ## Python
 
-Install CPU support:
+### Publisher
+
+This example node demonstrates how to use `onnxruntime_conversions` in a
+Python publisher. It runs an identity model once per second with a
+`480 × 640 × 3` float32 input filled with `42`, writes inference output directly
+into message storage, and publishes it on the `tensor` topic. The `model_path`
+argument points to a model with input `input` and output `output`, both using
+that shape and dtype:
+
+```python
+import numpy as np
+import onnxruntime as ort
+import onnxruntime_conversions
+from rclpy.node import Node
+from tensor_msgs.msg import ExperimentalTensor
+
+
+class ExampleTensorPublisher(Node):
+
+    def __init__(self, model_path):
+        super().__init__('example_tensor_publisher')
+        # Create a stream for the default plugin (empty on CPU).
+        self.stream = onnxruntime_conversions.create_stream()
+        # Configure inference to use the same backend and stream.
+        self.session = ort.InferenceSession(
+            model_path,
+            providers=onnxruntime_conversions.session_providers(stream=self.stream))
+        self.input_value = ort.OrtValue.ortvalue_from_numpy(
+            np.full((480, 640, 3), 42.0, dtype=np.float32))
+        self.publisher = self.create_publisher(ExperimentalTensor, 'tensor', 10)
+        self.timer = self.create_timer(1.0, self.publish_tensor)
+
+    def publish_tensor(self):
+        # Allocate message storage on the stream's device.
+        msg = onnxruntime_conversions.allocate_tensor_msg(
+            (480, 640, 3), np.float32, stream=self.stream)
+        # Create a writable view; output.value exposes its OrtValue.
+        output = onnxruntime_conversions.from_output_tensor_msg(msg, self.stream)
+
+        # Application code: run inference directly into message storage.
+        binding = self.session.io_binding()
+        binding.bind_ortvalue_input('input', self.input_value)
+        binding.bind_ortvalue_output('output', output.value)
+        self.session.run_with_iobinding(binding)
+
+        self.publisher.publish(msg)
+```
+
+Replace the model path, input data, shape, dtype, and binding names with those
+required by your model. Bind the model output to `output.value` so inference
+writes into the message storage.
+
+### Subscriber
+
+This example node demonstrates how to use `onnxruntime_conversions` in a
+Python subscriber. It reads each received tensor through a view and runs a
+model that computes its mean, logging `42.0` for messages from the publisher
+above. The `model_path` argument points to a model with a `480 × 640 × 3` float32
+input named `input` and a single float32 mean value named `output`. The node
+accepts both CPU and accelerator-backed buffers:
+
+```python
+import onnxruntime as ort
+import onnxruntime_conversions
+from rclpy.node import Node
+from tensor_msgs.msg import ExperimentalTensor
+
+
+class ExampleTensorSubscriber(Node):
+
+    def __init__(self, model_path):
+        super().__init__('example_tensor_subscriber')
+        # Create a stream for the default plugin (empty on CPU).
+        self.stream = onnxruntime_conversions.create_stream()
+        # Configure inference to use the same backend and stream.
+        self.session = ort.InferenceSession(
+            model_path,
+            providers=onnxruntime_conversions.session_providers(stream=self.stream))
+        self.subscription = self.create_subscription(
+            ExperimentalTensor,
+            'tensor',
+            self.receive_tensor,
+            10,
+            # Accept CPU and accelerator-backed message buffers.
+            acceptable_buffer_backends='any',
+        )
+
+    def receive_tensor(self, received):
+        # View the message storage directly; treat it as read-only.
+        input_tensor = onnxruntime_conversions.from_input_tensor_msg(
+            received, self.stream)
+
+        # Application code: run the mean model and log its scalar output.
+        binding = self.session.io_binding()
+        binding.bind_ortvalue_input('input', input_tensor.value)
+        binding.bind_output('output', 'cpu')
+        self.session.run_with_iobinding(binding)
+        mean = binding.copy_outputs_to_cpu()[0].item()
+
+        self.get_logger().info(f'Mean pixel value: {mean:.1f}')
+```
+
+Replace the mean model, binding names, and logging with your own inference and
+result processing.
+
+### Existing tensors
+
+This example copies an existing ONNX Runtime tensor into a new message and
+publishes it:
+
+```python
+import onnxruntime_conversions
+
+# Copy into a new message; the copy completes before this call returns.
+# Use the tensor producer's stream, or synchronize with it first.
+outgoing = onnxruntime_conversions.to_tensor_msg(ort_value, stream=stream)
+publisher.publish(outgoing)
+```
+
+Replace `ort_value`, `stream`, and `publisher` with your application's tensor,
+execution stream, and publisher.
+
+### Install or build
+
+Install the Debian packages:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py \
   ros-$ROS_DISTRO-onnxruntime-conversions-py-cpu
 ```
 
-Add CUDA support later:
+Or, from this repository's root after sourcing ROS, build from source:
 
 ```bash
-sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cuda
+rosdep install --from-paths \
+  $(colcon list --packages-up-to onnxruntime_conversions_py_cpu --paths-only) \
+  --ignore-src -y
+colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cpu
+source install/setup.bash
 ```
 
-For a Python CPU-only build, restrict rosdep to `tensor_msgs`,
-`onnxruntime_vendor/python_onnxruntime_vendor`, and the Python core/CPU plugin
-directories, then build only `onnxruntime_conversions_py_cpu`.
+## C++
 
 ### Publisher
 
-Create the stream and session once in the publisher. `model` is the
-application's model path or serialized model. The shape, dtype, and binding
-names must match the model; `input_value` must be ready on the session's stream.
+This example node demonstrates how to use `onnxruntime_conversions` in a
+C++ publisher. It runs an identity model once per second with a
+`480 × 640 × 3` float32 input filled with `42`, writes inference output directly
+into message storage, and publishes it on the `tensor` topic. The `model_path`
+argument points to a model with input `input` and output `output`, both using
+that shape and dtype:
 
-```python
-import numpy as np
-import onnxruntime as ort
-from onnxruntime_conversions import allocate_tensor_msg
-from onnxruntime_conversions import create_stream
-from onnxruntime_conversions import from_output_tensor_msg
-from onnxruntime_conversions import session_providers
+```cpp
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
 
-stream = create_stream()
-session = ort.InferenceSession(
-    model, providers=session_providers(stream=stream))
+#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
+#include "rclcpp/rclcpp.hpp"
 
-msg = allocate_tensor_msg((480, 640, 3), np.float32, stream=stream)
-output = from_output_tensor_msg(msg, stream)
-binding = session.io_binding()
-binding.bind_ortvalue_input('input', input_value)
-binding.bind_ortvalue_output('output', output.value)
-session.run_with_iobinding(binding)
-publisher.publish(msg)
+class ExampleTensorPublisher : public rclcpp::Node
+{
+public:
+  explicit ExampleTensorPublisher(const std::string & model_path)
+  : Node("example_tensor_publisher"),
+    env_(ORT_LOGGING_LEVEL_WARNING, "example_tensor_publisher"),
+    // Create a stream for the default plugin (empty on CPU).
+    stream_(onnxruntime_conversions::create_stream(env_)),
+    input_data_(480 * 640 * 3, 42.0f)
+  {
+    Ort::SessionOptions options;
+    // Configure inference to use the same backend and stream.
+    onnxruntime_conversions::configure_session_options(options, stream_);
+    session_ = Ort::Session(env_, model_path.c_str(), options);
+    auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    input_value_ = Ort::Value::CreateTensor<float>(
+      memory, input_data_.data(), input_data_.size(), shape_.data(), shape_.size());
+    publisher_ = create_publisher<onnxruntime_conversions::TensorMsg>("tensor", 10);
+    timer_ = create_wall_timer(
+      std::chrono::seconds(1), [this]() {publish_tensor();});
+  }
+
+private:
+  void publish_tensor()
+  {
+    // Allocate message storage on the stream's device.
+    auto msg = onnxruntime_conversions::allocate_tensor_msg(
+      shape_, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, stream_);
+    {
+      // Create a writable view; output.value() exposes its Ort::Value.
+      auto output = onnxruntime_conversions::from_output_tensor_msg(*msg, stream_);
+
+      // Application code: run inference directly into message storage.
+      Ort::IoBinding binding(session_);
+      binding.BindInput("input", input_value_);
+      binding.BindOutput("output", output.value());
+      session_.Run(Ort::RunOptions{}, binding);
+    }  // Release the binding and view before handing the message to the publisher.
+
+    publisher_->publish(std::move(msg));
+  }
+
+  Ort::Env env_;
+  onnxruntime_conversions::Stream stream_;
+  Ort::Session session_{nullptr};
+  const std::vector<int64_t> shape_{480, 640, 3};
+  std::vector<float> input_data_;
+  Ort::Value input_value_{nullptr};
+  rclcpp::Publisher<onnxruntime_conversions::TensorMsg>::SharedPtr publisher_;
+  rclcpp::TimerBase::SharedPtr timer_;
+};
 ```
 
-Allocation, conversion, and the session use the same stream. Inference writes
-directly into message storage; no `to_tensor_msg()` copy is needed.
-
-To borrow a caller-owned stream, replace only stream creation:
-
-```python
-from onnxruntime_conversions import borrow_stream
-
-stream = borrow_stream(existing_stream, 'cuda', device_id=0)
-```
-
-The native handle is an integer. Keep its owner alive until the session, views,
-and queued work finish; the borrowed wrapper does not extend that ownership.
+Replace the model path, input data, shape, dtype, and binding names with those
+required by your model. Bind the model output to `output.value()` so inference
+writes into the message storage.
 
 ### Subscriber
 
-Create a stream once in the subscriber and use it in the callback. The
-application function `consume()` must treat the input as read-only and use the
-supplied stream, or a session configured with that stream.
+This example node demonstrates how to use `onnxruntime_conversions` in a
+C++ subscriber. It reads each received tensor through a view and runs a
+model that computes its mean, logging `42.0` for messages from the publisher
+above. The `model_path` argument points to a model with a `480 × 640 × 3` float32
+input named `input` and a single float32 mean value named `output`. The node
+accepts both CPU and accelerator-backed buffers:
 
-```python
-from onnxruntime_conversions import create_stream
-from onnxruntime_conversions import from_input_tensor_msg
+```cpp
+#include <string>
 
-stream = create_stream()
+#include "onnxruntime_conversions/onnxruntime_conversions.hpp"
+#include "rclcpp/rclcpp.hpp"
 
+class ExampleTensorSubscriber : public rclcpp::Node
+{
+public:
+  explicit ExampleTensorSubscriber(const std::string & model_path)
+  : Node("example_tensor_subscriber"),
+    env_(ORT_LOGGING_LEVEL_WARNING, "example_tensor_subscriber"),
+    // Create a stream for the default plugin (empty on CPU).
+    stream_(onnxruntime_conversions::create_stream(env_))
+  {
+    Ort::SessionOptions session_options;
+    // Configure inference to use the same backend and stream.
+    onnxruntime_conversions::configure_session_options(session_options, stream_);
+    session_ = Ort::Session(env_, model_path.c_str(), session_options);
+    rclcpp::SubscriptionOptions options;
+    // Accept CPU and accelerator-backed message buffers.
+    options.acceptable_buffer_backends = "any";
+    subscription_ = create_subscription<onnxruntime_conversions::TensorMsg>(
+      "tensor", 10,
+      [this](onnxruntime_conversions::TensorMsg::ConstSharedPtr received) {
+        receive_tensor(*received);
+      }, options);
+  }
 
-def callback(received):
-    view = from_input_tensor_msg(received, stream)
-    consume(view.value, stream)
+private:
+  void receive_tensor(const onnxruntime_conversions::TensorMsg & received)
+  {
+    // View the message storage directly; treat it as read-only.
+    auto input_tensor = onnxruntime_conversions::from_input_tensor_msg(received, stream_);
+
+    // Application code: run the mean model and log its scalar output.
+    Ort::IoBinding binding(session_);
+    binding.BindInput("input", input_tensor.value());
+    binding.BindOutput(
+      "output", Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault));
+    session_.Run(Ort::RunOptions{}, binding);
+    const auto outputs = binding.GetOutputValues();
+    const auto mean = outputs.front().GetTensorData<float>()[0];
+
+    RCLCPP_INFO(get_logger(), "Mean pixel value: %.1f", static_cast<double>(mean));
+  }
+
+  Ort::Env env_;
+  onnxruntime_conversions::Stream stream_;
+  Ort::Session session_{nullptr};
+  rclcpp::Subscription<onnxruntime_conversions::TensorMsg>::SharedPtr subscription_;
+};
 ```
 
-Keep `stream` alive for the subscription and its queued work.
-
-Both conversion functions return an `OrtTensorView` whose `.value` is a native
-`OrtValue`; empty buffers return `None`. Unlike C++, the Python native value
-retains the storage and access handle through DLPack, even after the wrapper
-is released.
-
-The wrapper's `with` syntax is optional. It drops the wrapper's references on
-exit, but does not release values or I/O bindings retained elsewhere, and does
-not synchronize the stream. The examples need neither `with` for views nor
-explicit `del` statements.
+Replace the mean model, binding names, and logging with your own inference and
+result processing.
 
 ### Existing tensors
 
-Use `to_tensor_msg()` only when copying an already-existing ONNX Runtime tensor
-into a message. Use the stream associated with its producer:
+This example copies an existing ONNX Runtime tensor into a new message and
+publishes it:
 
-```python
-from onnxruntime_conversions import to_tensor_msg
-
-outgoing = to_tensor_msg(ort_value, stream=stream)
-publisher.publish(outgoing)
+```cpp
+// Copy into a new message; the copy completes before this call returns.
+// Use the tensor producer's stream, or synchronize with it first.
+auto outgoing = onnxruntime_conversions::to_tensor_msg(ort_value, stream);
+publisher->publish(std::move(outgoing));
 ```
 
-Copies complete before returning. Passing a stream here does not change the
-producer session's stream; synchronize explicitly if they differ.
+Replace `ort_value`, `stream`, and `publisher` with your application's tensor,
+execution stream, and publisher.
+
+### Install or build
+
+Install the Debian packages:
+
+```bash
+sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions \
+  ros-$ROS_DISTRO-onnxruntime-conversions-cpu
+```
+
+Or, from this repository's root after sourcing ROS, build from source:
+
+```bash
+rosdep install --from-paths \
+  $(colcon list --packages-up-to onnxruntime_conversions_cpu --paths-only) \
+  --ignore-src -y
+colcon build --merge-install --packages-up-to onnxruntime_conversions_cpu
+source install/setup.bash
+```
+
+## Accelerated devices
+
+With the CPU packages above installed, the examples run on CPU by default when
+no accelerator plugin is installed. To use an accelerated device, install or
+build the corresponding plugin for the language you use. Plugins can be added
+without rebuilding the conversion core or your application.
+
+Accelerator backends enable **zero-copy transport from publisher to subscriber**
+when they can share device memory: the subscriber accesses the publisher's tensor
+payload without copying it or transferring it to host memory. The publisher
+example binds inference output to message storage, and the subscriber binds
+that storage directly as inference input.
+
+For example, install the CUDA plugin from Debian packages:
+
+```bash
+# Python
+sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-py-cuda
+# C++
+sudo apt install ros-$ROS_DISTRO-onnxruntime-conversions-cuda
+```
+
+Or, from this repository's root, build the plugin for your language. Each
+rosdep command selects only that plugin and its dependencies:
+
+Python:
+
+```bash
+rosdep install --from-paths \
+  $(colcon list --packages-up-to onnxruntime_conversions_py_cuda --paths-only) \
+  --ignore-src -y
+colcon build --merge-install --packages-up-to onnxruntime_conversions_py_cuda
+source install/setup.bash
+```
+
+C++:
+
+```bash
+rosdep install --from-paths \
+  $(colcon list --packages-up-to onnxruntime_conversions_cuda --paths-only) \
+  --ignore-src -y
+colcon build --merge-install --packages-up-to onnxruntime_conversions_cuda
+source install/setup.bash
+```
+
+C++ discovers plugins on first registry use; Python discovers them when the
+module is imported. After installing or building a plugin, source the ROS
+environment and restart the application.
+
+When the device and a compatible ONNX Runtime provider are available, the plugin
+participates in automatic backend selection. Each plugin defines its priority in
+its implementation. Currently, the CPU plugin has priority `0` and the CUDA
+example plugin has priority `100`, in both Python and C++. Stream creation,
+allocation, and session setup use the available plugin with the highest priority.
+Pass an explicit `backend` to `create_stream` to select the backend for a node.
+
+Use the same stream for conversions and inference. Applications with an existing
+native stream can wrap it with `borrow_stream`; keep its owner alive while the
+session and tensor views use it. In C++, the `Ort::Env` must outlive the stream.
+
+## Requirements and package structure
+
+### Requirements
+
+| Component | Debian packages | Source builds |
+| --- | --- | --- |
+| Ubuntu / ROS | Ubuntu **26.04** (Resolute), with ROS 2 Lyrical or Rolling. | A ROS 2 Lyrical or Rolling environment. On Ubuntu **24.04** (Noble), build ROS 2 Lyrical from source. |
+| ONNX Runtime | Version **1.29.0**, supplied by the ROS vendor packages. | Reuses compatible installations of **>=1.23.0 for C++** or **>=1.26.0 for Python**; otherwise, the vendor packages download **1.29.0**. |
+| CUDA Toolkit (example plugin) | The `cuda-toolkit` dependency, installed through APT. | An installed toolkit compatible with the selected provider (**>=13.1** for the pinned fallback); `rosdep` can install `cuda-toolkit` if needed. |
+| cuDNN (example plugin) | Version **9.24.0.43**, supplied by the CUDA vendor package. | A reused ONNX Runtime provider needs its matching cuDNN libraries. The pinned fallback reuses compatible cuDNN **>=9.24,<10** for the toolkit's CUDA major version, or supplies **9.24.0.43**. |
+
+The CUDA plugin requires a CUDA-enabled ONNX Runtime provider. CPU plugins do
+not require CUDA or cuDNN. Reusing a C++ SDK requires its headers, libraries, and
+version metadata (`onnxruntimeConfigVersion.cmake` or `VERSION_NUMBER`).
+
+Both APIs require contiguous, row-major tensors. Explicit strides must match
+the contiguous strides for the shape; an empty `strides` field uses that layout.
+A nonzero `byte_offset` is supported when the tensor fits within the buffer.
+
+For Ubuntu 24.04 source builds, see the
+[ROS 2 Lyrical platform requirements](https://github.com/ros2/ros2_documentation/blob/lyrical/source/Releases/lyrical/supported-platforms.rst).
+
+### Package structure
+
+| Role | C++ | Python |
+| --- | --- | --- |
+| Public API and plugin registry | `onnxruntime_conversions` | `onnxruntime_conversions_py` |
+| CPU plugin | `onnxruntime_conversions_cpu` | `onnxruntime_conversions_py_cpu` |
+| CUDA plugin | `onnxruntime_conversions_cuda` | `onnxruntime_conversions_py_cuda` |
 
 ## License
 

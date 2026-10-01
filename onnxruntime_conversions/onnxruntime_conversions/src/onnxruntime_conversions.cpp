@@ -18,7 +18,6 @@
 #include <dlfcn.h>
 #endif
 
-#include <cstdlib>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -106,11 +105,6 @@ public:
 
   std::string default_name() const
   {
-    const char * requested = std::getenv("ROSIDL_TENSOR_BACKEND");
-    if (requested != nullptr && *requested != '\0') {
-      (void)for_backend(requested);
-      return requested;
-    }
     std::string selected;
     int selected_priority = std::numeric_limits<int>::min();
     for (const auto & entry : backends_) {

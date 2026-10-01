@@ -60,19 +60,16 @@ def identity_session():
         identity_model((2, 3)), providers=session_providers('cpu'))
 
 
-def test_cpu_stream_selection_and_validation(monkeypatch):
-    monkeypatch.setenv('ROSIDL_TENSOR_BACKEND', 'cpu')
-    stream = create_stream()
+def test_cpu_stream_selection_and_validation():
+    stream = create_stream('cpu')
     assert stream.backend == 'cpu'
     assert stream.device_id == 0
     assert stream.handle is None
     assert not stream.owns_stream
     assert borrow_stream(None, 'cpu') == stream
-    monkeypatch.setenv('ROSIDL_TENSOR_BACKEND', 'unavailable')
-    assert create_stream('cpu') == stream
     assert session_providers(stream=stream) == ['CPUExecutionProvider']
     with pytest.raises(RuntimeError, match='unavailable'):
-        create_stream()
+        create_stream('unavailable')
     with pytest.raises(ValueError, match='device 0'):
         create_stream('cpu', 1)
     with pytest.raises(ValueError, match='null handle'):

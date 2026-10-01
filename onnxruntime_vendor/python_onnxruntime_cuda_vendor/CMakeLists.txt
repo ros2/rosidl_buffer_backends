@@ -17,10 +17,9 @@ python_provider_find_compatible(onnxruntime "${PYTHON_ONNXRUNTIME_VENDOR_SUPPORT
 if(_reuse_root)
   python_provider_reuse_hooks("${_reuse_root}")
 else()
-  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "13.1" OR
-      NOT CUDAToolkit_VERSION VERSION_LESS "14")
+  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "13.1")
     message(FATAL_ERROR "${PROJECT_NAME}: the pinned ONNX Runtime 1.29.0 CUDA fallback requires "
-      "CUDA >=13.1,<14; selected toolkit is '${CUDAToolkit_VERSION}'. Install CUDA 13.1 through "
+      "CUDA >=13.1; selected toolkit is '${CUDAToolkit_VERSION}'. Install CUDA 13.1 through "
       "rosdep/APT and select it with -DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
   endif()
   set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION "${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION}")

@@ -14,7 +14,6 @@
 
 from dataclasses import dataclass
 from importlib import import_module
-import os
 from typing import Optional
 from typing import Protocol
 from typing import Sequence
@@ -25,7 +24,6 @@ from rosidl_buffer import Buffer
 
 
 PLUGIN_RESOURCE_TYPE = 'onnxruntime_conversions__python_plugins'
-BACKEND_ENVIRONMENT_VARIABLE = 'ROSIDL_TENSOR_BACKEND'
 
 
 @dataclass(frozen=True)
@@ -123,9 +121,6 @@ class ConversionRegistry:
         return sorted(self._by_backend)
 
     def default_backend(self) -> str:
-        requested = os.environ.get(BACKEND_ENVIRONMENT_VARIABLE)
-        if requested:
-            return self.for_backend(requested).backends[0]
         if not self._by_backend:
             raise RuntimeError('No ONNX Runtime conversion plugin is installed')
         return max(
