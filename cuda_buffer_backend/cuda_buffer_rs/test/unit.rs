@@ -219,15 +219,15 @@ mod typed {
             let address = {
                 let mut output = from_output_buffer::<u32>(&mut data, &stream).unwrap();
                 let address = output.get_ptr() as usize as u64;
-                // SAFETY: only inspect the view; ownership and metadata stay unchanged.
-                let view: &mut DeviceBuffer<u32> = unsafe { output.as_device_buffer() };
+                // Only inspect the view; ownership and metadata stay unchanged.
+                let view: &mut DeviceBuffer<u32> = output.as_device_buffer();
                 assert_eq!(view.cu_deviceptr(), address);
                 output.copy_from_host(&[11, 13, 17, 19]).unwrap();
                 address
             };
             let input = from_input_buffer::<u32>(&data, &stream).unwrap();
-            // SAFETY: only inspect the read-only view.
-            let view: &DeviceBuffer<u32> = unsafe { input.as_device_buffer() };
+            // Only inspect the read-only view.
+            let view: &DeviceBuffer<u32> = input.as_device_buffer();
             assert_eq!(view.cu_deviceptr(), address);
             assert_eq!(input.len(), 4);
             assert_eq!(input.to_host_vec().unwrap(), [11, 13, 17, 19]);
@@ -245,16 +245,14 @@ mod typed {
             let mut data = allocate_buffer(size_of_val(&values)).unwrap();
             {
                 let mut output = from_output_buffer::<u32>(&mut data, &stream).unwrap();
-                // SAFETY: values stays live and unchanged through stream synchronization.
-                unsafe {
-                    to_buffer(
-                        values.as_ptr().cast(),
-                        size_of_val(&values),
-                        &mut output,
-                        &stream,
-                        CopyKind::HostToDevice,
-                    )
-                }
+                // Keep values live and unchanged through stream synchronization.
+                to_buffer(
+                    values.as_ptr().cast(),
+                    size_of_val(&values),
+                    &mut output,
+                    &stream,
+                    CopyKind::HostToDevice,
+                )
                 .unwrap();
                 stream.synchronize().unwrap();
             }
@@ -284,16 +282,14 @@ mod typed {
                 callback_gate.store(true, Ordering::Release);
             })
             .unwrap();
-        // SAFETY: source and its completed contents remain live through the consumer read.
-        let copied = unsafe {
-            to_buffer(
-                source.cu_deviceptr() as usize as *const c_void,
-                size_of_val(&values),
-                &mut output,
-                &producer,
-                CopyKind::DeviceToDevice,
-            )
-        };
+        // Keep source and its completed contents live through the consumer read.
+        let copied = to_buffer(
+            source.cu_deviceptr() as usize as *const c_void,
+            size_of_val(&values),
+            &mut output,
+            &producer,
+            CopyKind::DeviceToDevice,
+        );
         let returned_before_gate_opened = !gate.load(Ordering::Acquire);
         copied.unwrap();
         let input = from_input_buffer::<u32>(&data, &consumer).unwrap();
@@ -321,23 +317,19 @@ mod typed {
                 (values.as_ptr().cast(), 5, &stream),
                 (values.as_ptr().cast(), 4, &other),
             ] {
-                // SAFETY: invalid arguments must be rejected before submitting a copy.
-                let error = unsafe {
-                    to_buffer(source, size, &mut output, selected, CopyKind::HostToDevice)
-                }
-                .unwrap_err();
+                // Invalid arguments must be rejected before submitting a copy.
+                let error = to_buffer(source, size, &mut output, selected, CopyKind::HostToDevice)
+                    .unwrap_err();
                 assert_eq!(error.kind, ErrorKind::InvalidArgument);
             }
-            // SAFETY: zero bytes access no source memory.
-            unsafe {
-                to_buffer(
-                    std::ptr::null(),
-                    0,
-                    &mut output,
-                    &other,
-                    CopyKind::HostToDevice,
-                )
-            }
+            // Zero bytes access no source memory.
+            to_buffer(
+                std::ptr::null(),
+                0,
+                &mut output,
+                &other,
+                CopyKind::HostToDevice,
+            )
             .unwrap();
             output.copy_from_host(&values).unwrap();
         }
@@ -357,16 +349,14 @@ mod typed {
         for stream in [context.default_stream(), context.new_stream().unwrap()] {
             let mut data = allocate_buffer(VALUES.len()).unwrap();
             let mut output = from_output_buffer::<u8>(&mut data, &stream).unwrap();
-            // SAFETY: VALUES remains valid through the queued copy.
-            unsafe {
-                to_buffer(
-                    VALUES.as_ptr().cast(),
-                    VALUES.len(),
-                    &mut output,
-                    &stream,
-                    CopyKind::HostToDevice,
-                )
-            }
+            // Static VALUES remains valid through the queued copy.
+            to_buffer(
+                VALUES.as_ptr().cast(),
+                VALUES.len(),
+                &mut output,
+                &stream,
+                CopyKind::HostToDevice,
+            )
             .unwrap();
             drop(data);
             stream.synchronize().unwrap();

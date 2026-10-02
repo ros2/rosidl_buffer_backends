@@ -249,12 +249,13 @@ impl<T: DeviceCopy> CudaReadHandle<'_, T> {
 
     /// Borrow a cuda-core buffer view without copying.
     ///
-    /// # Safety
+    /// # Caller requirements
     /// Submit all work on this handle's stream while its owner is borrowed.
     /// Complete submission before publishing the buffer or releasing the handle.
     /// Keep the pointer, length, context, and allocation owner unchanged.
     /// Access through this immutable facade must be read-only.
-    pub unsafe fn as_device_buffer(&self) -> &DeviceBuffer<T> {
+    /// These requirements are not enforced by the returned reference.
+    pub fn as_device_buffer(&self) -> &DeviceBuffer<T> {
         self.access.buffer()
     }
 
@@ -292,12 +293,14 @@ impl<T: DeviceCopy> CudaWriteHandle<'_, T> {
 
     /// Borrow a mutable cuda-core buffer view without copying.
     ///
-    /// # Safety
+    /// # Caller requirements
     /// Submit all work on this handle's stream while its owner is borrowed.
     /// Complete submission before publishing the buffer or releasing the handle.
     /// Never replace, move out, reallocate, or destroy the view. Its pointer,
-    /// length, and context must stay fixed.
-    pub unsafe fn as_device_buffer(&mut self) -> &mut DeviceBuffer<T> {
+    /// length, and context must stay fixed. In particular, do not use
+    /// `std::mem::replace` or `std::mem::swap` on this reference.
+    /// These requirements are not enforced by the returned reference.
+    pub fn as_device_buffer(&mut self) -> &mut DeviceBuffer<T> {
         self.access.buffer_mut()
     }
 }
@@ -319,12 +322,17 @@ pub enum CopyKind {
 /// synchronize. Read acquisition, publication, owner destruction, or handle
 /// cleanup records the producer event after the queued work.
 ///
-/// # Safety
+/// # Caller requirements
 /// `source` must identify at least `byte_count` readable bytes of the selected
 /// memory kind, accessible from this CUDA context and not overlapping the
 /// destination. Keep the source allocation alive and unchanged until the copy
 /// completes, and order any producer of the source before this copy on `stream`.
-pub unsafe fn to_buffer<T: DeviceCopy>(
+/// The source's validity and lifetime cannot be checked by this function.
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "Source validity and asynchronous lifetime are documented caller requirements"
+)]
+pub fn to_buffer<T: DeviceCopy>(
     source: *const std::ffi::c_void,
     byte_count: usize,
     output: &mut CudaWriteHandle<'_, T>,

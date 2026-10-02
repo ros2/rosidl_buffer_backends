@@ -183,23 +183,14 @@ cuda_buffer_backend::ReadHandle rh =
 
 ### Rust (rclrs)
 
-The `cuda_buffer_rs` package exposes the same scoped input/output model to
-rclrs, with typed `cuda-core` read and write handles. Message fields and standalone
-allocations use `rosidl_runtime_rs::Buffer<u8>` as their owning type.
-`cuda_buffer_rs::allocate_buffer()` creates CUDA storage in that type;
-`from_input_buffer()` and `from_output_buffer()` borrow it for CUDA access.
-The native backend owns GPU allocations and records synchronization events.
+`cuda_buffer_rs` provides four APIs: `allocate_buffer`, `from_output_buffer`,
+`to_buffer`, and `from_input_buffer`. Storage belongs to
+`rosidl_runtime_rs::Buffer<u8>`; scoped handles expose borrowed
+`cuda_core::DeviceBuffer<T>` views. The native backend owns allocations and events.
 
-The `cuda-core` feature is enabled by default. Use `default-features = false`
-in a dependency declaration, or `--no-default-features` with Cargo, to build
-only the low-level raw-pointer API.
-
-These snippets use an existing ROS `node`. `produce_device_data` and
-`consume_device_data` are application-defined kernel-launch helpers, not backend
-APIs. They accept `&mut cuda_core::DeviceBuffer<u8>` and
-`&cuda_core::DeviceBuffer<u8>`, respectively, plus the CUDA stream. Each helper
-must enqueue all buffer access on that stream before returning, without taking
-ownership of or replacing the borrowed buffer.
+The examples use an existing ROS `node`. `produce_device_data` and
+`consume_device_data` are application-defined kernel helpers, not backend APIs;
+they validate kernel arguments and handle any unsafe launch operations internally.
 
 #### Publisher (direct write, zero-copy)
 
@@ -216,44 +207,42 @@ let mut image = Image {
     width: 640,
     encoding: "rgb8".into(),
     step: 640 * 3,
+    // Backend API: allocate CUDA storage owned by the message.
     data: allocate_buffer(640 * 480 * 3)?,
     ..Default::default()
 };
 {
+    // Backend API: borrow writable CUDA access on this stream.
     let mut output = from_output_buffer::<u8>(&mut image.data, &stream)?;
-    unsafe {
-        produce_device_data(output.as_device_buffer(), &stream);
-    }
-} // Handle cleanup records the write event on this stream.
+    // Application code: launch a kernel that initializes the entire buffer.
+    produce_device_data(output.as_device_buffer(), &stream);
+} // Drop records the write event; it does not wait for completion.
 publisher.publish(image)?;
 ```
 
-Queue a kernel that writes the entire buffer on `stream`.
-
 #### Publisher (copy from an existing pointer)
 
-With `image.data` already allocated, copy from an existing device allocation:
+With `image.data` already allocated:
 
 ```rust
 use cuda_buffer_rs::{from_output_buffer, to_buffer, CopyKind};
 
 {
     let mut output = from_output_buffer::<u8>(&mut image.data, &stream)?;
-    unsafe {
-        to_buffer(
-            gpu_ptr,
-            byte_count,
-            &mut output,
-            &stream,
-            CopyKind::DeviceToDevice,
-        )?;
-    }
+    // Backend API: enqueue a copy from the application's device allocation.
+    to_buffer(
+        gpu_ptr,
+        byte_count,
+        &mut output,
+        &stream,
+        CopyKind::DeviceToDevice,
+    )?;
 }
 publisher.publish(image)?;
 ```
 
-Use `CopyKind::HostToDevice` for a host pointer. Keep the source allocation valid
-until the copy completes, and order its producer before the copy.
+Use `CopyKind::HostToDevice` for a host pointer. This path copies data;
+the direct-write example above does not.
 
 #### Subscriber (read from a buffer, zero-copy)
 
@@ -268,61 +257,29 @@ let stream = context.new_stream()?;
 let subscription = node.create_subscription::<Image, _>(
     SubscriptionOptions::new("image").acceptable_buffer_backends("cuda"),
     move |image: Image| {
+        // Backend API: borrow readable CUDA access, ordered after the producer.
         let input = from_input_buffer::<u8>(&image.data, &stream).unwrap();
-        unsafe {
-            consume_device_data(input.as_device_buffer(), &stream);
-        }
+        // Application code: launch a read-only kernel on the same stream.
+        consume_device_data(input.as_device_buffer(), &stream);
     },
 )?;
 ```
 
-`input.as_device_buffer()` borrows the received CUDA storage without copying.
-For CPU input, `from_input_buffer` uploads the data to a temporary allocation
-owned by the read handle.
-
-CPU applications can keep `sensor_msgs::msg::Image` and its `Vec<u8>` payload.
-For CPU-backed `msg::buffer::Image`, use `data.as_slice()` to borrow the pixels.
+CUDA input is borrowed without copying. CPU input is uploaded to temporary
+storage owned by the read handle; CPU output is replaced with uninitialized
+CUDA storage. CPU-only applications can keep the ordinary `Image` with `Vec<u8>`.
 
 #### Rust kernel interoperability
 
-[cuda-oxide's typed launch API](https://nvlabs.github.io/cuda-oxide/gpu-programming/launching-kernels.html)
-accepts `&DeviceBuffer<T>` for read-only slice arguments and
-`&mut DeviceBuffer<T>` for writable slice arguments. The helpers above can pass
-the borrowed views directly to that API; no raw-pointer extraction or buffer
-copy is needed. The launcher marshals the device address and element count.
-Use a cuda-oxide release whose `cuda-core` dependency resolves to the same
-crate version and source as this backend (currently pinned to `0.3.1`).
+[cuda-oxide](https://nvlabs.github.io/cuda-oxide/gpu-programming/launching-kernels.html)
+accepts the borrowed `&DeviceBuffer<T>` / `&mut DeviceBuffer<T>` views directly,
+without a copy. Its `cuda-core` version and source must match this backend
+(currently `0.3.1`).
+[cuTile Rust](https://github.com/NVlabs/cutile-rs#quick-start) uses tensor wrappers;
+a compatible borrowing adapter is not yet provided.
 
-[cuTile Rust](https://github.com/NVlabs/cutile-rs#quick-start) shares the
-`cuda-core` runtime, but its high-level launch API uses tensors and partitioned
-outputs, not bare `DeviceBuffer` borrows. This backend does not yet provide a
-cuTile tensor adapter. Such an adapter must preserve backend ownership and
-stream ordering; an API that takes ownership of a buffer cannot consume these
-borrowed views directly.
-
-Use `get_ptr()` only when a lower-level CUDA API requires a raw device pointer.
-
-#### Ownership and streams
-
-- CUDA-backed input and output reuse the backend allocation. CPU input is copied
-  to temporary CUDA storage; CPU output is replaced with uninitialized CUDA
-  storage of the same byte length.
-- Read handles borrow their source. Write handles permit one initialization
-  phase; queue all writes before publishing or reading the buffer.
-- Handle cleanup records native access events and releases its retained stream.
-  The backend frees or recycles the allocation after outstanding GPU work.
-- Queue kernels and memory operations on the handle's stream. A
-  `cuda_core::CudaStream` default stream means CUDA stream 0. The low-level
-  `cuda_buffer_rs::CudaStream::INTERNAL` instead selects the backend's internal
-  stream, resolved to its actual pointer before calling the C API.
-
-`as_device_buffer()` borrows a `cuda_core::DeviceBuffer` view without copying:
-read handles return `&DeviceBuffer<T>`, and write handles return
-`&mut DeviceBuffer<T>`. Both methods are unsafe: callers must follow the
-handle's stream contract and must not replace, resize, free, or take ownership
-of the view. The view's normal allocator destructor must never run on the
-backend's VMM allocation. Use `to_host_vec()` or `copy_from_host()` for checked,
-synchronous host transfers.
+The `cuda-core` feature is enabled by default. Disable it with
+`default-features = false` for only the low-level raw-pointer API.
 
 ## IPC Behavior
 

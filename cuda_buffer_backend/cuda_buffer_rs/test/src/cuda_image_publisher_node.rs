@@ -61,9 +61,9 @@ fn publish_image(
     };
     image.header.stamp.sec = sequence as i32;
     let mut output = from_output_buffer::<u8>(&mut image.data, stream).unwrap();
-    // SAFETY: borrow only the address; the facade is never replaced or freed.
+    // Borrow only the address; the facade is never replaced or freed.
     // All writes below use the handle's stream, before publishing its owner.
-    let mut address = unsafe { output.as_device_buffer() }.cu_deviceptr();
+    let mut address = output.as_device_buffer().cu_deviceptr();
     let mut size = BYTES as u32;
     let mut seed = sequence;
     let mut args = [

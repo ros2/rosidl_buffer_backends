@@ -45,7 +45,7 @@ impl CudaStream {
     ///
     /// # Safety
     ///
-    /// `raw` must be null or a live `cudaStream_t` that outlives every guard
+    /// `raw` must be null or a live `cudaStream_t` that outlives every handle
     /// acquired with it.
     pub const unsafe fn from_raw(raw: *mut c_void) -> Self {
         Self(raw)
@@ -304,7 +304,7 @@ pub fn write_buffer(buffer: &mut Buffer<u8>, stream: CudaStream) -> Result<CudaW
         }
     };
     // SAFETY: raw refers to CUDA storage owned by buffer or promoted. The
-    // returned guard borrows buffer, which receives any promoted allocation.
+    // returned handle borrows buffer, which receives any promoted allocation.
     let handle = unsafe { WriteHandle::acquire(&mut raw, stream) }?;
     if let Some(allocation) = promoted {
         *buffer = allocation;
