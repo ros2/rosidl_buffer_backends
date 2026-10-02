@@ -15,7 +15,10 @@
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #include "cuda_buffer/cuda_buffer_api.hpp"
@@ -347,4 +350,62 @@ int main(int argc, char ** argv)
 {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+TEST_F(CudaBufferTest, ReadFinalizesFloatingWriter)
+{
+  for (cudaStream_t producer : {static_cast<cudaStream_t>(nullptr), stream1_}) {
+    auto buffer = cuda_buffer_backend::allocate_buffer(64);
+    auto output = cuda_buffer_backend::from_output_buffer(buffer, producer);
+    ASSERT_EQ(cudaSuccess, cudaMemsetAsync(output.get_ptr(), 42, 64, producer));
+    auto input = cuda_buffer_backend::from_input_buffer(buffer, stream2_);
+    EXPECT_EQ(read_to_host(input.get_ptr(), 64, stream2_), std::vector<uint8_t>(64, 42));
+    EXPECT_THROW(
+      cuda_buffer_backend::from_output_buffer(buffer, producer),
+      cuda_buffer_backend::CudaError);
+  }
+}
+
+TEST_F(CudaBufferTest, DestructionFinalizesFloatingWriterBeforeRecycling)
+{
+  cudaStream_t nonblocking;
+  ASSERT_EQ(cudaSuccess, cudaStreamCreateWithFlags(&nonblocking, cudaStreamNonBlocking));
+  for (cudaStream_t producer : {static_cast<cudaStream_t>(nullptr), nonblocking}) {
+    uint8_t * data = nullptr;
+    ASSERT_EQ(cudaSuccess, cudaMalloc(&data, 4));
+    cudaEvent_t completion;
+    ASSERT_EQ(cudaSuccess, cudaEventCreateWithFlags(&completion, cudaEventDisableTiming));
+    auto recycled = std::make_shared<std::atomic<bool>>(false);
+    auto owner = std::make_unique<cuda_buffer_backend::CudaBuffer>(
+      data, 4, 0, [recycled](uint8_t * ptr) {
+        recycled->store(true);
+        cudaFree(ptr);
+      });
+    owner->set_write_event(completion, true);
+    auto output = owner->get_write_handle(producer);
+    auto gate = std::make_shared<std::atomic<bool>>(false);
+    auto callback_state = std::make_unique<std::shared_ptr<std::atomic<bool>>>(gate);
+    ASSERT_EQ(cudaSuccess, cudaLaunchHostFunc(
+      producer, [](void * state) {
+          std::unique_ptr<std::shared_ptr<std::atomic<bool>>> open(
+            static_cast<std::shared_ptr<std::atomic<bool>> *>(state));
+          auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+          while (!(*open)->load() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+          }
+      }, callback_state.get()));
+    callback_state.release();
+    ASSERT_EQ(cudaSuccess, cudaMemsetAsync(output.get_ptr(), 42, 4, producer));
+    owner.reset();
+    EXPECT_EQ(cudaErrorNotReady, cudaEventQuery(completion));
+    EXPECT_FALSE(recycled->load());
+    gate->store(true);
+    ASSERT_EQ(cudaSuccess, cudaStreamSynchronize(producer));
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!recycled->load() && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_TRUE(recycled->load());
+  }
+  EXPECT_EQ(cudaSuccess, cudaStreamDestroy(nonblocking));
 }

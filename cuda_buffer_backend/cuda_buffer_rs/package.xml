@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<!--
+Copyright 2026 Open Source Robotics Foundation, Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
+<package format="3">
+  <name>cuda_buffer_rs</name>
+  <version>0.1.0</version>
+  <description>Scoped Rust access to CUDA buffers and typed cuda-core views.</description>
+
+  <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
+  <license>Apache-2.0</license>
+  <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
+
+  <buildtool_depend version_gte="1.89">cargo</buildtool_depend>
+  <buildtool_depend version_gte="1.89">rustc</buildtool_depend>
+
+  <build_depend>libclang-dev</build_depend>
+  <build_export_depend>libclang-dev</build_export_depend>
+  <depend version_gte="13">nvidia-cuda</depend>
+  <depend>cuda_buffer</depend>
+  <depend>cuda_buffer_backend</depend>
+  <depend>rosidl_buffer</depend>
+  <depend>rosidl_runtime_rs</depend>
+
+  <test_depend>rmw_fastrtps_cpp</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ros</test_depend>
+  <test_depend>launch_ros</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>rclrs</test_depend>
+  <test_depend>std_msgs</test_depend>
+  <test_depend>sensor_msgs</test_depend>
+  <test_depend>rcl_interfaces</test_depend>
+  <test_depend>test_msgs</test_depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>

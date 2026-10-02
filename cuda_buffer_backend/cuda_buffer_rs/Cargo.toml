@@ -1,0 +1,49 @@
+# Copyright 2026 Open Source Robotics Foundation, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "cuda_buffer_rs"
+version = "0.1.0"
+authors = ["Yuankun Zhu <yuankunz@nvidia.com>"]
+edition = "2021"
+license = "Apache-2.0"
+description = "Rust bindings for the CUDA-backed rosidl::Buffer C ABI"
+readme = "../README.md"
+rust-version = "1.89"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = ["cuda-core"]
+cuda-core = ["dep:cuda-core"]
+
+[dependencies]
+rosidl_runtime_rs = "0.6"
+cuda-core = { version = "=0.3.1", optional = true }
+
+[dev-dependencies]
+rclrs = { version = "0.7", features = ["serde"] }
+ros-env = "=0.2.0"
+serde_json = "1"
+
+[[test]]
+name = "unit"
+path = "test/unit.rs"
+
+[[test]]
+name = "message_compatibility"
+path = "test/message_compatibility.rs"
+required-features = ["cuda-core"]
+
+[[example]]
+name = "cuda_buffer_rs_test_runner"
+path = "test/src/cuda_buffer_rs_test_runner.rs"
+required-features = ["cuda-core"]
+# Build the executable for launch tests, not an example test harness.
+test = false
+
+[[test]]
+name = "launch"
+path = "test/launch.rs"
+required-features = ["cuda-core"]
