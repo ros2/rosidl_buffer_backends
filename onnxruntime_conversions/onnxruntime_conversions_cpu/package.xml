@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>onnxruntime_conversions_cpu</name>
+  <version>0.1.2</version>
+  <description>CPU plugin for the ONNX Runtime conversion registry.</description>
+  <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
+  <license>Apache-2.0</license>
+  <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>onnxruntime_conversions</depend>
+  <depend>onnxruntime_core_vendor</depend>
+  <depend>pluginlib</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

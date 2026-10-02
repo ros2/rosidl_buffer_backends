@@ -1,0 +1,1 @@
+prepend-non-duplicate;PYTHONPATH;opt/@PROJECT_NAME@/@PYTHON_INSTALL_DIR@
