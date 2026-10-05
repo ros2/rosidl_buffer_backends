@@ -1,0 +1,15 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Image
+      Name: Detection Output
+      Topic:
+        Value: /usm/camera0/annotated
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Enabled: true
+  Global Options:
+    Fixed Frame: camera

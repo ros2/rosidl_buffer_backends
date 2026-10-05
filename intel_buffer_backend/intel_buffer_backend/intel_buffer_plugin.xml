@@ -1,0 +1,10 @@
+<!-- Copyright 2026 Open Source Robotics Foundation, Inc.
+     Licensed under the Apache License, Version 2.0 -->
+<library path="intel_buffer_backend">
+  <class name="intel_buffer"
+         type="intel_buffer_backend::IntelBufferBackend"
+         base_class_type="rosidl::BufferBackend">
+    <description>Intel USM backend for zero-copy buffer sharing across CPU, iGPU, IPU, and NPU
+    on Panther Lake (Intel Core Ultra 3) via Level Zero USM or DMA-BUF</description>
+  </class>
+</library>
