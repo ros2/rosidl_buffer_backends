@@ -3,14 +3,17 @@
 
 //! Scoped Rust access to native CUDA buffers.
 //!
-//! [`rosidl_runtime_rs::Buffer`] owns message storage; scoped handles order GPU
+//! [`rosidl_buffer_rs::Buffer`] owns message storage; scoped handles order GPU
 //! access through native CUDA events. The `cuda-core` feature adds typed access
 //! and retains the acquisition stream until handle cleanup. CUDA access handles
 //! are neither `Send` nor `Sync`.
 
 #![warn(unsafe_op_in_unsafe_fn)]
 
-pub mod ffi;
+#[cfg_attr(not(feature = "cuda-core"), allow(dead_code))]
+mod bridge;
+use bridge::ffi;
+use rosidl_buffer_rs::CxxBuffer;
 
 #[cfg(feature = "cuda-core")]
 mod cuda_core_adapter;
@@ -20,13 +23,13 @@ pub use cuda_core_adapter::{
     CudaReadHandle, CudaWriteHandle,
 };
 
-use std::ffi::CStr;
 use std::fmt;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
-use std::ptr::{self, NonNull};
+use std::pin::Pin;
+use std::ptr;
 
-use rosidl_runtime_rs::{Buffer, PrimitiveSequence};
+use rosidl_buffer_rs::{Buffer, PrimitiveSequence};
 
 /// A borrowed CUDA stream for the low-level buffer API.
 ///
@@ -69,7 +72,7 @@ impl CudaStream {
     }
 }
 
-/// Classification of a `cuda_buffer` C ABI failure.
+/// Classification of a native CUDA buffer failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
     InvalidArgument,
@@ -96,39 +99,33 @@ impl std::error::Error for CudaBufferError {}
 /// Result of a CUDA buffer operation.
 pub type Result<T> = std::result::Result<T, CudaBufferError>;
 
-fn check(ret: ffi::cuda_buffer_ret_t) -> Result<()> {
-    let kind = match ret {
-        ffi::CUDA_BUFFER_RET_OK => return Ok(()),
-        ffi::CUDA_BUFFER_RET_INVALID_ARGUMENT => ErrorKind::InvalidArgument,
-        ffi::CUDA_BUFFER_RET_BAD_ALLOC => ErrorKind::BadAlloc,
-        ffi::CUDA_BUFFER_RET_CUDA_ERROR => ErrorKind::Cuda,
-        _ => ErrorKind::Other,
-    };
-    Err(CudaBufferError {
-        kind,
-        message: last_error_message(),
+fn native_call<T>(
+    call: impl FnOnce(&mut ffi::NativeErrorKind) -> std::result::Result<T, cxx::Exception>,
+) -> Result<T> {
+    let mut kind = ffi::NativeErrorKind::Other;
+    call(&mut kind).map_err(|error| CudaBufferError {
+        kind: match kind {
+            ffi::NativeErrorKind::InvalidArgument => ErrorKind::InvalidArgument,
+            ffi::NativeErrorKind::BadAlloc => ErrorKind::BadAlloc,
+            ffi::NativeErrorKind::Cuda => ErrorKind::Cuda,
+            _ => ErrorKind::Other,
+        },
+        message: error.to_string(),
     })
 }
 
-fn last_error_message() -> String {
-    // SAFETY: the ABI returns a non-null, thread-local C string.
-    unsafe { CStr::from_ptr(ffi::cuda_buffer_error_message()) }
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn corrupt_abi(message: &str) -> CudaBufferError {
-    CudaBufferError {
-        kind: ErrorKind::Other,
-        message: message.to_string(),
-    }
+// SAFETY: raw must refer to a live native buffer for the returned lifetime.
+unsafe fn native_buffer<'a>(raw: *const c_void) -> Result<&'a CxxBuffer> {
+    unsafe { raw.cast::<CxxBuffer>().as_ref() }.ok_or_else(|| CudaBufferError {
+        kind: ErrorKind::InvalidArgument,
+        message: "native buffer must not be null".into(),
+    })
 }
 
 /// Get the backend's process-wide internal CUDA stream.
 pub fn internal_stream() -> Result<CudaStream> {
-    let mut raw = ptr::null_mut();
-    check(unsafe { ffi::cuda_buffer_internal_stream(&mut raw) })?;
-    Ok(unsafe { CudaStream::from_raw(raw) })
+    let raw = native_call(ffi::internal_stream)?;
+    Ok(unsafe { CudaStream::from_raw(raw as *mut c_void) })
 }
 
 /// Report whether an opaque `rosidl::Buffer<uint8_t> *` uses the CUDA backend.
@@ -137,7 +134,7 @@ pub fn internal_stream() -> Result<CudaStream> {
 ///
 /// `buffer` must be null or point to a live `rosidl::Buffer<uint8_t>`.
 pub unsafe fn is_cuda_backed(buffer: *const c_void) -> bool {
-    unsafe { ffi::cuda_buffer_is_cuda_backed(buffer) }
+    unsafe { native_buffer(buffer) }.is_ok_and(ffi::is_cuda_backed)
 }
 
 /// Allocate uninitialized CUDA bytes for a generated message field.
@@ -145,22 +142,34 @@ pub unsafe fn is_cuda_backed(buffer: *const c_void) -> bool {
 /// Uses the native CUDA pool without acquiring a handle or copying data.
 /// Initialize the output through `from_output_buffer` before publishing it.
 pub fn allocate_buffer(byte_count: usize) -> Result<Buffer<u8>> {
-    let mut raw = ptr::null_mut();
-    check(unsafe { ffi::cuda_buffer_allocate(byte_count, &mut raw) })?;
-    // SAFETY: successful allocation transfers a native byte buffer of this size.
-    // The sequence takes sole ownership and releases it through rosidl_buffer.
-    unsafe { PrimitiveSequence::from_owned_rosidl_buffer(raw, byte_count) }
-        .map(Buffer::from)
-        .ok_or_else(|| corrupt_abi("allocation returned a null buffer"))
+    let buffer = native_call(|error| ffi::allocate(byte_count, error))?;
+    rosidl_buffer_rs::native::into_buffer(buffer).map_err(|error| CudaBufferError {
+        kind: ErrorKind::Other,
+        message: error.to_string(),
+    })
 }
 
 /// Scoped native read access, released on drop.
 ///
 /// Prefer [`read_buffer`], which ties the handle to a borrow of the buffer.
+///
+/// The owner must remain alive through native handle cleanup:
+/// ```compile_fail,E0505
+/// use cuda_buffer_rs::{allocate_buffer, read_buffer, CudaStream};
+/// let buffer = allocate_buffer(4).unwrap();
+/// let _read = read_buffer(&buffer, CudaStream::INTERNAL).unwrap();
+/// drop(buffer);
+/// ```
 #[must_use]
 pub struct ReadHandle<'a> {
-    raw: NonNull<ffi::cuda_buffer_read_handle_t>,
+    raw: cxx::UniquePtr<ffi::CxxReadHandle>,
     _owner: PhantomData<&'a ()>,
+}
+
+impl Drop for ReadHandle<'_> {
+    fn drop(&mut self) {
+        // Keep the owner borrowed through the native destructor's event cleanup.
+    }
 }
 
 impl ReadHandle<'_> {
@@ -175,25 +184,27 @@ impl ReadHandle<'_> {
     /// returned handle. Enqueue work on `stream` before dropping the handle;
     /// the stream must remain live until then.
     pub unsafe fn acquire(buffer: *const c_void, stream: CudaStream) -> Result<Self> {
-        let mut raw = ptr::null_mut();
-        let stream = stream.resolve()?;
-        check(unsafe { ffi::cuda_buffer_acquire_read(buffer, stream, &mut raw) })?;
-        NonNull::new(raw)
-            .map(|raw| Self {
-                raw,
-                _owner: PhantomData,
-            })
-            .ok_or_else(|| corrupt_abi("read acquisition returned a null handle"))
+        unsafe { Self::acquire_exact(buffer, stream.resolve()?) }
+    }
+
+    unsafe fn acquire_exact(buffer: *const c_void, stream: *mut c_void) -> Result<Self> {
+        let buffer = unsafe { native_buffer(buffer) }?;
+        let raw =
+            native_call(|error| unsafe { ffi::acquire_read(buffer, stream as usize, error) })?;
+        Ok(Self {
+            raw,
+            _owner: PhantomData,
+        })
     }
 
     /// Device pointer to the readable bytes.
     pub fn device_ptr(&self) -> *const u8 {
-        unsafe { ffi::cuda_buffer_read_handle_data(self.raw.as_ptr()) }
+        self.raw.data()
     }
 
     /// Number of readable bytes.
     pub fn len(&self) -> usize {
-        unsafe { ffi::cuda_buffer_read_handle_size(self.raw.as_ptr()) }
+        self.raw.size()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -210,19 +221,13 @@ impl fmt::Debug for ReadHandle<'_> {
     }
 }
 
-impl Drop for ReadHandle<'_> {
-    fn drop(&mut self) {
-        unsafe { ffi::cuda_buffer_read_handle_destroy(self.raw.as_ptr()) };
-    }
-}
-
 /// Native write access, released on drop.
 ///
 /// Prefer [`write_buffer`], which ties the handle to a mutable borrow of the
 /// buffer.
 #[must_use]
 pub struct WriteHandle {
-    raw: NonNull<ffi::cuda_buffer_write_handle_t>,
+    raw: cxx::UniquePtr<ffi::CxxWriteHandle>,
 }
 
 impl WriteHandle {
@@ -239,22 +244,40 @@ impl WriteHandle {
     /// of the returned handle. Submit work before the buffer is published, read,
     /// or destroyed. The stream must remain live through handle cleanup.
     pub unsafe fn acquire(buffer: &mut *mut c_void, stream: CudaStream) -> Result<Self> {
-        let mut raw = ptr::null_mut();
-        let stream = stream.resolve()?;
-        check(unsafe { ffi::cuda_buffer_acquire_write(buffer, stream, &mut raw) })?;
-        NonNull::new(raw)
-            .map(|raw| Self { raw })
-            .ok_or_else(|| corrupt_abi("write acquisition returned a null handle"))
+        unsafe { Self::acquire_exact(buffer, stream.resolve()?) }
+    }
+
+    unsafe fn acquire_exact(buffer: &mut *mut c_void, stream: *mut c_void) -> Result<Self> {
+        let source = unsafe { native_buffer(*buffer) }?;
+        let promoted = if ffi::is_cuda_backed(source) {
+            cxx::UniquePtr::null()
+        } else {
+            native_call(|error| ffi::allocate(source.size(), error))?
+        };
+        let target = if promoted.is_null() {
+            *buffer as *mut CxxBuffer
+        } else {
+            promoted.as_mut_ptr()
+        };
+        // SAFETY: the caller exclusively borrows the original buffer. A
+        // promoted buffer is owned here until successful acquisition.
+        let target = unsafe { Pin::new_unchecked(&mut *target) };
+        let raw =
+            native_call(|error| unsafe { ffi::acquire_write(target, stream as usize, error) })?;
+        if !promoted.is_null() {
+            *buffer = promoted.into_raw().cast();
+        }
+        Ok(Self { raw })
     }
 
     /// Device pointer to the writable bytes.
     pub fn device_ptr(&self) -> *mut u8 {
-        unsafe { ffi::cuda_buffer_write_handle_data(self.raw.as_ptr()) }
+        self.raw.data()
     }
 
     /// Number of writable bytes.
     pub fn len(&self) -> usize {
-        unsafe { ffi::cuda_buffer_write_handle_size(self.raw.as_ptr()) }
+        self.raw.size()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -268,12 +291,6 @@ impl fmt::Debug for WriteHandle {
             .field("device_ptr", &self.device_ptr())
             .field("len", &self.len())
             .finish()
-    }
-}
-
-impl Drop for WriteHandle {
-    fn drop(&mut self) {
-        unsafe { ffi::cuda_buffer_write_handle_destroy(self.raw.as_ptr()) };
     }
 }
 
@@ -352,33 +369,4 @@ pub fn read_primitive_sequence(
         })?;
     // SAFETY: the returned handle borrows sequence, which retains the owner.
     unsafe { ReadHandle::acquire(raw, stream) }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn raw_internal_stream_is_resolved_before_acquisition() {
-        let internal = internal_stream().unwrap().as_raw();
-        assert!(!internal.is_null());
-        assert_eq!(CudaStream::INTERNAL.resolve().unwrap(), internal);
-        assert_eq!(internal_stream().unwrap().resolve().unwrap(), internal);
-
-        let mut buffer = allocate_buffer(1).unwrap();
-        let write = write_buffer(&mut buffer, CudaStream::INTERNAL).unwrap();
-        static SOURCE: [u8; 1] = [42];
-        // SAFETY: SOURCE is static, the destination is live, and the backend's
-        // internal stream outlives the copy and the write handle.
-        check(unsafe {
-            ffi::cuda_buffer_to_buffer_on_stream(
-                SOURCE.as_ptr().cast(),
-                SOURCE.len(),
-                write.handle.raw.as_ptr(),
-                internal,
-                ffi::CUDA_BUFFER_COPY_HOST_TO_DEVICE,
-            )
-        })
-        .unwrap();
-    }
 }

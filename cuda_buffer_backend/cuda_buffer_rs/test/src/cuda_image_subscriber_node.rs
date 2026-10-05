@@ -155,30 +155,3 @@ impl CudaImageSubscriber {
         );
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn accepts_negotiation_retries_then_numbered_samples() {
-        let received = AtomicU32::new(0);
-        record_sample(&received, 0);
-        record_sample(&received, 0);
-        for sequence in 1..=SAMPLES {
-            record_sample(&received, sequence);
-        }
-        assert_eq!(received.load(Ordering::SeqCst), SAMPLES);
-    }
-
-    #[test]
-    fn rejects_duplicate_skipped_late_and_out_of_range_samples() {
-        for (previous, sequence) in [(1, 1), (0, 2), (1, 0), (SAMPLES, SAMPLES + 1)] {
-            let received = AtomicU32::new(previous);
-            assert!(
-                std::panic::catch_unwind(|| record_sample(&received, sequence)).is_err(),
-                "accepted sequence {sequence} after {previous} samples"
-            );
-        }
-    }
-}

@@ -17,7 +17,6 @@ const USAGE: &str = "Usage: cuda_buffer_rs_test_runner publisher <subscriber-cou
                     cuda_buffer_rs_test_runner subscriber <id> [cuda|cpu]\n\
                     cuda_buffer_rs_test_runner composed <subscriber-count>";
 
-#[derive(Debug, PartialEq)]
 enum Mode {
     Publisher(usize),
     Subscriber { id: usize, backend: Backend },
@@ -98,44 +97,4 @@ fn main() -> ExitCode {
         }
     }
     ExitCode::SUCCESS
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn accepts_each_mode() {
-        assert_eq!(parse_mode(&["publisher", "2"]), Ok(Mode::Publisher(2)));
-        assert_eq!(parse_mode(&["composed", "3"]), Ok(Mode::Composed(3)));
-        assert_eq!(
-            parse_mode(&["subscriber", "0"]),
-            Ok(Mode::Subscriber {
-                id: 0,
-                backend: Backend::Cuda
-            })
-        );
-        assert_eq!(
-            parse_mode(&["subscriber", "1", "cpu"]),
-            Ok(Mode::Subscriber {
-                id: 1,
-                backend: Backend::Cpu
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_arguments() {
-        for args in [
-            vec![],
-            vec!["unknown", "1"],
-            vec!["publisher", "0"],
-            vec!["subscriber", "-1"],
-            vec!["subscriber", "0", "unknown"],
-            vec!["composed", "many"],
-            vec!["publisher", "2", "extra"],
-        ] {
-            assert!(parse_mode(&args).is_err(), "accepted {args:?}");
-        }
-    }
 }

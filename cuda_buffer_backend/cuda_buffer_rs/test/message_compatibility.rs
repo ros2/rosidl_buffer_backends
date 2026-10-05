@@ -36,7 +36,12 @@ fn nested_cuda_fields_convert_to_cpu() {
     assert!(native.array_of_unbounded_sequences[0]
         .uint8_values
         .is_rosidl_buffer());
-    let cpu = test_msgs::msg::MultiNested::try_from_rmw_message(native).unwrap();
+    let cloned = native.clone();
+    drop(native);
+    assert!(cloned.unbounded_sequence_of_unbounded_sequences[0]
+        .uint8_values
+        .is_rosidl_buffer());
+    let cpu = test_msgs::msg::MultiNested::try_from_rmw_message(cloned).unwrap();
     assert_eq!(
         cpu.array_of_unbounded_sequences[0].uint8_values,
         vec![9, 7, 5]

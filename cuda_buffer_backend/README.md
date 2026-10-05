@@ -10,17 +10,21 @@ CUDA buffer backend plugin for the ROS 2 Buffer system. Enables zero-copy GPU me
 See the [design document](docs/cuda_buffer_backend_design.md) for architecture
 and implementation details.
 
+See the [DMA-BUF integration proposal](docs/dma_buf_integration_design.md)
+for the CUDA migration and shared CUDA/ROCm storage designs.
+
 ## Prerequisites
 
 - A ROS 2 Rolling source workspace; see
   [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
   for the canonical setup.
 - CUDA Toolkit (>= 11.8) on the host.
-- For Rust: Linux, Rust 1.89+, CUDA 13+, libclang, and Rust message generation
+- For Rust: Linux, Rust 1.89+, CUDA 13+, libclang, a C++20 compiler, and Rust message generation
   in the Buffer-enabled ROS workspace. Install `colcon-cargo`,
   `colcon-ros-cargo`, and `cargo-ament-build` for Rust ROS packages.
-  Cargo downloads `cuda-core` 0.3.1 from crates.io; no ROS vendor package is
-  required.
+  Cargo downloads `cuda-core` 0.3.1, `cxx`, and `cxx-build` from crates.io.
+  The CXX bridges compile against the installed ROS and CUDA headers and link
+  the native backend libraries.
 
 ## Build
 
@@ -185,8 +189,13 @@ cuda_buffer_backend::ReadHandle rh =
 
 `cuda_buffer_rs` provides four APIs: `allocate_buffer`, `from_output_buffer`,
 `to_buffer`, and `from_input_buffer`. Storage belongs to
-`rosidl_runtime_rs::Buffer<u8>`; scoped handles expose borrowed
+`rosidl_buffer_rs::Buffer<u8>`; scoped handles expose borrowed
 `cuda_core::DeviceBuffer<T>` views. The native backend owns allocations and events.
+[cuda-core](https://github.com/NVlabs/cutile-rs/tree/main/cuda-core) provides Rust
+APIs for CUDA device memory, streams, and kernel launches.
+
+Enable the `rosidl-buffer` Cargo feature on `rclrs` when using buffer-enabled
+interfaces through `ros-env`.
 
 The examples use an existing ROS `node`. `produce_device_data` and
 `consume_device_data` are application-defined kernel helpers, not backend APIs;
@@ -215,10 +224,17 @@ let mut image = Image {
     // Backend API: borrow writable CUDA access on this stream.
     let mut output = from_output_buffer::<u8>(&mut image.data, &stream)?;
     // Application code: launch a kernel that initializes the entire buffer.
+    // Borrow the view; do not replace it or retain its pointer.
     produce_device_data(output.as_device_buffer(), &stream);
 } // Drop records the write event; it does not wait for completion.
 publisher.publish(image)?;
 ```
+
+The write handle's `as_device_buffer()` borrows backend-owned storage. Modify
+device contents only: never replace or swap the `DeviceBuffer` (including
+`*view = other`), extract it, resize/reallocate it, or free its pointer.
+These restrictions are not compiler-enforced; violating them can cause invalid
+frees, use-after-free, or data races.
 
 #### Publisher (copy from an existing pointer)
 
@@ -265,21 +281,12 @@ let subscription = node.create_subscription::<Image, _>(
 )?;
 ```
 
+The read handle's `as_device_buffer()` borrows backend-owned storage. Do not modify
+its GPU contents, including through kernels or extracted raw pointers.
+
 CUDA input is borrowed without copying. CPU input is uploaded to temporary
 storage owned by the read handle; CPU output is replaced with uninitialized
 CUDA storage. CPU-only applications can keep the ordinary `Image` with `Vec<u8>`.
-
-#### Rust kernel interoperability
-
-[cuda-oxide](https://nvlabs.github.io/cuda-oxide/gpu-programming/launching-kernels.html)
-accepts the borrowed `&DeviceBuffer<T>` / `&mut DeviceBuffer<T>` views directly,
-without a copy. Its `cuda-core` version and source must match this backend
-(currently `0.3.1`).
-[cuTile Rust](https://github.com/NVlabs/cutile-rs#quick-start) uses tensor wrappers;
-a compatible borrowing adapter is not yet provided.
-
-The `cuda-core` feature is enabled by default. Disable it with
-`default-features = false` for only the low-level raw-pointer API.
 
 ## IPC Behavior
 

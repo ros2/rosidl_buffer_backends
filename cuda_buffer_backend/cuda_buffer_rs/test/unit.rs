@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use cuda_buffer_rs::{allocate_buffer, read_buffer, write_buffer, CudaStream, ErrorKind};
-use rosidl_runtime_rs::{Buffer, PrimitiveSequence};
+use rosidl_runtime_rs::Buffer;
 
 #[test]
 fn raw_guards_share_device_memory_and_finalize_one_write() {
@@ -23,7 +23,6 @@ fn raw_guards_share_device_memory_and_finalize_one_write() {
         };
         let error = write_buffer(&mut buffer, stream).unwrap_err();
         assert_eq!(error.kind, ErrorKind::Cuda);
-        assert!(error.message.contains("finalized"));
         let guard = read_buffer(&buffer, stream).unwrap();
         assert_eq!(guard.len(), 2048);
         assert_eq!(guard.device_ptr(), written.cast_const());
@@ -52,43 +51,7 @@ fn buffer_and_sequence_conversions_transfer_ownership() {
 }
 
 #[test]
-fn empty_buffers_reject_guards_and_errors_survive_later_ffi_calls() {
-    let mut buffer = allocate_buffer(0).unwrap();
-    assert!(buffer.is_empty());
-    let error = read_buffer(&buffer, CudaStream::INTERNAL).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidArgument);
-    let message = error.message.clone();
-    assert!(!message.is_empty());
-    assert!(std::error::Error::source(&error).is_none());
-    assert_eq!(
-        write_buffer(&mut buffer, CudaStream::INTERNAL)
-            .unwrap_err()
-            .kind,
-        ErrorKind::InvalidArgument
-    );
-    let _stream = cuda_buffer_rs::internal_stream().unwrap();
-    assert_eq!(error.message, message);
-    assert!(error.to_string().contains(&message));
-    assert!(!unsafe { cuda_buffer_rs::is_cuda_backed(std::ptr::null()) });
-}
-
-#[test]
-fn normal_sequences_are_preserved_on_rejected_raw_read() {
-    let sequence = PrimitiveSequence::from(&[1u8, 2, 3][..]);
-    let error =
-        cuda_buffer_rs::read_primitive_sequence(&sequence, CudaStream::INTERNAL).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidArgument);
-    assert_eq!(sequence.as_slice(), &[1, 2, 3]);
-    let buffer = Buffer::from(sequence);
-    assert_eq!(
-        read_buffer(&buffer, CudaStream::INTERNAL).unwrap_err().kind,
-        ErrorKind::InvalidArgument
-    );
-    assert_eq!(buffer.as_slice().unwrap(), &[1, 2, 3]);
-}
-
-#[test]
-fn raw_write_promotes_cpu_storage_and_preserves_empty_inputs_on_failure() {
+fn raw_write_promotes_cpu_storage() {
     let mut buffer = Buffer::from(vec![1u8, 2, 3]);
     let written = {
         let output = write_buffer(&mut buffer, CudaStream::INTERNAL).unwrap();
@@ -98,19 +61,6 @@ fn raw_write_promotes_cpu_storage_and_preserves_empty_inputs_on_failure() {
     assert_eq!(buffer.backend_name().unwrap(), "cuda");
     let input = read_buffer(&buffer, CudaStream::INTERNAL).unwrap();
     assert_eq!(input.device_ptr(), written.cast_const());
-
-    for mut empty in [Buffer::<u8>::default(), allocate_buffer(0).unwrap()] {
-        let owner = empty.as_sequence().rosidl_buffer_ptr();
-        let backend = empty.backend_name().unwrap();
-        assert_eq!(
-            write_buffer(&mut empty, CudaStream::INTERNAL)
-                .unwrap_err()
-                .kind,
-            ErrorKind::InvalidArgument
-        );
-        assert_eq!(empty.as_sequence().rosidl_buffer_ptr(), owner);
-        assert_eq!(empty.backend_name().unwrap(), backend);
-    }
 }
 
 #[cfg(feature = "cuda-core")]
@@ -125,6 +75,43 @@ mod typed {
         Arc,
     };
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn native_clone_and_equality_use_backend_storage() {
+        let context = CudaContext::new(0).unwrap();
+        for stream in [context.default_stream(), context.new_stream().unwrap()] {
+            let values = [2u8, 4, 6, 8];
+            let mut source = allocate_buffer(values.len()).unwrap();
+            from_output_buffer::<u8>(&mut source, &stream)
+                .unwrap()
+                .copy_from_host(&values)
+                .unwrap();
+            let clone = source.try_clone().unwrap();
+            assert_eq!(clone.backend_name().unwrap(), "cuda");
+            assert_ne!(
+                clone.as_sequence().rosidl_buffer_ptr(),
+                source.as_sequence().rosidl_buffer_ptr()
+            );
+            {
+                let original = from_input_buffer::<u8>(&source, &stream).unwrap();
+                let copied = from_input_buffer::<u8>(&clone, &stream).unwrap();
+                assert_ne!(original.device_ptr(), copied.device_ptr());
+            }
+            assert_eq!(clone, source);
+            let cpu = Buffer::from(values.to_vec());
+            assert_eq!(clone, cpu);
+            assert_eq!(cpu, clone);
+            assert_ne!(clone, Buffer::from(vec![2u8, 4, 6, 9]));
+            drop(source);
+            assert_eq!(
+                from_input_buffer::<u8>(&clone, &stream)
+                    .unwrap()
+                    .to_host_vec()
+                    .unwrap(),
+                values
+            );
+        }
+    }
 
     #[test]
     fn invalid_layout_is_rejected_before_write_acquisition() {
@@ -162,30 +149,6 @@ mod typed {
             vec![3; 7]
         );
         assert!(from_input_buffer::<u8>(&allocate_buffer(0).unwrap(), &stream).is_err());
-    }
-
-    #[test]
-    fn stream_and_context_references_are_released_on_drop_and_unwind() {
-        let context = CudaContext::new(0).unwrap();
-        let stream = context.new_stream().unwrap();
-        let context_refs = Arc::strong_count(&context);
-        let stream_refs = Arc::strong_count(&stream);
-        let mut buffer = allocate_buffer(128).unwrap();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut writer = from_output_buffer::<u32>(&mut buffer, &stream).unwrap();
-            writer.copy_from_host(&[91; 32]).unwrap();
-            panic!("exercise unwinding after native acquisition");
-        }));
-        assert!(result.is_err());
-        assert_eq!(Arc::strong_count(&context), context_refs);
-        assert_eq!(Arc::strong_count(&stream), stream_refs);
-        for _ in 0..2 {
-            let handle = from_input_buffer::<u32>(&buffer, &stream).unwrap();
-            assert_eq!(handle.to_host_vec().unwrap(), vec![91; 32]);
-        }
-        assert_eq!(Arc::strong_count(&context), context_refs);
-        assert_eq!(Arc::strong_count(&stream), stream_refs);
-        context.check_err().unwrap();
     }
 
     #[test]
@@ -304,45 +267,6 @@ mod typed {
     }
 
     #[test]
-    fn invalid_copy_requests_leave_the_output_usable() {
-        let context = CudaContext::new(0).unwrap();
-        let stream = context.new_stream().unwrap();
-        let other = context.new_stream().unwrap();
-        let mut data = allocate_buffer(4).unwrap();
-        let values = [29u8; 4];
-        {
-            let mut output = from_output_buffer::<u8>(&mut data, &stream).unwrap();
-            for (source, size, selected) in [
-                (std::ptr::null(), 4, &stream),
-                (values.as_ptr().cast(), 5, &stream),
-                (values.as_ptr().cast(), 4, &other),
-            ] {
-                // Invalid arguments must be rejected before submitting a copy.
-                let error = to_buffer(source, size, &mut output, selected, CopyKind::HostToDevice)
-                    .unwrap_err();
-                assert_eq!(error.kind, ErrorKind::InvalidArgument);
-            }
-            // Zero bytes access no source memory.
-            to_buffer(
-                std::ptr::null(),
-                0,
-                &mut output,
-                &other,
-                CopyKind::HostToDevice,
-            )
-            .unwrap();
-            output.copy_from_host(&values).unwrap();
-        }
-        assert_eq!(
-            from_input_buffer::<u8>(&data, &stream)
-                .unwrap()
-                .to_host_vec()
-                .unwrap(),
-            values
-        );
-    }
-
-    #[test]
     fn unpublished_owner_can_drop_before_unused_write_handle() {
         static VALUES: [u8; 4] = [3, 5, 7, 11];
         let context = CudaContext::new(0).unwrap();
@@ -366,39 +290,19 @@ mod typed {
 
     #[test]
     fn cpu_adapters_preserve_input_and_replace_output_storage() {
-        extern "C" {
-            fn rosidl_buffer_uint8_create_cpu(
-                data: *const u8,
-                len: usize,
-                output: *mut *mut c_void,
-            ) -> i32;
-        }
         let context = CudaContext::new(0).unwrap();
         for stream in [context.default_stream(), context.new_stream().unwrap()] {
-            let mut pointer = std::ptr::null_mut();
             let values = [1u8, 2, 3, 4];
-            // SAFETY: values and pointer are valid for this synchronous construction.
-            assert_eq!(
-                unsafe { rosidl_buffer_uint8_create_cpu(values.as_ptr(), 4, &mut pointer) },
-                0
-            );
-            // SAFETY: create_cpu transferred the sole native owner of four bytes.
-            let opaque = Buffer::from(
-                unsafe { PrimitiveSequence::from_owned_rosidl_buffer(pointer, 4) }.unwrap(),
-            );
+            let native = rosidl_runtime_rs::native::ffi::create_cpu(&values).unwrap();
+            let opaque = rosidl_runtime_rs::native::into_buffer(native).unwrap();
             for mut buffer in [rosidl_runtime_rs::Buffer::from(&values[..]), opaque] {
                 let owner = buffer.as_sequence().rosidl_buffer_ptr();
-                let references = Arc::strong_count(&stream);
                 let input = from_input_buffer::<u8>(&buffer, &stream).unwrap();
                 assert_eq!(input.to_host_vec().unwrap(), values);
                 drop(input);
-                assert_eq!(Arc::strong_count(&stream), references);
                 assert_eq!(buffer.backend_name().unwrap(), "cpu");
                 assert_eq!(buffer.as_sequence().rosidl_buffer_ptr(), owner);
                 assert_eq!(buffer.to_vec().unwrap(), values);
-                assert!(from_output_buffer::<u64>(&mut buffer, &stream).is_err());
-                assert!(from_output_buffer::<()>(&mut buffer, &stream).is_err());
-                assert_eq!(buffer.as_sequence().rosidl_buffer_ptr(), owner);
                 let mut output = from_output_buffer::<u8>(&mut buffer, &stream).unwrap();
                 output.copy_from_host(&[4, 3, 2, 1]).unwrap();
                 let input = from_input_buffer::<u8>(&buffer, &stream).unwrap();

@@ -7,15 +7,14 @@ use std::borrow::Cow;
 use std::fmt;
 use std::marker::PhantomData;
 use std::mem::{align_of, size_of, ManuallyDrop};
-use std::ptr::{self, NonNull};
 use std::sync::Arc;
 
 use cuda_core::{CudaStream, DeviceBuffer, DeviceCopy};
-use rosidl_runtime_rs::{Buffer, PrimitiveSequence};
+use rosidl_buffer_rs::{Buffer, PrimitiveSequence};
 
 use crate::{
-    allocate_buffer, check, corrupt_abi, ffi, CudaBufferError, ErrorKind, ReadHandle, Result,
-    WriteHandle,
+    allocate_buffer, ffi, native_buffer, native_call, CudaBufferError, ErrorKind, ReadHandle,
+    Result, WriteHandle,
 };
 
 fn invalid(message: &str) -> CudaBufferError {
@@ -47,8 +46,8 @@ fn element_count<T>(bytes: usize) -> Result<usize> {
 
 fn prepare<T>(buffer: *const std::ffi::c_void, bytes: usize, stream: &CudaStream) -> Result<usize> {
     let len = element_count::<T>(bytes)?;
-    let mut device = -1;
-    check(unsafe { ffi::cuda_buffer_device_id(buffer, &mut device) })?;
+    let buffer = unsafe { native_buffer(buffer) }?;
+    let device = native_call(|error| ffi::device_id(buffer, error))?;
     // Both cuda-core and the backend use the device's primary context.
     if device < 0 || device as usize != stream.context().ordinal() {
         return Err(invalid(
@@ -76,8 +75,9 @@ impl<T: DeviceCopy, H> Access<T, H> {
         // SAFETY: callers retain the backend owner during device access and
         // validate the element layout and context before constructing this view.
         // This relies on cuda-core 0.3.1's raw-parts implementation: construction
-        // stores the address without touching the allocation. ManuallyDrop and
-        // into_raw_parts prevent its cuMemFree destructor from freeing VMM memory.
+        // stores the address without touching the allocation. While the facade
+        // stays in Access, ManuallyDrop and into_raw_parts suppress cuMemFree.
+        // The mutable accessor cannot enforce that callers leave it in place.
         let facade = ManuallyDrop::new(unsafe {
             DeviceBuffer::from_raw_parts(address as u64, len, Arc::clone(stream.context()))
         });
@@ -145,14 +145,8 @@ unsafe fn acquire_write<'a, T: DeviceCopy>(
     stream: &Arc<CudaStream>,
 ) -> Result<CudaWriteHandle<'a, T>> {
     let len = prepare::<T>(buffer, bytes, stream)?;
-    let mut raw = ptr::null_mut();
     let mut slot = buffer;
-    check(unsafe {
-        ffi::cuda_buffer_acquire_write(&mut slot, stream.cu_stream().cast(), &mut raw)
-    })?;
-    let native = WriteHandle {
-        raw: NonNull::new(raw).ok_or_else(|| corrupt_abi("null native write handle"))?,
-    };
+    let native = unsafe { WriteHandle::acquire_exact(&mut slot, stream.cu_stream().cast()) }?;
     let address = native.device_ptr() as usize;
     Ok(CudaWriteHandle {
         access: Access::new(native, address, len, stream)?,
@@ -167,12 +161,7 @@ unsafe fn acquire_read<'a, T: DeviceCopy>(
     stream: &Arc<CudaStream>,
 ) -> Result<CudaReadHandle<'a, T>> {
     let len = prepare::<T>(buffer, bytes, stream)?;
-    let mut raw = ptr::null_mut();
-    check(unsafe { ffi::cuda_buffer_acquire_read(buffer, stream.cu_stream().cast(), &mut raw) })?;
-    let native = ReadHandle {
-        _owner: PhantomData,
-        raw: NonNull::new(raw).ok_or_else(|| corrupt_abi("null native read handle"))?,
-    };
+    let native = unsafe { ReadHandle::acquire_exact(buffer, stream.cu_stream().cast()) }?;
     let address = native.device_ptr() as usize;
     Ok(CudaReadHandle {
         access: Access::new(native, address, len, stream)?,
@@ -253,7 +242,8 @@ impl<T: DeviceCopy> CudaReadHandle<'_, T> {
     /// Submit all work on this handle's stream while its owner is borrowed.
     /// Complete submission before publishing the buffer or releasing the handle.
     /// Keep the pointer, length, context, and allocation owner unchanged.
-    /// Access through this immutable facade must be read-only.
+    /// Do not modify the GPU contents, including through kernels or extracted
+    /// raw pointers.
     /// These requirements are not enforced by the returned reference.
     pub fn as_device_buffer(&self) -> &DeviceBuffer<T> {
         self.access.buffer()
@@ -296,10 +286,15 @@ impl<T: DeviceCopy> CudaWriteHandle<'_, T> {
     /// # Caller requirements
     /// Submit all work on this handle's stream while its owner is borrowed.
     /// Complete submission before publishing the buffer or releasing the handle.
-    /// Never replace, move out, reallocate, or destroy the view. Its pointer,
-    /// length, and context must stay fixed. In particular, do not use
-    /// `std::mem::replace` or `std::mem::swap` on this reference.
-    /// These requirements are not enforced by the returned reference.
+    /// Modify the device contents, not the `DeviceBuffer` object:
+    /// - Do not assign through the reference (`*view = other`), use
+    ///   `std::mem::replace` / `std::mem::swap`, or otherwise extract the object.
+    /// - Do not resize, reallocate, or free its storage, or change its pointer,
+    ///   length, or context. Do not use extracted pointers after handle release.
+    /// Initialize the entire output before publishing it.
+    ///
+    /// Violations can cause use-after-free, data races, or an invalid `cuMemFree`
+    /// of backend-owned VMM storage, even when the caller uses only safe Rust.
     pub fn as_device_buffer(&mut self) -> &mut DeviceBuffer<T> {
         self.access.buffer_mut()
     }
@@ -310,9 +305,9 @@ impl<T: DeviceCopy> CudaWriteHandle<'_, T> {
 #[repr(i32)]
 pub enum CopyKind {
     /// Copy from host memory to the output's CUDA allocation.
-    HostToDevice = ffi::CUDA_BUFFER_COPY_HOST_TO_DEVICE,
+    HostToDevice = 1,
     /// Copy from CUDA memory to the output's CUDA allocation.
-    DeviceToDevice = ffi::CUDA_BUFFER_COPY_DEVICE_TO_DEVICE,
+    DeviceToDevice = 3,
 }
 
 /// Enqueue a byte copy into an existing output handle without allocating.
@@ -353,19 +348,20 @@ pub fn to_buffer<T: DeviceCopy>(
         return Err(invalid("copy stream must match the output handle's stream"));
     }
     stream.context().bind_to_thread().map_err(driver_error)?;
-    check(unsafe {
-        ffi::cuda_buffer_to_buffer_on_stream(
-            source,
-            byte_count,
+    native_call(|error| unsafe {
+        ffi::copy_to_buffer(
             output
                 .access
                 .native
-                .as_ref()
+                .as_mut()
                 .expect("live write handle")
                 .raw
-                .as_ptr(),
-            stream.cu_stream().cast(),
+                .pin_mut(),
+            source.cast(),
+            byte_count,
+            stream.cu_stream() as usize,
             kind as i32,
+            error,
         )
     })
 }
@@ -382,7 +378,7 @@ pub fn from_input_buffer<'a, T: DeviceCopy>(
     element_count::<T>(buffer.len())?;
     if let Some(raw) = buffer.as_sequence().rosidl_buffer_ptr() {
         // SAFETY: buffer retains the native owner through the returned handle.
-        if unsafe { ffi::cuda_buffer_is_cuda_backed(raw) } {
+        if unsafe { crate::is_cuda_backed(raw) } {
             return unsafe { acquire_read(raw, buffer.len(), stream) };
         }
     }
@@ -420,7 +416,7 @@ pub fn from_output_buffer<'a, T: DeviceCopy>(
     element_count::<T>(buffer.len())?;
     if let Some(raw) = buffer.as_sequence().rosidl_buffer_ptr() {
         // SAFETY: buffer retains the owner and is exclusively borrowed.
-        if unsafe { ffi::cuda_buffer_is_cuda_backed(raw) } {
+        if unsafe { crate::is_cuda_backed(raw) } {
             return unsafe { acquire_write(raw, buffer.len(), stream) };
         }
     }

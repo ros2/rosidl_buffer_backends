@@ -13,6 +13,7 @@ fn cuda_search_path(path: &Path) {
 }
 
 fn main() {
+    let mut prefixes = Vec::new();
     let mut directories = Vec::new();
     println!("cargo:rerun-if-env-changed=AMENT_PREFIX_PATH");
     if let Some(prefixes) = env::var_os("AMENT_PREFIX_PATH") {
@@ -21,6 +22,53 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CONDA_PREFIX");
     if let Some(prefix) = env::var_os("CONDA_PREFIX") {
         directories.push(PathBuf::from(prefix).join("lib"));
+    }
+
+    prefixes.extend(
+        directories
+            .iter()
+            .filter_map(|directory| directory.parent().map(Path::to_path_buf)),
+    );
+    let mut build = cxx_build::bridge("src/bridge.rs");
+    build.file("src/bridge.cpp").std("c++20");
+    for (package, header) in [
+        ("cuda_buffer", "cuda_buffer/cuda_buffer_api.hpp"),
+        ("rosidl_buffer", "rosidl_buffer/buffer.hpp"),
+        ("rmw", "rmw/types.h"),
+        ("rcutils", "rcutils/allocator.h"),
+        (
+            "rosidl_runtime_c",
+            "rosidl_runtime_c/message_type_support_struct.h",
+        ),
+    ] {
+        let include = prefixes
+            .iter()
+            .flat_map(|prefix| [prefix.join("include").join(package), prefix.join("include")])
+            .find(|directory| directory.join(header).is_file())
+            .unwrap_or_else(|| panic!("{package} headers are missing from the ROS installation"));
+        println!("cargo:rerun-if-changed={}", include.display());
+        build.include(include);
+    }
+    let cuda_roots: Vec<_> = ["CUDA_TOOLKIT_PATH", "CUDA_HOME", "CUDA_PATH"]
+        .iter()
+        .filter_map(env::var_os)
+        .map(PathBuf::from)
+        .chain([PathBuf::from("/usr/local/cuda"), PathBuf::from("/usr")])
+        .collect();
+    let cuda_include = cuda_roots
+        .iter()
+        .map(|root| root.join("include"))
+        .find(|directory| directory.join("cuda_runtime.h").is_file())
+        .expect("CUDA headers are missing; set CUDA_TOOLKIT_PATH");
+    build
+        .include(&cuda_include)
+        .compile("cuda_buffer_rs_bridge");
+    println!("cargo:rerun-if-changed={}", cuda_include.display());
+    for path in ["src/bridge.rs", "src/bridge.cpp", "src/bridge.hpp"] {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    for library in ["cudart", "cuda", "rcutils"] {
+        println!("cargo:rustc-link-lib=dylib={library}");
     }
 
     // Give rustdoc one directory containing the selected native libraries, so

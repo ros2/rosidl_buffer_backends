@@ -7,7 +7,7 @@ version = "0.1.0"
 authors = ["Yuankun Zhu <yuankunz@nvidia.com>"]
 edition = "2021"
 license = "Apache-2.0"
-description = "Rust bindings for the CUDA-backed rosidl::Buffer C ABI"
+description = "Rust bindings for the CUDA-backed rosidl::Buffer"
 readme = "../README.md"
 rust-version = "1.89"
 
@@ -19,12 +19,17 @@ default = ["cuda-core"]
 cuda-core = ["dep:cuda-core"]
 
 [dependencies]
-rosidl_runtime_rs = "0.6"
 cuda-core = { version = "=0.3.1", optional = true }
+cxx = "=1.0.202"
+rosidl_buffer_rs = "0.1"
+
+[build-dependencies]
+cxx-build = "=1.0.202"
 
 [dev-dependencies]
-rclrs = { version = "0.7", features = ["serde"] }
+rclrs = { version = "0.7", features = ["serde", "rosidl-buffer"] }
 ros-env = "=0.2.0"
+rosidl_runtime_rs = { version = "0.6", features = ["rosidl-buffer"] }
 serde_json = "1"
 
 [[test]]

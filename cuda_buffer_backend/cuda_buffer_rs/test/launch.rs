@@ -1,9 +1,6 @@
 // Copyright 2026 Open Source Robotics Foundation, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-// Keep the node runner's unit tests in Cargo's test suite.
-include!("src/cuda_buffer_rs_test_runner.rs");
-
 fn run_launch_test(name: &str) {
     let executable = std::env::current_exe().unwrap();
     let profile_dir = executable.parent().unwrap().parent().unwrap();
