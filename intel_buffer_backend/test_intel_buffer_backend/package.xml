@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>test_intel_buffer_backend</name>
+  <version>0.1.0</version>
+  <description>Sample ROS 2 workload for the Intel buffer backend: a
+  camera publisher, OpenVINO GPU/NPU inference node, and detection visualizer
+  sharing frames zero-copy via Level Zero USM or DMA-BUF.</description>
+
+  <maintainer email="ramkumar.k@intel.com">Ramkumar K</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>intel_buffer</depend>
+  <depend>intel_memory_core</depend>
+  <depend>intel_buffer_backend_msgs</depend>
+  <!-- Runtime-only: the backend plugin is loaded by pluginlib, not linked. -->
+  <exec_depend>intel_buffer_backend</exec_depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
+  <depend>vision_msgs</depend>
+  <depend>sensor_msgs</depend>
+
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
