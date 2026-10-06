@@ -34,8 +34,24 @@ install(TARGETS ${PROJECT_NAME}
   RUNTIME DESTINATION bin)
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_cppcheck REQUIRED)
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   find_package(ament_lint_auto REQUIRED)
+  list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_cppcheck)
+  ament_cppcheck(LIBRARIES googletest)
   ament_lint_auto_find_test_dependencies()
+
+  ament_add_gtest(test_onnxruntime_conversions_cpu test/test_onnxruntime_conversions_cpu.cpp)
+  if(TARGET test_onnxruntime_conversions_cpu)
+    target_link_libraries(test_onnxruntime_conversions_cpu
+      onnxruntime_conversions::onnxruntime_conversions)
+  endif()
+
+  add_launch_test(test/test_ort_tensor_inter_pubsub_fastrtps_launch.py
+    TARGET test_ort_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package()

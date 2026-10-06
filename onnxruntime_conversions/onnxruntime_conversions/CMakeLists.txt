@@ -12,6 +12,9 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(onnxruntime_core_vendor REQUIRED)
 find_package(pluginlib REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
+find_package(rosidl_runtime_cpp REQUIRED)
 find_package(tensor_msgs REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED src/onnxruntime_conversions.cpp)
@@ -46,17 +49,43 @@ install(
 ament_export_targets(export_${PROJECT_NAME} NAMESPACE ${PROJECT_NAME}::)
 ament_export_dependencies(onnxruntime_core_vendor pluginlib tensor_msgs)
 
+add_library(ort_tensor_publisher_component SHARED
+  examples/ort_tensor_publisher_node.cpp)
+target_link_libraries(ort_tensor_publisher_component
+  ${PROJECT_NAME}
+  rclcpp::rclcpp
+  rclcpp_components::component
+  rosidl_runtime_cpp::rosidl_runtime_cpp
+  ${tensor_msgs_TARGETS})
+rclcpp_components_register_node(ort_tensor_publisher_component
+  PLUGIN "OrtTensorPublisher"
+  EXECUTABLE ort_tensor_publisher_node)
+
+add_library(ort_tensor_subscriber_component SHARED
+  examples/ort_tensor_subscriber_node.cpp)
+target_include_directories(ort_tensor_subscriber_component PRIVATE examples/include)
+target_link_libraries(ort_tensor_subscriber_component
+  ${PROJECT_NAME}
+  rclcpp::rclcpp
+  rclcpp_components::component
+  rosidl_runtime_cpp::rosidl_runtime_cpp
+  ${tensor_msgs_TARGETS})
+rclcpp_components_register_node(ort_tensor_subscriber_component
+  PLUGIN "OrtTensorSubscriber"
+  EXECUTABLE ort_tensor_subscriber_node)
+
+install(
+  TARGETS
+    ort_tensor_publisher_component
+    ort_tensor_subscriber_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_cppcheck REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
-  find_package(CUDAToolkit QUIET)
-  find_package(launch_testing_ament_cmake REQUIRED)
-  find_package(ament_cmake_ros REQUIRED)
-  find_package(rclcpp REQUIRED)
-  find_package(rclcpp_components REQUIRED)
-  find_package(rosidl_runtime_cpp REQUIRED)
-  find_package(std_msgs REQUIRED)
   # Load GoogleTest macros when cppcheck analyzes the test sources.
   list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_cppcheck)
   ament_cppcheck(LIBRARIES googletest INCLUDE_DIRS include test)
@@ -67,55 +96,6 @@ if(BUILD_TESTING)
   if(TARGET test_onnxruntime_conversions)
     target_link_libraries(test_onnxruntime_conversions ${PROJECT_NAME})
   endif()
-
-  if(CUDAToolkit_FOUND)
-    ament_add_gtest(test_onnxruntime_conversions_cuda
-      test/test_onnxruntime_conversions_cuda.cpp)
-    if(TARGET test_onnxruntime_conversions_cuda)
-      target_link_libraries(test_onnxruntime_conversions_cuda
-        ${PROJECT_NAME} CUDA::cudart)
-    endif()
-
-  endif()
-
-  add_library(ort_tensor_publisher_component SHARED
-    test/src/ort_tensor_publisher_node.cpp)
-  target_link_libraries(ort_tensor_publisher_component
-    ${PROJECT_NAME}
-    rclcpp::rclcpp
-    rclcpp_components::component
-    rosidl_runtime_cpp::rosidl_runtime_cpp
-    ${std_msgs_TARGETS}
-    ${tensor_msgs_TARGETS})
-  rclcpp_components_register_node(ort_tensor_publisher_component
-    PLUGIN "OrtTensorPublisher"
-    EXECUTABLE ort_tensor_publisher_node)
-
-  add_library(ort_tensor_subscriber_component SHARED
-    test/src/ort_tensor_subscriber_node.cpp)
-  target_include_directories(ort_tensor_subscriber_component PRIVATE test)
-  target_link_libraries(ort_tensor_subscriber_component
-    ${PROJECT_NAME}
-    rclcpp::rclcpp
-    rclcpp_components::component
-    rosidl_runtime_cpp::rosidl_runtime_cpp
-    ${std_msgs_TARGETS}
-    ${tensor_msgs_TARGETS})
-  rclcpp_components_register_node(ort_tensor_subscriber_component
-    PLUGIN "OrtTensorSubscriber"
-    EXECUTABLE ort_tensor_subscriber_node)
-
-  install(
-    TARGETS
-      ort_tensor_publisher_component
-      ort_tensor_subscriber_component
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin)
-
-  add_launch_test(test/test_ort_tensor_inter_pubsub_fastrtps_launch.py
-    TARGET test_ort_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30
-    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package(CONFIG_EXTRAS_POST cmake/onnxruntime_conversions-extras.cmake.in)

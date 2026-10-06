@@ -13,6 +13,10 @@ ament_python_install_package(onnxruntime_conversions)
 install(TARGETS _ort_bridge
   DESTINATION "${PYTHON_INSTALL_DIR}/onnxruntime_conversions")
 
+install(PROGRAMS examples/ort_tensor_subscriber_node.py
+  DESTINATION "lib/${PROJECT_NAME}"
+  RENAME ort_tensor_subscriber_node)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
@@ -20,10 +24,6 @@ if(BUILD_TESTING)
 
   ament_add_pytest_test(test_onnxruntime_conversions_py
     test/test_onnxruntime_conversions_py.py TIMEOUT 120)
-  ament_add_pytest_test(test_onnxruntime_conversions_py_cuda
-    test/test_onnxruntime_conversions_py_cuda.py TIMEOUT 120)
-  ament_add_pytest_test(test_onnxruntime_tensor_inter_pubsub_fastrtps
-    test/test_onnxruntime_tensor_inter_pubsub_fastrtps.py TIMEOUT 120)
 endif()
 
 ament_package()

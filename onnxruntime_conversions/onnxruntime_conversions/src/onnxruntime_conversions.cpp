@@ -132,8 +132,9 @@ private:
   {
     for (const auto & class_name : loader_.getDeclaredClasses()) {
       try {
-        pin_library(loader_.getClassLibraryPath(class_name));
         auto plugin = loader_.createSharedInstance(class_name);
+        // Register through pluginlib before pinning to preserve unloading of other libraries.
+        pin_library(loader_.getClassLibraryPath(class_name));
         if (!plugin->available()) {
           continue;
         }

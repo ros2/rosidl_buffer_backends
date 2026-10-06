@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -129,14 +128,11 @@ def _publisher(topic, stream):
 
 def test_onnx_inference_publishes_with_live_output_bindings():
     topic = f'onnxruntime_tensor_{uuid.uuid4().hex}'
-    environment = os.environ.copy()
-    environment['RMW_IMPLEMENTATION'] = 'rmw_fastrtps_cpp'
-    environment['ROS_LOCALHOST_ONLY'] = '1'
 
     def start(role):
         return subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), role, topic],
-            env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            [sys.executable, str(Path(__file__).resolve()), role, topic, 'cpu'],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True)
 
     processes = []
@@ -167,7 +163,7 @@ def test_onnx_inference_publishes_with_live_output_bindings():
 
 if __name__ == '__main__':
     worker = {'publisher': _publisher, 'subscriber': _subscriber}[sys.argv[1]]
-    stream = create_stream()
+    stream = create_stream(sys.argv[3])
     rclpy.init(args=[])
     try:
         worker(sys.argv[2], stream)

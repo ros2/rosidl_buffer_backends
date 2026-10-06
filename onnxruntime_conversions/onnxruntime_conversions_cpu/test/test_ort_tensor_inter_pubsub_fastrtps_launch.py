@@ -13,19 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import time
+import re
 import unittest
 
 from launch import LaunchDescription
-from launch.actions import SetEnvironmentVariable, TimerAction
+from launch.actions import TimerAction
 from launch_ros.actions import Node
 import launch_testing
 import launch_testing.actions
 import launch_testing.asserts
 import launch_testing.markers
 import pytest
-import rclpy
-from std_msgs.msg import UInt32
 
 
 @pytest.mark.launch_test
@@ -34,50 +32,40 @@ def generate_test_description():
     subscriber = Node(
         package='onnxruntime_conversions',
         executable='ort_tensor_subscriber_node',
+        parameters=[{'backend': 'cpu'}],
         output='screen',
     )
     publisher = Node(
         package='onnxruntime_conversions',
         executable='ort_tensor_publisher_node',
+        parameters=[{'backend': 'cpu'}],
         output='screen',
     )
     return LaunchDescription([
-        SetEnvironmentVariable('RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
         subscriber,
         TimerAction(period=2.0, actions=[
             publisher,
             launch_testing.actions.ReadyToTest(),
         ]),
-    ])
+    ]), {'subscriber': subscriber}
 
 
 class TestTensorInterProcessInference(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(cls):
-        rclpy.init()
-
-    @classmethod
-    def tearDownClass(cls):
-        rclpy.shutdown()
-
-    def setUp(self):
-        self.node = rclpy.create_node('test_tensor_inter_process_inference')
-        self.validation_count = 0
-        self.node.create_subscription(
-            UInt32, 'validation_count', self._validation_result, 10)
-
-    def tearDown(self):
-        self.node.destroy_node()
-
-    def _validation_result(self, message):
-        self.validation_count = message.data
-
-    def test_received_inference_output(self):
-        deadline = time.time() + 20.0
-        while self.validation_count < 5 and time.time() < deadline:
-            rclpy.spin_once(self.node, timeout_sec=0.1)
-        self.assertGreaterEqual(self.validation_count, 5)
+    def test_received_inference_output(self, proc_output, subscriber):
+        proc_output.assertWaitFor('count=5)', process=subscriber, timeout=20)
+        output = b''.join(event.text for event in proc_output[subscriber]).decode()
+        samples = re.findall(
+            r'Received tensor \(backend=(\w+), min=([^,]+), '
+            r'max=([^,]+), count=\d+\)',
+            output)
+        self.assertGreaterEqual(len(samples), 5)
+        previous_value = 0.0
+        for received_backend, minimum, maximum in samples:
+            self.assertEqual(received_backend, 'cpu')
+            self.assertEqual(float(minimum), float(maximum))
+            self.assertGreater(float(minimum), previous_value)
+            previous_value = float(minimum)
 
 
 @launch_testing.post_shutdown_test()

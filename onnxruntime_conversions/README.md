@@ -117,6 +117,9 @@ class ExampleTensorSubscriber(Node):
 Replace the mean model, binding names, and logging with your own inference and
 result processing.
 
+The [standalone Python subscriber](onnxruntime_conversions_py/examples/ort_tensor_subscriber_node.py)
+accepts the model path through its `model_path` ROS parameter.
+
 ### Existing tensors
 
 This example copies an existing ONNX Runtime tensor into a new message and
@@ -420,6 +423,10 @@ For Ubuntu 24.04 source builds, see the
 | Public API and plugin registry | `onnxruntime_conversions` | `onnxruntime_conversions_py` |
 | CPU plugin | `onnxruntime_conversions_cpu` | `onnxruntime_conversions_py_cpu` |
 | CUDA plugin | `onnxruntime_conversions_cuda` | `onnxruntime_conversions_py_cuda` |
+
+The core packages install example nodes from their `examples/` directories.
+Backend-dependent unit and publication tests live in the corresponding CPU and
+CUDA plugin packages.
 
 ## License
 

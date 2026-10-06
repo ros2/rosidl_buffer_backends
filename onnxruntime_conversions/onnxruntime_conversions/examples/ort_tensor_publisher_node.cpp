@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "onnxruntime_conversions/onnxruntime_conversions.hpp"
@@ -28,7 +29,8 @@ public:
   explicit OrtTensorPublisher(const rclcpp::NodeOptions & options)
   : Node("onnxruntime_tensor_publisher", options),
     env_(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_tensor_publisher"),
-    stream_(onnxruntime_conversions::create_stream(env_))
+    stream_(onnxruntime_conversions::create_stream(
+        env_, this->declare_parameter<std::string>("backend", "")))
   {
     publisher_ = create_publisher<onnxruntime_conversions::TensorMsg>(
       "test_onnxruntime_tensor", 10);

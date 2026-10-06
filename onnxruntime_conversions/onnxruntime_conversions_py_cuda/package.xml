@@ -12,8 +12,13 @@
   <exec_depend>python_onnxruntime_cuda_vendor</exec_depend>
   <exec_depend>onnxruntime_conversions_py</exec_depend>
 
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>onnxruntime_conversions_py_cpu</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+
+  <test_depend>rclpy</test_depend>
+  <test_depend>rmw_fastrtps_cpp</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

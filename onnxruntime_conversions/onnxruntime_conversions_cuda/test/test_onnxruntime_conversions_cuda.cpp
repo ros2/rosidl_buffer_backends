@@ -41,6 +41,15 @@ using onnxruntime_conversions::from_input_tensor_msg;
 using onnxruntime_conversions::from_output_tensor_msg;
 using onnxruntime_conversions::to_tensor_msg;
 
+Ort::Value host_value(
+  std::vector<float> & data, const std::vector<int64_t> & shape)
+{
+  auto info = Ort::MemoryInfo::CreateCpu(
+    OrtDeviceAllocator, OrtMemTypeDefault);
+  return Ort::Value::CreateTensor<float>(
+    info, data.data(), data.size(), shape.data(), shape.size());
+}
+
 class CudaConversions : public ::testing::Test
 {
 protected:
@@ -327,6 +336,41 @@ TEST_F(CudaConversions, ConfiguresTheProviderAndRunsInferenceOnDeviceStorage)
   binding.SynchronizeOutputs();
 
   expect_device_values(output_view.value(), host, stream_);
+}
+
+TEST(OnnxRuntimeConversions, RunsInferenceWithPreallocatedMessageBuffers)
+{
+  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "onnxruntime_conversions_test");
+  auto stream = create_stream(env);
+  EXPECT_EQ(stream.backend(), onnxruntime_conversions::default_backend());
+  Ort::SessionOptions session_options;
+  configure_session_options(session_options, stream);
+  Ort::Session session(
+    env, test_models::identity_model({2, 3}), session_options);
+  Ort::IoBinding binding(session);
+
+  auto input = allocate_tensor_msg(
+    {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, stream);
+  auto output = allocate_tensor_msg(
+    {2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, stream);
+  std::vector<float> values{1, 2, 3, 4, 5, 6};
+  auto source = host_value(values, {2, 3});
+  to_tensor_msg(*input, source, stream);
+
+  auto input_view = from_input_tensor_msg(*input, stream);
+  auto output_view = from_output_tensor_msg(*output, stream);
+  binding.BindInput("input", input_view.value());
+  binding.BindOutput("output", output_view.value());
+  session.Run(Ort::RunOptions{}, binding);
+
+  auto copied = to_tensor_msg(output_view.value(), stream);
+  auto copied_view = from_input_tensor_msg(*copied, stream);
+  auto host = allocate_tensor_msg({2, 3}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, "cpu");
+  to_tensor_msg(*host, copied_view.value(), stream);
+  const auto * output_data = reinterpret_cast<const float *>(host->data.data());
+  for (size_t index = 0; index < 6; ++index) {
+    EXPECT_EQ(output_data[index], values[index]);
+  }
 }
 
 }  // namespace
