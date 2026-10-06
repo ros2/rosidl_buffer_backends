@@ -1,0 +1,8 @@
+<library path="onnxruntime_conversions_cpu">
+  <class
+    name="cpu"
+    type="onnxruntime_conversions_cpu::CpuConversionPlugin"
+    base_class_type="onnxruntime_conversions::ConversionPlugin">
+    <description>Direct Ort::Value conversion for CPU-backed messages.</description>
+  </class>
+</library>
