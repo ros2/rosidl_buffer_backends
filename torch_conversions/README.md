@@ -95,6 +95,9 @@ class ExampleTensorSubscriber(Node):
 Replace the mean calculation and logging with your own processing of
 `input_tensor`.
 
+A runnable Python subscriber is available in
+[`examples/torch_tensor_subscriber_node.py`](torch_conversions_py/examples/torch_tensor_subscriber_node.py).
+
 ### Existing tensors
 
 This example copies an existing tensor into a new message and publishes it:
@@ -360,6 +363,10 @@ For Ubuntu 24.04 source builds, see the
 | Public API and plugin registry | `torch_conversions` | `torch_conversions_py` |
 | CPU plugin | `torch_conversions_cpu` | `torch_conversions_py_cpu` |
 | CUDA plugin | `torch_conversions_cuda` | `torch_conversions_py_cuda` |
+
+The core packages install example nodes from their `examples/` directories.
+The CPU and CUDA plugin packages contain the backend-dependent unit and
+publication tests, which use the same example nodes.
 
 ## License
 

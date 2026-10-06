@@ -184,3 +184,12 @@ def test_device_index_is_preserved_and_validated():
         with torch.cuda.device(device):
             value = from_output_tensor_msg(msg)
             assert value.device.index == device
+
+
+def test_default_allocation_is_usable_by_this_torch_build():
+    msg = allocate_tensor_msg((4,), torch.float32)
+
+    tensor = from_output_tensor_msg(msg)
+
+    assert tensor is not None
+    tensor.fill_(1.0)

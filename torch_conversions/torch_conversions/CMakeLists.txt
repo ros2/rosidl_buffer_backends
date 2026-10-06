@@ -13,6 +13,9 @@ find_package(ament_cmake REQUIRED)
 find_package(libtorch_vendor REQUIRED)
 find_package(Torch REQUIRED)
 find_package(pluginlib REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
+find_package(rosidl_runtime_cpp REQUIRED)
 find_package(tensor_msgs REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED src/torch_conversions.cpp)
@@ -49,76 +52,47 @@ install(
 ament_export_targets(export_${PROJECT_NAME} NAMESPACE ${PROJECT_NAME}::)
 ament_export_dependencies(libtorch_vendor pluginlib tensor_msgs)
 
+add_library(torch_tensor_publisher_component SHARED
+  examples/torch_tensor_publisher_node.cpp)
+target_link_libraries(torch_tensor_publisher_component
+  ${PROJECT_NAME}
+  rclcpp::rclcpp
+  rclcpp_components::component
+  rosidl_runtime_cpp::rosidl_runtime_cpp
+  ${tensor_msgs_TARGETS})
+rclcpp_components_register_node(torch_tensor_publisher_component
+  PLUGIN "TorchTensorPublisher"
+  EXECUTABLE torch_tensor_publisher_node)
+
+add_library(torch_tensor_subscriber_component SHARED
+  examples/torch_tensor_subscriber_node.cpp)
+target_link_libraries(torch_tensor_subscriber_component
+  ${PROJECT_NAME}
+  rclcpp::rclcpp
+  rclcpp_components::component
+  rosidl_runtime_cpp::rosidl_runtime_cpp
+  ${tensor_msgs_TARGETS})
+rclcpp_components_register_node(torch_tensor_subscriber_component
+  PLUGIN "TorchTensorSubscriber"
+  EXECUTABLE torch_tensor_subscriber_node)
+
+install(
+  TARGETS
+    torch_tensor_publisher_component
+    torch_tensor_subscriber_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
-  find_package(launch_testing_ament_cmake REQUIRED)
-  find_package(ament_cmake_ros REQUIRED)
-  find_package(rclcpp REQUIRED)
-  find_package(rclcpp_components REQUIRED)
-  find_package(rosidl_runtime_cpp REQUIRED)
-  find_package(std_msgs REQUIRED)
   ament_lint_auto_find_test_dependencies()
 
   ament_add_gtest(test_torch_conversions test/test_torch_conversions.cpp)
   if(TARGET test_torch_conversions)
     target_link_libraries(test_torch_conversions ${PROJECT_NAME})
   endif()
-
-  if(TARGET torch_cuda)
-    ament_add_gtest(test_torch_conversions_cuda
-      test/test_torch_conversions_cuda.cpp)
-    if(TARGET test_torch_conversions_cuda)
-      target_link_libraries(test_torch_conversions_cuda ${PROJECT_NAME})
-    endif()
-  endif()
-
-  add_library(torch_tensor_publisher_component SHARED
-    test/src/torch_tensor_publisher_node.cpp)
-  target_link_libraries(torch_tensor_publisher_component
-    ${PROJECT_NAME}
-    rclcpp::rclcpp
-    rclcpp_components::component
-    rosidl_runtime_cpp::rosidl_runtime_cpp
-    ${std_msgs_TARGETS}
-    ${tensor_msgs_TARGETS})
-  rclcpp_components_register_node(torch_tensor_publisher_component
-    PLUGIN "TorchTensorPublisher"
-    EXECUTABLE torch_tensor_publisher_node)
-
-  add_library(torch_tensor_subscriber_component SHARED
-    test/src/torch_tensor_subscriber_node.cpp)
-  target_link_libraries(torch_tensor_subscriber_component
-    ${PROJECT_NAME}
-    rclcpp::rclcpp
-    rclcpp_components::component
-    rosidl_runtime_cpp::rosidl_runtime_cpp
-    ${std_msgs_TARGETS}
-    ${tensor_msgs_TARGETS})
-  rclcpp_components_register_node(torch_tensor_subscriber_component
-    PLUGIN "TorchTensorSubscriber"
-    EXECUTABLE torch_tensor_subscriber_node)
-
-  install(
-    TARGETS
-      torch_tensor_publisher_component
-      torch_tensor_subscriber_component
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin)
-
-  add_launch_test(test/test_torch_tensor_intra_pubsub_fastrtps_launch.py
-    TARGET test_torch_tensor_intra_pubsub_fastrtps_launch TIMEOUT 30
-    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
-  add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps_launch.py
-    TARGET test_torch_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30
-    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
-  add_launch_test(test/test_torch_tensor_multi_pub_fastrtps_launch.py
-    TARGET test_torch_tensor_multi_pub_fastrtps_launch TIMEOUT 45
-    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
-  add_launch_test(test/test_torch_tensor_multi_sub_fastrtps_launch.py
-    TARGET test_torch_tensor_multi_sub_fastrtps_launch TIMEOUT 45
-    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package(CONFIG_EXTRAS_POST cmake/torch_conversions-extras.cmake.in)
