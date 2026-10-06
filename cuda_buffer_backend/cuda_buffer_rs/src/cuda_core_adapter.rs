@@ -291,6 +291,7 @@ impl<T: DeviceCopy> CudaWriteHandle<'_, T> {
     ///   `std::mem::replace` / `std::mem::swap`, or otherwise extract the object.
     /// - Do not resize, reallocate, or free its storage, or change its pointer,
     ///   length, or context. Do not use extracted pointers after handle release.
+    ///
     /// Initialize the entire output before publishing it.
     ///
     /// Violations can cause use-after-free, data races, or an invalid `cuMemFree`
