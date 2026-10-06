@@ -23,6 +23,7 @@ pub use cuda_core_adapter::{
     CudaReadHandle, CudaWriteHandle,
 };
 
+use std::borrow::Borrow;
 use std::fmt;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
@@ -357,10 +358,12 @@ impl CudaWriteGuard<'_> {
 }
 
 /// Acquires CUDA read access directly from an RMW-native `uint8[]` field.
+/// Accepts runtime sequences and backend primitive sequences through a shared borrow.
 pub fn read_primitive_sequence(
-    sequence: &PrimitiveSequence<u8>,
+    sequence: &(impl Borrow<PrimitiveSequence<u8>> + ?Sized),
     stream: CudaStream,
 ) -> Result<CudaReadGuard<'_>> {
+    let sequence = sequence.borrow();
     let raw = sequence
         .rosidl_buffer_ptr()
         .ok_or_else(|| CudaBufferError {

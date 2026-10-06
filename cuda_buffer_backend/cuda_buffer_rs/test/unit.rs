@@ -42,6 +42,14 @@ fn buffer_and_sequence_conversions_transfer_ownership() {
     assert!(!device_ptr.is_null());
     drop(guard);
 
+    let sequence: rosidl_runtime_rs::Sequence<u8> = sequence.into();
+    {
+        let guard =
+            cuda_buffer_rs::read_primitive_sequence(&sequence, CudaStream::INTERNAL).unwrap();
+        assert_eq!(guard.device_ptr(), device_ptr);
+        assert_eq!(guard.len(), 512);
+    }
+
     let reclaimed = Buffer::from(sequence);
     assert_eq!(reclaimed.len(), 512);
     assert_eq!(reclaimed.backend_name().unwrap(), "cuda");

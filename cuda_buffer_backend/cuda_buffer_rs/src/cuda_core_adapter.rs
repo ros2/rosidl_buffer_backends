@@ -3,7 +3,7 @@
 
 //! Typed cuda-core access to backend-owned VMM storage.
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::fmt;
 use std::marker::PhantomData;
 use std::mem::{align_of, size_of, ManuallyDrop};
@@ -170,10 +170,12 @@ unsafe fn acquire_read<'a, T: DeviceCopy>(
 }
 
 /// Borrow typed CUDA data from an RMW-native message without extracting its owner.
+/// Accepts runtime sequences and backend primitive sequences through a shared borrow.
 pub fn get_primitive_sequence_read_handle<'a, T: DeviceCopy>(
-    sequence: &'a PrimitiveSequence<u8>,
+    sequence: &'a (impl Borrow<PrimitiveSequence<u8>> + ?Sized),
     stream: &Arc<CudaStream>,
 ) -> Result<CudaReadHandle<'a, T>> {
+    let sequence = sequence.borrow();
     let raw = sequence
         .rosidl_buffer_ptr()
         .ok_or_else(|| invalid("primitive sequence is not Buffer-backed"))?;

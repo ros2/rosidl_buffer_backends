@@ -83,6 +83,36 @@ fn owned_message_roundtrip_preserves_buffer_owner() {
 }
 
 #[test]
+fn borrowed_rmw_sequences_retain_cuda_storage() {
+    use cuda_buffer_rs::{get_primitive_sequence_read_handle, read_primitive_sequence, CudaStream};
+
+    let context = cuda_core::CudaContext::new(0).unwrap();
+    for stream in [context.default_stream(), context.new_stream().unwrap()] {
+        let image = sensor_msgs::msg::buffer::Image {
+            data: make_cuda_buffer(&[4, 8, 12]),
+            ..Default::default()
+        };
+        let device_ptr = {
+            let read = get_primitive_sequence_read_handle::<u8>(image.data.as_sequence(), &stream)
+                .unwrap();
+            read.device_ptr()
+        };
+        let native =
+            sensor_msgs::msg::buffer::Image::into_rmw_message(Cow::Owned(image)).into_owned();
+        {
+            let read = get_primitive_sequence_read_handle::<u8>(&native.data, &stream).unwrap();
+            assert_eq!(read.device_ptr(), device_ptr);
+            assert_eq!(read.to_host_vec().unwrap(), [4, 8, 12]);
+            let raw = read_primitive_sequence(&native.data, CudaStream::INTERNAL).unwrap();
+            assert_eq!(raw.device_ptr(), device_ptr);
+            assert_eq!(raw.len(), 3);
+        }
+        let image = sensor_msgs::msg::buffer::Image::from_rmw_message(native);
+        assert_eq!(image.data.backend_name().unwrap(), "cuda");
+    }
+}
+
+#[test]
 fn cuda_buffer_json_matches_the_cpu_schema() {
     let image = sensor_msgs::msg::Image {
         data: vec![1, 2, 3],

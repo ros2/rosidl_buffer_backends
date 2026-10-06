@@ -10,9 +10,6 @@ CUDA buffer backend plugin for the ROS 2 Buffer system. Enables zero-copy GPU me
 See the [design document](docs/cuda_buffer_backend_design.md) for architecture
 and implementation details.
 
-See the [DMA-BUF integration proposal](docs/dma_buf_integration_design.md)
-for the CUDA migration and shared CUDA/ROCm storage designs.
-
 ## Prerequisites
 
 - A ROS 2 Rolling source workspace; see
