@@ -40,8 +40,27 @@ install(
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_cppcheck REQUIRED)
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   find_package(ament_lint_auto REQUIRED)
+  list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_cppcheck)
+  ament_cppcheck(LIBRARIES googletest)
   ament_lint_auto_find_test_dependencies()
+
+  ament_add_gtest(test_torch_conversions_cpu test/test_torch_conversions_cpu.cpp)
+  if(TARGET test_torch_conversions_cpu)
+    target_link_libraries(test_torch_conversions_cpu
+      torch_conversions::torch_conversions)
+  endif()
+
+  add_launch_test(test/test_torch_tensor_intra_pubsub_fastrtps_launch.py
+    TARGET test_torch_tensor_intra_pubsub_fastrtps_launch TIMEOUT 30
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
+  add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps_launch.py
+    TARGET test_torch_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package()

@@ -16,8 +16,18 @@ install(
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+
+  ament_add_pytest_test(test_torch_conversions_py_cuda
+    test/test_torch_conversions_py_cuda.py TIMEOUT 90)
+
+  add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps.py
+    TARGET test_torch_tensor_inter_pubsub_fastrtps TIMEOUT 40
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package()

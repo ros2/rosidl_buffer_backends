@@ -15,12 +15,12 @@
 #include <torch/torch.h>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
-#include "std_msgs/msg/u_int32.hpp"
 #include "torch_conversions/torch_conversions.hpp"
 #include "tensor_msgs/msg/experimental_tensor.hpp"
 
@@ -30,6 +30,10 @@ public:
   explicit TorchTensorPublisher(const rclcpp::NodeOptions & options)
   : Node("torch_tensor_publisher", options), count_(0)
   {
+    const auto device = this->declare_parameter<std::string>("device", "");
+    if (!device.empty()) {
+      device_ = c10::Device(device);
+    }
     this->declare_parameter<int>("max_publish_count", 0);
     this->declare_parameter<int>("publish_rate_ms", 200);
     this->declare_parameter<int>("tensor_width", 8);
@@ -42,8 +46,6 @@ public:
 
     publisher_ = this->create_publisher<tensor_msgs::msg::ExperimentalTensor>(
       "test_torch_tensor", 10);
-    count_publisher_ = this->create_publisher<std_msgs::msg::UInt32>(
-      "publisher_count", 10);
 
     timer_ = this->create_wall_timer(
       std::chrono::milliseconds(publish_rate_ms),
@@ -63,9 +65,9 @@ private:
       return;
     }
 
-    auto guard = torch_conversions::set_stream();
+    auto guard = torch_conversions::set_stream(device_);
     auto msg = torch_conversions::allocate_tensor_msg(
-      {tensor_height_, tensor_width_, 3}, torch::kByte);
+      {tensor_height_, tensor_width_, 3}, torch::kByte, device_);
 
     {
       at::Tensor output = torch_conversions::from_output_tensor_msg(*msg);
@@ -75,9 +77,7 @@ private:
     const std::string backend_type = msg->data.get_backend_type();
     publisher_->publish(std::move(msg));
 
-    std_msgs::msg::UInt32 count_msg;
-    count_msg.data = ++count_;
-    count_publisher_->publish(count_msg);
+    ++count_;
 
     if (count_ % 10 == 0) {
       RCLCPP_INFO(
@@ -88,8 +88,8 @@ private:
   }
 
   rclcpp::Publisher<tensor_msgs::msg::ExperimentalTensor>::SharedPtr publisher_;
-  rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr count_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
+  std::optional<c10::Device> device_;
   size_t count_;
   int max_publish_count_;
   int tensor_width_;

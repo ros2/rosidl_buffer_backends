@@ -217,3 +217,18 @@ TEST(TorchConversionsCuda, ScopedStreamRestoresState)
   EXPECT_EQ(c10::cuda::getCurrentCUDAStream(), original);
   EXPECT_EQ(c10::cuda::current_device(), original.device_index());
 }
+
+TEST(TorchConversions, DefaultAllocationsAreUsableByThisTorchBuild)
+{
+  auto guard = torch_conversions::set_stream();
+  auto msg = torch_conversions::allocate_tensor_msg({4}, at::kFloat);
+
+  {
+    auto tensor = torch_conversions::from_output_tensor_msg(*msg);
+    ASSERT_TRUE(tensor.defined());
+    tensor.fill_(3.0f);
+  }
+  auto tensor = torch_conversions::from_input_tensor_msg(*msg);
+  auto copied = torch_conversions::to_tensor_msg(tensor * 2);
+  EXPECT_FLOAT_EQ(torch_conversions::from_input_tensor_msg(*copied).sum().item<float>(), 24.0f);
+}

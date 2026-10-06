@@ -17,7 +17,6 @@ import time
 import unittest
 
 from launch import LaunchDescription
-from launch.actions import SetEnvironmentVariable
 from launch.actions import TimerAction
 from launch_ros.actions import Node
 import launch_testing
@@ -28,7 +27,6 @@ import pytest
 import rclpy
 from tensor_msgs.msg import ExperimentalTensor
 import torch
-import torch_conversions
 from torch_conversions import from_input_tensor_msg
 from torch_conversions import set_stream
 
@@ -56,13 +54,13 @@ def generate_test_description():
         executable='torch_tensor_publisher_node',
         output='screen',
         parameters=[{
+            'device': 'cpu',
             'tensor_shape': list(TENSOR_SHAPE),
             'tensor_values': list(TENSOR_VALUES),
         }],
     )
 
     return LaunchDescription([
-        SetEnvironmentVariable('RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
         TimerAction(period=2.0, actions=[
             publisher,
             launch_testing.actions.ReadyToTest(),
@@ -103,16 +101,16 @@ class TestTorchTensorInterProcess(unittest.TestCase):
             and msg.dtype_code == 1
             and msg.dtype_bits == 8
             and msg.dtype_lanes == 1
-            and getattr(msg.data, 'backend_type', 'cpu') == torch_conversions.default_backend()
+            and getattr(msg.data, 'backend_type', 'cpu') == 'cpu'
             and len(msg.data) > 0
         )
 
         if valid:
-            with set_stream():
+            with set_stream('cpu'):
                 tensor = from_input_tensor_msg(msg, clone=False)
                 valid = (
                     tensor is not None
-                    and tensor.device.type == torch_conversions.default_backend()
+                    and tensor.device.type == 'cpu'
                     and tensor.dtype == torch.uint8
                     and torch.equal(
                         tensor,

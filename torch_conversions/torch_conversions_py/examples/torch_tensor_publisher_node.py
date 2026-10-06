@@ -29,6 +29,7 @@ class TorchTensorPublisher(Node):
 
     def __init__(self):
         super().__init__('torch_tensor_publisher')
+        self._device = self.declare_parameter('device', '').value or None
         self.declare_parameter('tensor_shape', [1])
         self.declare_parameter('tensor_values', [0])
         self._tensor_shape = tuple(
@@ -43,9 +44,9 @@ class TorchTensorPublisher(Node):
         self._timer = self.create_timer(0.1, self._timer_callback)
 
     def _timer_callback(self):
-        with set_stream():
+        with set_stream(self._device):
             msg = allocate_tensor_msg(
-                self._tensor_shape, torch.uint8)
+                self._tensor_shape, torch.uint8, self._device)
             output = from_output_tensor_msg(msg)
             tensor = torch.tensor(
                 self._tensor_values,
