@@ -29,11 +29,13 @@ fn nested_cuda_fields_convert_to_cpu() {
     nested.array_of_unbounded_sequences[0] = unbounded.clone();
     nested.bounded_sequence_of_unbounded_sequences = vec![unbounded.clone()].try_into().unwrap();
     nested.unbounded_sequence_of_unbounded_sequences = vec![unbounded];
-    nested.array_of_bounded_sequences[0].uint8_values =
-        make_cuda_buffer(&[3, 2, 1]).try_into().unwrap();
+    nested.array_of_bounded_sequences[0].uint8_values = vec![3, 2, 1].try_into().unwrap();
     let native =
         test_msgs::msg::buffer::MultiNested::into_rmw_message(Cow::Borrowed(&nested)).into_owned();
     assert!(native.array_of_unbounded_sequences[0]
+        .uint8_values
+        .is_rosidl_buffer());
+    assert!(!native.array_of_bounded_sequences[0]
         .uint8_values
         .is_rosidl_buffer());
     let cloned = native.clone();
@@ -127,26 +129,23 @@ fn cuda_buffer_json_matches_the_cpu_schema() {
 }
 
 #[test]
-fn cpu_client_receives_nested_cuda_service_response() {
-    use rcl_interfaces::{msg, srv};
+fn cpu_client_receives_cuda_service_response() {
+    use rcl_interfaces::srv;
     let mut executor = Context::default().create_basic_executor();
     let node = executor.create_node("portable_service_test").unwrap();
     let name = format!("portable_service_cuda_{}", std::process::id());
     let _service = node
-        .create_service::<srv::buffer::GetParameters, _>(
+        .create_service::<srv::buffer::GetParameterTypes, _>(
             &name,
-            move |request: srv::buffer::GetParameters_Request| {
+            move |request: srv::buffer::GetParameterTypes_Request| {
                 assert_eq!(request.names, vec!["pixels"]);
-                srv::buffer::GetParameters_Response {
-                    values: vec![msg::buffer::ParameterValue {
-                        byte_array_value: make_cuda_buffer(&[13, 17, 23]),
-                        ..Default::default()
-                    }],
+                srv::buffer::GetParameterTypes_Response {
+                    types: make_cuda_buffer(&[1, 2, 3]),
                 }
             },
         )
         .unwrap();
-    let client = node.create_client::<srv::GetParameters>(&name).unwrap();
+    let client = node.create_client::<srv::GetParameterTypes>(&name).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !client.service_is_ready().unwrap() {
         assert!(Instant::now() < deadline, "service discovery timed out");
@@ -156,11 +155,11 @@ fn cpu_client_receives_nested_cuda_service_response() {
     let output = Arc::clone(&received);
     let _call = client
         .call_then(
-            srv::GetParameters_Request {
+            srv::GetParameterTypes_Request {
                 names: vec!["pixels".into()],
             },
-            move |response: srv::GetParameters_Response| {
-                *output.lock().unwrap() = Some(response.values[0].byte_array_value.clone());
+            move |response: srv::GetParameterTypes_Response| {
+                *output.lock().unwrap() = Some(response.types);
             },
         )
         .unwrap();
@@ -171,7 +170,7 @@ fn cpu_client_receives_nested_cuda_service_response() {
             "{errors:?}"
         );
         if let Some(values) = &*received.lock().unwrap() {
-            assert_eq!(values, &[13, 17, 23]);
+            assert_eq!(values, &[1, 2, 3]);
             break;
         }
         assert!(Instant::now() < deadline, "service response timed out");
@@ -179,7 +178,7 @@ fn cpu_client_receives_nested_cuda_service_response() {
 }
 
 #[test]
-fn buffer_client_sends_nested_cuda_request_to_cpu_service() {
+fn buffer_client_sends_cpu_byte_array_request() {
     use rcl_interfaces::{msg, srv};
     let mut executor = Context::default().create_basic_executor();
     let node = executor.create_node("portable_request_test").unwrap();
@@ -207,7 +206,7 @@ fn buffer_client_sends_nested_cuda_request_to_cpu_service() {
         parameters: vec![msg::buffer::Parameter {
             name: "pixels".into(),
             value: msg::buffer::ParameterValue {
-                byte_array_value: make_cuda_buffer(&[29, 31]),
+                byte_array_value: vec![29, 31],
                 ..Default::default()
             },
         }],

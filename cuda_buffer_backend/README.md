@@ -193,6 +193,8 @@ APIs for CUDA device memory, streams, and kernel launches.
 
 Enable the `rosidl-buffer` Cargo feature on `rclrs` when using buffer-enabled
 interfaces through `ros-env`.
+As in C++, only unbounded `uint8[]` fields use backend storage; bounded sequences
+and other primitive sequences remain CPU-backed.
 
 The examples use an existing ROS `node`. `produce_device_data` and
 `consume_device_data` are application-defined kernel helpers, not backend APIs;
@@ -226,6 +228,10 @@ let mut image = Image {
 } // Drop records the write event; it does not wait for completion.
 publisher.publish(image)?;
 ```
+
+Publish by value (`publish(image)`) to transfer the buffer without cloning it.
+Publishing by reference (`publish(&image)`) clones the buffer fields, causing a
+device-to-device copy for CUDA storage.
 
 The write handle's `as_device_buffer()` borrows backend-owned storage. Modify
 device contents only: never replace or swap the `DeviceBuffer` (including
