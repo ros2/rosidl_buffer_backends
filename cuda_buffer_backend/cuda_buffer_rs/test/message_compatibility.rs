@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use rclrs::{Context, CreateBasicExecutor, SpinOptions};
 use ros_env::{rcl_interfaces, sensor_msgs, test_msgs};
-use rosidl_runtime_rs::{Buffer, Message};
+use rosidl_buffer_rs::Buffer;
+use rosidl_runtime_rs::Message;
 
 fn make_cuda_buffer(values: &[u8]) -> Buffer<u8> {
     let mut buffer = Buffer::from(vec![0u8; values.len()]);

@@ -22,6 +22,8 @@ and implementation details.
   Cargo downloads `cuda-core` 0.3.1, `cxx`, and `cxx-build` from crates.io.
   The CXX bridges compile against the installed ROS and CUDA headers and link
   the native backend libraries.
+  Regenerate all Rust interfaces visible in the sourced workspace with the
+  matching generator; `ros-env` also discovers interfaces from underlays.
 
 ## Build
 
@@ -191,14 +193,12 @@ cuda_buffer_backend::ReadHandle rh =
 [cuda-core](https://github.com/NVlabs/cutile-rs/tree/main/cuda-core) provides Rust
 APIs for CUDA device memory, streams, and kernel launches.
 
-Enable the `rosidl-buffer` Cargo feature on `rclrs` when using buffer-enabled
-interfaces through `ros-env`.
-As in C++, only unbounded `uint8[]` fields use backend storage; bounded sequences
-and other primitive sequences remain CPU-backed.
+To use backend storage, use the generated `msg::buffer` representation, such as
+`sensor_msgs::msg::buffer::Image`. Its `data` field is a
+`rosidl_buffer_rs::Buffer<u8>`, rather than the `Vec<u8>` in the ordinary
+`sensor_msgs::msg::Image`.
 
-The examples use an existing ROS `node`. `produce_device_data` and
-`consume_device_data` are application-defined kernel helpers, not backend APIs;
-they validate kernel arguments and handle any unsafe launch operations internally.
+Enable the `rosidl-buffer` Cargo feature on `rclrs` for the examples below.
 
 #### Publisher (direct write, zero-copy)
 
@@ -234,12 +234,11 @@ Publishing by reference (`publish(&image)`) clones the buffer fields, causing a
 device-to-device copy for CUDA storage.
 
 The write handle's `as_device_buffer()` borrows backend-owned storage. Modify
-device contents only: never replace or swap the `DeviceBuffer` (including
-`*view = other`), extract it, resize/reallocate it, or free its pointer.
-These restrictions are not compiler-enforced; violating them can cause invalid
-frees, use-after-free, or data races.
+device contents only: never replace or swap the `DeviceBuffer`, resize or
+reallocate its storage, or free its pointer. Violating these restrictions can
+cause invalid frees, use-after-free, or data races.
 
-#### Publisher (copy from an existing pointer)
+#### Publisher (copy from existing pointer)
 
 With `image.data` already allocated:
 
@@ -260,10 +259,10 @@ use cuda_buffer_rs::{from_output_buffer, to_buffer, CopyKind};
 publisher.publish(image)?;
 ```
 
-Use `CopyKind::HostToDevice` for a host pointer. This path copies data;
-the direct-write example above does not.
+Use `CopyKind::HostToDevice` for a host pointer. This path copies data from
+existing memory into the buffer field; it is not zero-copy.
 
-#### Subscriber (read from a buffer, zero-copy)
+#### Subscriber (read from buffer, zero-copy)
 
 ```rust
 use cuda_buffer_rs::from_input_buffer;
@@ -288,8 +287,7 @@ The read handle's `as_device_buffer()` borrows backend-owned storage. Do not mod
 its GPU contents, including through kernels or extracted raw pointers.
 
 CUDA input is borrowed without copying. CPU input is uploaded to temporary
-storage owned by the read handle; CPU output is replaced with uninitialized
-CUDA storage. CPU-only applications can keep the ordinary `Image` with `Vec<u8>`.
+storage owned by the read handle.
 
 ## IPC Behavior
 
