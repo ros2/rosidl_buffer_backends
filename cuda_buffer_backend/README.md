@@ -22,6 +22,8 @@ and implementation details.
   Cargo downloads `cuda-core` 0.3.1, `cxx`, and `cxx-build` from crates.io.
   The CXX bridges compile against the installed ROS and CUDA headers and link
   the native backend libraries.
+  Regenerate all Rust interfaces visible in the sourced workspace with the
+  matching generator; `ros-env` also discovers interfaces from underlays.
 
 ## Build
 

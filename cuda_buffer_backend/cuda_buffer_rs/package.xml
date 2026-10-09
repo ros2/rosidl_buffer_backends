@@ -23,6 +23,7 @@ SPDX-License-Identifier: Apache-2.0
   <depend>cuda_buffer_backend</depend>
   <depend>rosidl_buffer</depend>
   <depend>rosidl_buffer_rs</depend>
+  <depend>rosidl_runtime_rs</depend>
 
   <test_depend>rmw_fastrtps_cpp</test_depend>
   <test_depend>launch_testing</test_depend>
@@ -30,7 +31,6 @@ SPDX-License-Identifier: Apache-2.0
   <test_depend>launch_ros</test_depend>
   <test_depend>python3-pytest</test_depend>
   <test_depend>rclrs</test_depend>
-  <test_depend>rosidl_runtime_rs</test_depend>
   <test_depend>std_msgs</test_depend>
   <test_depend>sensor_msgs</test_depend>
   <test_depend>rcl_interfaces</test_depend>

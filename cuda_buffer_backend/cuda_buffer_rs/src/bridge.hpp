@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "cuda_buffer/cuda_buffer_api.hpp"
-#include "rosidl_buffer_rs/src/buffer_bridge.hpp"
+#include "rosidl_runtime_rs/src/buffer_bridge.hpp"
 
 namespace cuda_buffer_rs
 {

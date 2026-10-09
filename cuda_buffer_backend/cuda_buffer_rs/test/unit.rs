@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use cuda_buffer_rs::{allocate_buffer, read_buffer, write_buffer, CudaStream, ErrorKind};
-use rosidl_runtime_rs::Buffer;
+use rosidl_buffer_rs::Buffer;
 
 #[test]
 fn raw_guards_share_device_memory_and_finalize_one_write() {
@@ -301,9 +301,9 @@ mod typed {
         let context = CudaContext::new(0).unwrap();
         for stream in [context.default_stream(), context.new_stream().unwrap()] {
             let values = [1u8, 2, 3, 4];
-            let native = rosidl_runtime_rs::native::ffi::create_cpu(&values).unwrap();
-            let opaque = rosidl_runtime_rs::native::into_buffer(native).unwrap();
-            for mut buffer in [rosidl_runtime_rs::Buffer::from(&values[..]), opaque] {
+            let native = rosidl_buffer_rs::native::ffi::create_cpu(&values).unwrap();
+            let opaque = rosidl_buffer_rs::native::into_buffer(native).unwrap();
+            for mut buffer in [rosidl_buffer_rs::Buffer::from(&values[..]), opaque] {
                 let owner = buffer.as_sequence().rosidl_buffer_ptr();
                 let input = from_input_buffer::<u8>(&buffer, &stream).unwrap();
                 assert_eq!(input.to_host_vec().unwrap(), values);
