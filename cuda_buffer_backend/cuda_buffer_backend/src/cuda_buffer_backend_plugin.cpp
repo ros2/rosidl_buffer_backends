@@ -134,10 +134,27 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
 {
   host_endpoint_manager::GidKey key(endpoint_info.endpoint_gid);
 
+  bool decided = false;
   {
     std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
     auto it = ipc_decision_cache_.find(key);
     if (it != ipc_decision_cache_.end() && !it->second) {
+      return nullptr;
+    }
+    decided = it != ipc_decision_cache_.end();
+  }
+
+  if (!decided) {
+    // The subscriber was never classified: it is not in the local endpoint
+    // registry (another host, or a host with no usable device). It cannot
+    // import a CUDA descriptor, so use the host path.
+    rmw_gid_t peer;
+    peer.implementation_identifier = "";
+    std::memcpy(peer.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);
+    auto peer_manager = get_endpoint_manager();
+    peer_manager->refresh_from_remote();
+    auto peer_locality = peer_manager->query_endpoint_locality(peer);
+    if (!peer_locality.found || !peer_locality.ipc_capable) {
       return nullptr;
     }
   }

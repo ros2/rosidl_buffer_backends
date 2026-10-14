@@ -83,6 +83,30 @@ TEST_F(CudaBufferBackendTest, OnDiscoveringEndpointDoesNotThrow)
       endpoint_info, existing_endpoints, supported_backends));
 }
 
+// Needs a CUDA device. A subscriber that the publisher cannot find in the
+// local endpoint registry (another host, or a host with no device) must not
+// be sent a CUDA descriptor: it could not import it. The publisher must fall
+// back to the host path, which create_descriptor_with_endpoint signals with
+// nullptr.
+TEST_F(CudaBufferBackendTest, NoDescriptorForUnknownSubscriber)
+{
+  rmw_topic_endpoint_info_t endpoint_info;
+  std::memset(&endpoint_info, 0, sizeof(endpoint_info));
+  endpoint_info.topic_type = "test_type";
+  endpoint_info.endpoint_type = RMW_ENDPOINT_SUBSCRIPTION;
+  std::memset(endpoint_info.endpoint_gid, 0x5a, sizeof(endpoint_info.endpoint_gid));
+
+  std::vector<rmw_topic_endpoint_info_t> existing_endpoints;
+  std::unordered_map<std::string, std::string> supported_backends;
+  supported_backends["cuda"] = "";
+  auto result = backend_->on_discovering_endpoint(
+    endpoint_info, existing_endpoints, supported_backends);
+  EXPECT_FALSE(result.first);
+
+  CudaBufferImpl<uint8_t> impl(1024);
+  EXPECT_EQ(nullptr, backend_->create_descriptor_with_endpoint(&impl, endpoint_info));
+}
+
 int main(int argc, char ** argv)
 {
   testing::InitGoogleTest(&argc, argv);
