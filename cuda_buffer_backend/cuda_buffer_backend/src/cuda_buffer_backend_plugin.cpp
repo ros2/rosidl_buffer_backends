@@ -31,6 +31,21 @@
 
 namespace cuda_buffer_backend
 {
+namespace
+{
+bool cuda_ipc_available() noexcept
+{
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess || count == 0) {
+    return false;
+  }
+  try {
+    return CudaBufferImpl<uint8_t>::is_pool_ipc_capable();
+  } catch (...) {
+    return false;
+  }
+}
+}  // namespace
 
 CudaBufferBackend::CudaBufferBackend()
 {
@@ -66,6 +81,9 @@ CudaBufferBackend::get_endpoint_manager() const
 void CudaBufferBackend::on_creating_endpoint(
   const rmw_topic_endpoint_info_t & endpoint_info) const
 {
+  if (!cuda_ipc_available()) {
+    return;
+  }
   auto manager = get_endpoint_manager();
 
   rmw_gid_t gid;
@@ -93,7 +111,7 @@ CudaBufferBackend::on_discovering_endpoint(
     return {false, {}};
   }
 
-  if (!CudaBufferImpl<uint8_t>::is_pool_ipc_capable()) {
+  if (!cuda_ipc_available()) {
     return {false, {}};
   }
 

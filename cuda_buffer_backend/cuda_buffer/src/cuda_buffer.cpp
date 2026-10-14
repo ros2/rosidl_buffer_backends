@@ -117,6 +117,7 @@ CudaBuffer::CudaBuffer(
 
 CudaBuffer::~CudaBuffer()
 {
+  finalize_write_handle();
   std::vector<cudaEvent_t> events_to_sync;
 
   if (owns_write_event_ && write_event_) {

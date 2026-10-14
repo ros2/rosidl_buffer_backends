@@ -38,7 +38,7 @@ constexpr unsigned int CUDA_BUFFER_DEFAULT_EVENT_FLAGS =
 
 inline bool cuda_is_stream_usable(cudaStream_t s)
 {
-  if (s == nullptr) {return false;}
+  // nullptr is CUDA default stream 0. Moved-from handles are checked by state.
   const cudaError_t st = cudaStreamQuery(s);
   return (st == cudaSuccess) || (st == cudaErrorNotReady);
 }
@@ -144,7 +144,7 @@ private:
   : data_ptr_(data_ptr), read_events_(read_events),
     events_mutex_(events_mutex), stream_(stream)
   {
-    if (write_event != nullptr && stream_ != nullptr) {
+    if (write_event != nullptr) {
       CUDA_CHECK(cudaStreamWaitEvent(stream_, write_event, 0));
     }
   }
@@ -161,8 +161,8 @@ private:
 /// WriteHandle is created by CudaBuffer::get_write_handle(). It exposes a
 /// mutable device pointer and records the producer write event on destruction,
 /// making later ReadHandles wait for the correct CUDA stream work. Only one
-/// write handle may be active for a buffer.
-/// Must not outlive the CudaBuffer that created it.
+/// write handle may be active for a buffer. Data access requires a live owner;
+/// cleanup remains valid after the owner finalizes the write and is destroyed.
 class WriteHandle
 {
 public:
