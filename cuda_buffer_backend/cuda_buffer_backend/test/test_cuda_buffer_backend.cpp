@@ -56,6 +56,33 @@ TEST_F(CudaBufferBackendTest, OnDiscoveringEndpointWithoutCudaSupport)
   EXPECT_FALSE(result.first);
 }
 
+// These tests need no CUDA device: when none is usable, the endpoint hooks
+// must report "not IPC capable" instead of throwing out of the RMW.
+TEST_F(CudaBufferBackendTest, OnCreatingEndpointDoesNotThrow)
+{
+  rmw_topic_endpoint_info_t endpoint_info;
+  std::memset(&endpoint_info, 0, sizeof(endpoint_info));
+  endpoint_info.topic_type = "test_type";
+  endpoint_info.endpoint_type = RMW_ENDPOINT_PUBLISHER;
+
+  EXPECT_NO_THROW(backend_->on_creating_endpoint(endpoint_info));
+}
+
+TEST_F(CudaBufferBackendTest, OnDiscoveringEndpointDoesNotThrow)
+{
+  rmw_topic_endpoint_info_t endpoint_info;
+  std::memset(&endpoint_info, 0, sizeof(endpoint_info));
+  endpoint_info.topic_type = "test_type";
+
+  std::vector<rmw_topic_endpoint_info_t> existing_endpoints;
+  std::unordered_map<std::string, std::string> supported_backends;
+  supported_backends["cuda"] = "version=1.0";
+
+  EXPECT_NO_THROW(
+    backend_->on_discovering_endpoint(
+      endpoint_info, existing_endpoints, supported_backends));
+}
+
 int main(int argc, char ** argv)
 {
   testing::InitGoogleTest(&argc, argv);

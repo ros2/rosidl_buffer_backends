@@ -166,8 +166,14 @@ public:
 
   static bool is_pool_ipc_capable()
   {
-    auto pool = get_or_create_global_pool();
-    return pool && pool->is_ipc_capable();
+    // With no usable CUDA device the pool cannot be created. That is "not IPC
+    // capable", not an error: callers run inside C-linkage RMW entry points.
+    try {
+      auto pool = get_or_create_global_pool();
+      return pool && pool->is_ipc_capable();
+    } catch (const CudaError &) {
+      return false;
+    }
   }
 
 private:

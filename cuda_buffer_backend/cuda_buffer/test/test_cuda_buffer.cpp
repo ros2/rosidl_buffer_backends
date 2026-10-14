@@ -501,6 +501,15 @@ TEST(CudaBufferShmTest, ReadingDoesNotLeaveShmSegments)
     << "reading a CUDA buffer left segments behind in /dev/shm:" << names;
 }
 
+// Needs no CUDA device: with none usable this must return false, not throw.
+TEST(CudaBufferPoolTest, IsPoolIpcCapableDoesNotThrow)
+{
+  bool capable = false;
+  EXPECT_NO_THROW(
+    capable = cuda_buffer_backend::CudaBufferImpl<uint8_t>::is_pool_ipc_capable());
+  RecordProperty("ipc_capable", capable ? "true" : "false");
+}
+
 int main(int argc, char ** argv)
 {
   if (argc > 1 && std::strncmp(argv[1], kChildFlag, std::strlen(kChildFlag)) == 0) {
