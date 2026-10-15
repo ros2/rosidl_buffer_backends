@@ -108,25 +108,35 @@ flowchart TD
   B --> C["WriteHandle records write event"]
   C --> D["Descriptor published"]
 
-  D --> E["Subscriber imports block"]
-  E --> F{"Descriptor UID matches shared-memory UID?"}
-  F -->|"yes"| G["IPC refcount increments"]
-  F -->|"no"| S["stale buffer, discard"]
-  G --> H["Local CudaBuffer and ReadHandle"]
+  D --> E["Subscriber acquires open UID generation"]
+  E -->|"accepted"| G["IPC refcount increments"]
+  E -->|"closed or stale"| S["discard descriptor before event import"]
+  G --> H["Import event; local CudaBuffer and ReadHandle"]
   H --> I["Local recycler waits read events"]
-  I --> J["IPC refcount decrements"]
+  I --> J["Destroy imported event; decrement IPC refcount"]
 
-  J --> K{"Safe to recycle?"}
-  K -->|"refcount zero and grace elapsed"| A
-  K -->|"otherwise"| K
+  D --> P["Pool retains exported event with returned block"]
+  P --> K{"Grace elapsed?"}
+  K -->|"yes"| L["Close generation by setting shared UID to zero"]
+  K -->|"no"| K
+  L --> M{"IPC refcount zero and producer event complete?"}
+  M -->|"yes"| N["Destroy exported event and reuse block with a new UID"]
+  M -->|"no"| M
+  N --> A
 ```
 
-A CUDA buffer is a pooled VMM block wrapped in `CudaBuffer`. When the block is
-imported in another process, the import increments the shared-memory IPC
-refcount, while local `shared_ptr` ownership keeps the imported `CudaBuffer`
-alive inside that process. When the last local owner is released, the recycler
-waits for recorded CUDA read events before decrementing the IPC refcount.
-The publisher may recycle the block only after the IPC refcount returns to
-zero and a short grace window has elapsed. If a late subscriber still races
-with reuse, it detects stale data on first access by comparing the descriptor
-UID with the UID stored in shared memory.
+A CUDA buffer is a pooled VMM block wrapped in `CudaBuffer`. Before importing a
+block, a subscriber atomically acquires its published UID generation. The
+acquisition increments the shared-memory IPC refcount only while that
+generation remains open. Local `shared_ptr` ownership then keeps the imported
+`CudaBuffer` alive. When the last local owner is released, the recycler waits
+for recorded CUDA read events, destroys the imported event handle, and
+decrements the IPC refcount.
+
+When the publisher returns a block, the pool retains any exported write event
+with that block. After the grace window, the pool closes the generation to new
+imports by setting the shared UID to zero. It destroys the exported event and
+reuses the block only after the producer event has completed and the IPC
+refcount is zero. Reuse installs the next UID before reopening the generation.
+A delayed subscriber therefore observes a closed or different UID and discards
+the descriptor before calling `cudaIpcOpenEventHandle`.

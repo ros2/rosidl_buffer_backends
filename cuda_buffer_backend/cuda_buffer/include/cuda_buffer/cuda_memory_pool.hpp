@@ -39,6 +39,8 @@ namespace cuda_buffer_backend
 struct IPCMetadata
 {
   std::atomic<int32_t> refcount{0};
+  // Zero closes the block to new imports. A nonzero value identifies the
+  // currently published generation.
   std::atomic<uint64_t> uid{0};
   std::atomic<uint64_t> publish_timestamp_us{0};
 };
@@ -56,6 +58,9 @@ struct VmmBlock
   int shm_fd{-1};
   std::string shm_name;
   uint64_t current_uid{0};
+  cudaEvent_t exported_event{nullptr};
+  // A terminal event error permanently quarantines this block from reuse.
+  bool exported_event_retirement_failed{false};
 };
 
 /// \brief Publisher-side VMM allocation pool used by CudaBufferImpl.
@@ -79,21 +84,24 @@ public:
   CUresult create();
   VmmBlock * allocate(size_t byte_size);
   void free(VmmBlock * block);
+  void retain_exported_event(VmmBlock * block, cudaEvent_t event, uint64_t uid);
 
   uint64_t assign_uid(VmmBlock * block)
   {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (block->current_uid != 0) {
       return block->current_uid;
     }
     uint64_t uid = uid_dist_(uid_rng_);
     block->current_uid = uid;
     if (block->ipc_meta) {
-      block->ipc_meta->uid.store(uid, std::memory_order_release);
       block->ipc_meta->publish_timestamp_us.store(
         static_cast<uint64_t>(
           std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count()),
         std::memory_order_release);
+      // Publish the generation only after all of its metadata is initialized.
+      block->ipc_meta->uid.store(uid, std::memory_order_seq_cst);
     }
     return uid;
   }
@@ -108,7 +116,7 @@ public:
 
   std::string register_block_for_ipc(VmmBlock * block)
   {
-    if (!ipc_capable_ || !ipc_manager_ || block->exported_fd < 0) {
+    if (!ipc_capable_ || !ipc_manager_ || block->exported_fd < 0 || !block->ipc_meta) {
       return "";
     }
     return ipc_manager_->register_block(block);
@@ -129,7 +137,15 @@ public:
   int get_device_id() const {return device_id_;}
 
 private:
-  bool is_block_ready(VmmBlock * block) const;
+  enum class BlockReadiness
+  {
+    Ready,
+    Pending,
+    TerminalError,
+  };
+
+  BlockReadiness get_block_readiness(VmmBlock * block);
+  BlockReadiness retire_exported_event(VmmBlock * block);
   bool probe_vmm_ipc();
   VmmBlock * create_block(size_t aligned_size);
 
