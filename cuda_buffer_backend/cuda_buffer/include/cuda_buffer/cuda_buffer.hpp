@@ -93,6 +93,11 @@ public:
 
   cudaEvent_t get_write_event() const {return write_event_;}
 
+  void release_write_event_ownership()
+  {
+    owns_write_event_ = false;
+  }
+
   void finalize_write_handle() const;
 
   size_t size() const {return size_;}

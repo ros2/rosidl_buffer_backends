@@ -40,19 +40,32 @@ namespace cuda_buffer_backend
 namespace
 {
 
-void check_uid_staleness(
+void acquire_ipc_lease(
   IPCMetadata * meta,
   uint32_t block_id,
   int32_t pid,
   uint64_t expected_uid)
 {
-  if (!meta || expected_uid == 0) {return;}
-  uint64_t current = meta->uid.load(std::memory_order_acquire);
+  if (!meta || expected_uid == 0) {
+    throw CudaError("IPC block is missing generation metadata");
+  }
+
+  uint64_t current = meta->uid.load(std::memory_order_seq_cst);
   if (current != expected_uid) {
     RCUTILS_LOG_WARN_NAMED("cuda_ipc",
-      "Stale block %u from pid %d: descriptor uid %lu, current uid %lu; dropping",
+      "Stale or closed block %u from pid %d: descriptor uid %lu, current uid %lu; dropping",
       block_id, pid, expected_uid, current);
-    throw CudaError("IPC block recycled before import (stale UID)");
+    throw CudaError("IPC block generation is stale or closed");
+  }
+
+  meta->refcount.fetch_add(1, std::memory_order_seq_cst);
+  current = meta->uid.load(std::memory_order_seq_cst);
+  if (current != expected_uid) {
+    meta->refcount.fetch_sub(1, std::memory_order_seq_cst);
+    RCUTILS_LOG_WARN_NAMED("cuda_ipc",
+      "Stale or closed block %u from pid %d: descriptor uid %lu, current uid %lu; dropping",
+      block_id, pid, expected_uid, current);
+    throw CudaError("IPC block recycled or closed before import");
   }
 }
 
@@ -452,15 +465,7 @@ CudaVmmIPCManager::ImportResult CudaVmmIPCManager::import_block(
   auto it = cache.find(cache_key);
   if (it != cache.end()) {
     IPCMetadata * meta = it->second.ipc_meta;
-    if (meta) {
-      meta->refcount.fetch_add(1, std::memory_order_acq_rel);
-    }
-    try {
-      check_uid_staleness(meta, block_id, pid, expected_uid);
-    } catch (...) {
-      if (meta) {meta->refcount.fetch_sub(1, std::memory_order_release);}
-      throw;
-    }
+    acquire_ipc_lease(meta, block_id, pid, expected_uid);
     return {it->second.va, meta};
   }
 
@@ -477,8 +482,13 @@ CudaVmmIPCManager::ImportResult CudaVmmIPCManager::import_block(
     }
   }
 
-  if (ipc_meta) {
-    ipc_meta->refcount.fetch_add(1, std::memory_order_acq_rel);
+  try {
+    acquire_ipc_lease(ipc_meta, block_id, pid, expected_uid);
+  } catch (...) {
+    if (ipc_meta) {
+      munmap(ipc_meta, sizeof(IPCMetadata));
+    }
+    throw;
   }
 
   CUmemGenericAllocationHandle handle = 0;
@@ -502,13 +512,6 @@ CudaVmmIPCManager::ImportResult CudaVmmIPCManager::import_block(
         munmap(ipc_meta, sizeof(IPCMetadata));
       }
     };
-
-  try {
-    check_uid_staleness(ipc_meta, block_id, pid, expected_uid);
-  } catch (...) {
-    cleanup_failed_import();
-    throw;
-  }
 
   int fd = receive_fd_from_socket(socket_path);
   if (fd < 0) {
