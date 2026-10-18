@@ -15,6 +15,7 @@
 from types import TracebackType
 from typing import Optional
 from typing import Type
+from typing import Union
 
 from rosidl_buffer import Buffer
 
@@ -53,9 +54,13 @@ class CudaWriteHandle:
     ) -> bool: ...
 
 
-def _from_cpu_data(data: bytes) -> Buffer: ...
-def _from_size(size: int) -> Buffer: ...
 def _allocate_buffer(size: int) -> Buffer: ...
+def _to_buffer(
+    source: Union[bytes, int],
+    byte_count: int,
+    handle: CudaWriteHandle,
+    stream: Optional[int] = None,
+) -> None: ...
 def _from_output_buffer(
     buffer: Buffer,
     stream: Optional[int] = None,

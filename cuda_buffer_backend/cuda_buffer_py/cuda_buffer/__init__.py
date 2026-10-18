@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Python factories for CUDA-backed ROS 2 buffers."""
+"""Allocate and access CUDA-backed ROS 2 buffers with scoped handles."""
 
 from collections.abc import Sized
 from typing import Iterable
@@ -20,35 +20,53 @@ from typing import Optional
 from typing import Union
 
 from cuda_buffer._cuda_buffer_py import _allocate_buffer
-from cuda_buffer._cuda_buffer_py import _from_cpu_data
 from cuda_buffer._cuda_buffer_py import _from_input_buffer
 from cuda_buffer._cuda_buffer_py import _from_input_cpu_data
 from cuda_buffer._cuda_buffer_py import _from_output_buffer
-from cuda_buffer._cuda_buffer_py import _from_size
+from cuda_buffer._cuda_buffer_py import _to_buffer
 from cuda_buffer._cuda_buffer_py import CudaReadHandle
 from cuda_buffer._cuda_buffer_py import CudaWriteHandle
 from rosidl_buffer import Buffer
 
 
 class CudaBuffer:
-    """Create CUDA-backed :class:`rosidl_buffer.Buffer` objects."""
-
-    @staticmethod
-    def from_cpu(data: Union[bytes, bytearray, Iterable[int]]) -> Buffer:
-        """Copy CPU byte data into a new CUDA-backed buffer."""
-        if not isinstance(data, bytes):
-            data = bytes(data)
-        return _from_cpu_data(data)
-
-    @staticmethod
-    def from_size(size: int) -> Buffer:
-        """Create a zero-initialized CUDA-backed buffer with ``size`` bytes."""
-        return _from_size(size)
+    """Allocate, acquire input/output handles, and copy into CUDA buffers."""
 
     @staticmethod
     def allocate_buffer(size: int) -> Buffer:
         """Allocate an uninitialized CUDA-backed buffer without synchronizing."""
         return _allocate_buffer(size)
+
+    @staticmethod
+    def to_buffer(
+        source: Union[bytes, bytearray, memoryview, Iterable[int], int],
+        byte_count: int,
+        handle: CudaWriteHandle,
+        stream: Optional[int] = None,
+    ) -> None:
+        """
+        Copy bytes into an existing, open write handle without finalizing it.
+
+        Host bytes or an iterable of byte values are copied host-to-device;
+        an integer source is a device pointer and is copied device-to-device.
+        ``byte_count`` must be nonnegative and fit the destination and, for
+        host data, the source. Device pointer capacity is the caller's
+        responsibility. A null device pointer is allowed only for a zero-byte
+        copy.
+
+        ``stream`` is an integer CUDA stream pointer. Omit it to use the
+        handle's stream; an explicit stream must match the handle's stream.
+        Host copies synchronize that stream before returning, so the source
+        can immediately be changed or released. Device copies are asynchronous:
+        make the source ready on this stream and retain its storage until the
+        copy completes (e.g. use a read handle on the same stream).
+
+        Further GPU writes may be queued on this stream in the same handle
+        scope. Only closing the handle finalizes the producer payload.
+        """
+        if not isinstance(source, (bytes, int)):
+            source = bytes(source)
+        _to_buffer(source, byte_count, handle, stream)
 
     @staticmethod
     def from_output_buffer(

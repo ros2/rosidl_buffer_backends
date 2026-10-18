@@ -99,7 +99,9 @@ def test_multiprocess_rclpy_cuda_buffer_transport():
         msg.width = 64
         msg.encoding = '8UC1'
         msg.step = 64
-        msg.data = CudaBuffer.from_cpu(EXPECTED_PAYLOAD)
+        msg.data = CudaBuffer.allocate_buffer(len(EXPECTED_PAYLOAD))
+        with CudaBuffer.from_output_buffer(msg.data) as handle:
+            CudaBuffer.to_buffer(EXPECTED_PAYLOAD, len(EXPECTED_PAYLOAD), handle)
 
         for _ in range(5):
             publisher.publish(msg)

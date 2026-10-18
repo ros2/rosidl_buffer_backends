@@ -72,8 +72,8 @@ class CudaWriteHandleWrapper
 public:
   CudaWriteHandleWrapper(
     cuda_buffer_backend::WriteHandle && handle,
-    py::object buffer)
-  : buffer_(std::move(buffer)), handle_(std::move(handle))
+    py::object buffer, size_t size, cudaStream_t stream)
+  : buffer_(std::move(buffer)), handle_(std::move(handle)), size_(size), stream_(stream)
   {
   }
 
@@ -94,6 +94,47 @@ public:
 
   py::object get_buffer() const {return buffer_;}
 
+  void copy_from(const py::object & source, py::ssize_t byte_count, const py::object & stream)
+  {
+    // Check even zero-byte copies: a closed handle must never be reused.
+    (void)get_ptr();
+    if (byte_count < 0) {
+      throw py::value_error("byte_count must be nonnegative");
+    }
+    const auto size = static_cast<size_t>(byte_count);
+    if (size > size_) {
+      throw py::value_error("byte_count exceeds destination size");
+    }
+    if (!stream.is_none() && reinterpret_cast<cudaStream_t>(stream.cast<uintptr_t>()) !=
+      stream_)
+    {
+      throw py::value_error("stream must match the write handle's stream");
+    }
+
+    if (py::isinstance<py::bytes>(source)) {
+      std::string bytes = source.cast<std::string>();
+      if (size > bytes.size()) {
+        throw py::value_error("byte_count exceeds host source size");
+      }
+      cuda_buffer_backend::to_buffer(
+        bytes.data(), size, *handle_, stream_, cudaMemcpyHostToDevice);
+      if (size > 0) {
+        // cudaMemcpyAsync may still reference bytes after enqueueing. Keep
+        // this storage alive until the host-to-device transfer completes.
+        CUDA_CHECK(cudaStreamSynchronize(stream_));
+      }
+    } else if (py::isinstance<py::int_>(source)) {
+      const auto ptr = source.cast<uintptr_t>();
+      if (ptr == 0 && size > 0) {
+        throw py::value_error("device source pointer must be nonzero");
+      }
+      cuda_buffer_backend::to_buffer(
+        reinterpret_cast<const void *>(ptr), size, *handle_, stream_, cudaMemcpyDeviceToDevice);
+    } else {
+      throw py::type_error("source must be bytes or an integer device pointer");
+    }
+  }
+
   void close()
   {
     // Keep buffer_ available after close so callers can assign a promoted
@@ -106,6 +147,8 @@ private:
   // record its event while the underlying CUDA allocation is still alive.
   py::object buffer_;
   std::optional<cuda_buffer_backend::WriteHandle> handle_;
+  size_t size_;
+  cudaStream_t stream_;
 };
 
 cudaStream_t stream_from_python(const py::object & stream)
@@ -121,42 +164,6 @@ py::object wrap_cuda_buffer(std::unique_ptr<rosidl::Buffer<uint8_t>> buffer)
   py::module_ rosidl_buffer_module = py::module_::import("rosidl_buffer._rosidl_buffer_py");
   return rosidl_buffer_module.attr("_take_buffer_from_ptr")(
     reinterpret_cast<uintptr_t>(buffer.release()));
-}
-
-std::unique_ptr<rosidl::Buffer<uint8_t>> allocate_and_copy(
-  const void * data, size_t size)
-{
-  auto buffer = std::make_unique<rosidl::Buffer<uint8_t>>(
-    cuda_buffer_backend::allocate_buffer(size));
-
-  if (size > 0) {
-    cudaStream_t stream = cuda_buffer_backend::get_internal_stream();
-    {
-      auto write_handle = cuda_buffer_backend::from_output_buffer(*buffer, stream);
-      cuda_buffer_backend::to_buffer(
-        data, size, write_handle, stream, cudaMemcpyHostToDevice);
-    }
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-  }
-
-  return buffer;
-}
-
-std::unique_ptr<rosidl::Buffer<uint8_t>> allocate_zeroed(size_t size)
-{
-  auto buffer = std::make_unique<rosidl::Buffer<uint8_t>>(
-    cuda_buffer_backend::allocate_buffer(size));
-
-  if (size > 0) {
-    cudaStream_t stream = cuda_buffer_backend::get_internal_stream();
-    {
-      auto write_handle = cuda_buffer_backend::from_output_buffer(*buffer, stream);
-      CUDA_CHECK(cudaMemsetAsync(write_handle.get_ptr(), 0, size, stream));
-    }
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-  }
-
-  return buffer;
 }
 
 }  // namespace
@@ -205,21 +212,6 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
     });
 
   module.def(
-    "_from_cpu_data",
-    [](py::bytes data) {
-      std::string bytes = data;
-      return wrap_cuda_buffer(allocate_and_copy(bytes.data(), bytes.size()));
-    },
-    py::arg("data"));
-
-  module.def(
-    "_from_size",
-    [](size_t size) {
-      return wrap_cuda_buffer(allocate_zeroed(size));
-    },
-    py::arg("size"));
-
-  module.def(
     "_allocate_buffer",
     [](size_t size) {
       auto buffer = std::make_unique<rosidl::Buffer<uint8_t>>(
@@ -229,15 +221,25 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
     py::arg("size"));
 
   module.def(
+    "_to_buffer",
+    [](py::object source, py::ssize_t byte_count, CudaWriteHandleWrapper & handle,
+    py::object stream) {
+      handle.copy_from(source, byte_count, stream);
+    },
+    py::arg("source"), py::arg("byte_count"), py::arg("handle"),
+    py::arg("stream") = py::none());
+
+  module.def(
     "_from_output_buffer",
     [](py::object buffer, py::object stream) {
       py::module_ rosidl_buffer_module = py::module_::import(
         "rosidl_buffer._rosidl_buffer_py");
       uintptr_t ptr = rosidl_buffer_module.attr("_get_buffer_ptr")(buffer).cast<uintptr_t>();
       auto * cpp_buffer = reinterpret_cast<rosidl::Buffer<uint8_t> *>(ptr);
-      auto write_handle = cuda_buffer_backend::from_output_buffer(
-        *cpp_buffer, stream_from_python(stream));
-      return CudaWriteHandleWrapper(std::move(write_handle), std::move(buffer));
+      const auto cuda_stream = stream_from_python(stream);
+      auto write_handle = cuda_buffer_backend::from_output_buffer(*cpp_buffer, cuda_stream);
+      return CudaWriteHandleWrapper(
+        std::move(write_handle), std::move(buffer), cpp_buffer->size(), cuda_stream);
     },
     py::arg("buffer"),
     py::arg("stream") = py::none());
@@ -249,8 +251,16 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
         "rosidl_buffer._rosidl_buffer_py");
       uintptr_t ptr = rosidl_buffer_module.attr("_get_buffer_ptr")(buffer).cast<uintptr_t>();
       auto * cpp_buffer = reinterpret_cast<rosidl::Buffer<uint8_t> *>(ptr);
+      const auto cuda_stream = stream_from_python(stream);
       auto read_handle = cuda_buffer_backend::from_input_buffer(
-        *cpp_buffer, stream_from_python(stream));
+        *cpp_buffer, cuda_stream);
+      if (!dynamic_cast<const cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(
+        cpp_buffer->get_impl()))
+      {
+        // CPU storage can be changed or released as soon as Python regains
+        // control, even if the returned read handle is immediately closed.
+        CUDA_CHECK(cudaStreamSynchronize(cuda_stream));
+      }
       return CudaReadHandleWrapper(std::move(read_handle), std::move(buffer));
     },
     py::arg("buffer"),
@@ -262,8 +272,11 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
       std::string bytes = data;
       std::vector<uint8_t> storage(bytes.begin(), bytes.end());
       rosidl::Buffer<uint8_t> cpu_buffer(std::move(storage));
+      const auto cuda_stream = stream_from_python(stream);
       auto read_handle = cuda_buffer_backend::from_input_buffer(
-        cpu_buffer, stream_from_python(stream));
+        cpu_buffer, cuda_stream);
+      // The temporary CPU buffer must outlive its asynchronous promotion.
+      CUDA_CHECK(cudaStreamSynchronize(cuda_stream));
       return CudaReadHandleWrapper(std::move(read_handle), py::none());
     },
     py::arg("data"),
