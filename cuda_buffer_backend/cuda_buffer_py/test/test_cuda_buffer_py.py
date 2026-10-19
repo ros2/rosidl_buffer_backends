@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from array import array
 import ctypes
 import ctypes.util
 import gc
@@ -19,11 +20,13 @@ import subprocess
 import sys
 import textwrap
 
+import _cuda_buffer_test_utils as buffer_test_utils
 from cuda_buffer import CudaBuffer
 from cuda_buffer import CudaReadHandle
 from cuda_buffer import CudaWriteHandle
 import pytest
 from rosidl_buffer import Buffer
+from rosidl_buffer._rosidl_buffer_py import _get_buffer_ptr
 
 
 @pytest.fixture
@@ -59,6 +62,8 @@ def stream(cudart):
 def test_core_operations():
     assert {name for name in vars(CudaBuffer) if not name.startswith('_')} == {
         'allocate_buffer', 'from_output_buffer', 'from_input_buffer', 'to_buffer'}
+    assert not hasattr(CudaReadHandle, 'buffer')
+    assert not hasattr(CudaWriteHandle, 'buffer')
 
 
 @pytest.mark.parametrize('source', [
@@ -70,7 +75,7 @@ def test_to_buffer_host_data(source):
     with CudaBuffer.from_output_buffer(buffer) as handle:
         assert CudaBuffer.to_buffer(source, 32, handle) is None
         assert not handle.closed
-        assert handle.buffer is buffer
+        assert handle.get_promoted_buffer() is None
 
     assert isinstance(buffer, Buffer)
     assert buffer.backend_type == 'cuda'
@@ -216,6 +221,13 @@ def test_standalone_without_torch():
             with CudaBuffer.from_output_buffer(buffer) as handle:
                 CudaBuffer.to_buffer(b'abcd', 4, handle)
             assert buffer.to_bytes() == b'abcd'
+            with CudaBuffer.from_input_buffer(b'abcd') as handle:
+                promoted = handle.get_promoted_buffer()
+            assert promoted.to_bytes() == b'abcd'
+            with CudaBuffer.from_output_buffer(b'xxxx') as handle:
+                promoted = handle.get_promoted_buffer()
+                CudaBuffer.to_buffer(b'abcd', 4, handle)
+            assert promoted.to_bytes() == b'abcd'
         """)], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -241,31 +253,56 @@ def test_from_output_cuda_buffer():
 
     with CudaBuffer.from_output_buffer(buffer) as handle:
         assert isinstance(handle, CudaWriteHandle)
-        assert handle.buffer is buffer
+        assert handle.get_promoted_buffer() is None
         assert handle.device_ptr != 0
         assert handle.get_ptr() == handle.device_ptr
         assert not handle.closed
 
     assert handle.closed
-    assert handle.buffer is buffer
+    with pytest.raises(RuntimeError, match='closed'):
+        handle.get_promoted_buffer()
     with pytest.raises(RuntimeError, match='closed'):
         handle.get_ptr()
 
 
-def test_from_output_cpu_data_promotes_to_cuda():
-    handle = CudaBuffer.from_output_buffer(bytes(32))
+@pytest.mark.parametrize('source_factory', [
+    bytes, bytearray, memoryview, list, tuple, iter,
+    lambda data: array('H', data),
+    lambda data: memoryview(array('I', data)),
+    lambda data: memoryview(data)[::2],
+])
+def test_from_output_cpu_data_promotes_to_cuda(source_factory, cudart, stream):
+    original = bytes(range(32))
+    source = source_factory(original)
+    expected_size = len(bytes(source_factory(original)))
+    with CudaBuffer.from_output_buffer(source, stream) as handle:
+        assert isinstance(handle, CudaWriteHandle)
+        promoted = handle.get_promoted_buffer()
+        again = handle.get_promoted_buffer()
+        assert isinstance(promoted, Buffer)
+        assert promoted.backend_type == 'cuda'
+        assert len(promoted) == expected_size
+        # Retrieval returns the retained Python owner and does not consume it.
+        assert again is promoted
+        assert _get_buffer_ptr(promoted) == _get_buffer_ptr(again)
+        del again
+        gc.collect()
+        assert not handle.closed
+        CudaBuffer.to_buffer(bytes([17]) * expected_size, expected_size, handle)
+        assert cudart.cudaMemsetAsync(handle.device_ptr, 23, expected_size, stream) == 0
 
-    assert isinstance(handle, CudaWriteHandle)
-    assert isinstance(handle.buffer, Buffer)
-    assert handle.buffer.backend_type == 'cuda'
-    assert len(handle.buffer) == 32
-    assert handle.device_ptr != 0
-    CudaBuffer.to_buffer(bytes(range(32)), 32, handle)
     handle.close()
-    handle.close()
-    assert handle.closed
-    assert handle.buffer.backend_type == 'cuda'
-    assert handle.buffer.to_bytes() == bytes(range(32))
+    with pytest.raises(RuntimeError, match='closed'):
+        handle.get_promoted_buffer()
+    del handle
+    gc.collect()
+    assert promoted.to_bytes() == bytes([23]) * expected_size
+    if not hasattr(source, '__next__'):
+        assert bytes(source) == bytes(source_factory(original))
+    with pytest.raises(RuntimeError, match='write.*finalized'):
+        CudaBuffer.from_output_buffer(promoted, stream)
+    with CudaBuffer.from_input_buffer(promoted, stream) as reader:
+        assert reader.get_promoted_buffer() is None
 
 
 def test_from_output_can_only_be_acquired_once():
@@ -291,23 +328,52 @@ def test_from_input_cuda_buffer():
 
     with CudaBuffer.from_input_buffer(buffer) as handle:
         assert isinstance(handle, CudaReadHandle)
+        assert handle.get_promoted_buffer() is None
         assert handle.device_ptr != 0
         assert handle.get_ptr() == handle.device_ptr
         assert not handle.closed
 
     assert handle.closed
     with pytest.raises(RuntimeError, match='closed'):
+        handle.get_promoted_buffer()
+    with pytest.raises(RuntimeError, match='closed'):
         handle.get_ptr()
 
 
-def test_from_input_cpu_data_promotes_to_cuda():
-    handle = CudaBuffer.from_input_buffer(bytes(range(32)))
+@pytest.mark.parametrize('source_factory', [
+    bytes, bytearray, memoryview, list, tuple, iter,
+    lambda data: array('H', data),
+    lambda data: memoryview(array('I', data)),
+    lambda data: memoryview(data)[::2],
+])
+def test_from_input_cpu_data_promotes_to_cuda(source_factory):
+    original = bytes(range(32))
+    source = source_factory(original)
+    expected = bytes(source_factory(original))
+    with CudaBuffer.from_input_buffer(source) as handle:
+        assert isinstance(handle, CudaReadHandle)
+        promoted = handle.get_promoted_buffer()
+        again = handle.get_promoted_buffer()
+        assert isinstance(promoted, Buffer)
+        assert promoted.backend_type == 'cuda'
+        assert again is promoted
+        assert _get_buffer_ptr(promoted) == _get_buffer_ptr(again)
+        pointer = handle.device_ptr
+        with CudaBuffer.from_input_buffer(promoted) as reader:
+            assert reader.device_ptr == pointer
+            assert reader.get_promoted_buffer() is None
+        del promoted
+        gc.collect()
+        assert handle.get_promoted_buffer().to_bytes() == expected
 
-    assert isinstance(handle, CudaReadHandle)
-    assert handle.device_ptr != 0
     handle.close()
-    handle.close()
-    assert handle.closed
+    del handle
+    gc.collect()
+    assert again.to_bytes() == expected
+    if not hasattr(source, '__next__'):
+        assert bytes(source) == expected
+    with pytest.raises(RuntimeError, match='write.*finalized'):
+        CudaBuffer.from_output_buffer(again)
 
 
 @pytest.mark.parametrize('buffer_type', [bytes, bytearray, memoryview])
@@ -316,6 +382,8 @@ def test_cpu_input_promotion_lifetime(cudart, stream, buffer_type):
     source = buffer_type(expected)
     with CudaBuffer.from_input_buffer(source, stream) as handle:
         assert cudart.cudaStreamQuery(stream) == 0
+        if isinstance(source, bytearray):
+            source[:] = bytes(len(source))
         del source
         gc.collect()
         host = ctypes.create_string_buffer(len(expected))
@@ -327,3 +395,52 @@ def test_cpu_input_promotion_lifetime(cudart, stream, buffer_type):
 def test_from_input_empty_buffer_raises():
     with pytest.raises(RuntimeError, match='empty buffer'):
         CudaBuffer.from_input_buffer(b'')
+
+
+@pytest.mark.parametrize('output', [False, True])
+def test_native_cpu_buffer_promotion(output, stream):
+    expected = bytes(range(32))
+    source = buffer_test_utils.make_cpu_buffer(expected)
+    assert source.backend_type == 'cpu'
+    acquire = CudaBuffer.from_output_buffer if output else CudaBuffer.from_input_buffer
+    with acquire(source, stream) as handle:
+        promoted = handle.get_promoted_buffer()
+        assert promoted.backend_type == 'cuda'
+        assert _get_buffer_ptr(promoted) != _get_buffer_ptr(source)
+        if output:
+            expected = b'x' * len(expected)
+            CudaBuffer.to_buffer(expected, len(expected), handle)
+        assert source.to_bytes() == bytes(range(32))
+        del source
+        gc.collect()
+    del handle
+    gc.collect()
+    assert promoted.to_bytes() == expected
+
+
+@pytest.mark.parametrize('output', [False, True])
+def test_handle_retains_promoted_python_owner(output):
+    acquire = CudaBuffer.from_output_buffer if output else CudaBuffer.from_input_buffer
+    handle = acquire(b'abcd')
+    if output:
+        CudaBuffer.to_buffer(b'abcd', 4, handle)
+    promoted = handle.get_promoted_buffer()
+    native_pointer = _get_buffer_ptr(promoted)
+    del promoted
+    gc.collect()
+    # Only the handle retains the Python owner until this retrieval.
+    retained = handle.get_promoted_buffer()
+    assert _get_buffer_ptr(retained) == native_pointer
+    assert handle.get_promoted_buffer() is retained
+    handle.close()
+    del handle
+    gc.collect()
+    assert retained.to_bytes() == b'abcd'
+
+
+@pytest.mark.parametrize('output', [False, True])
+def test_empty_native_cpu_buffer_raises(output):
+    source = buffer_test_utils.make_cpu_buffer(b'')
+    acquire = CudaBuffer.from_output_buffer if output else CudaBuffer.from_input_buffer
+    with pytest.raises(RuntimeError, match='empty buffer'):
+        acquire(source)

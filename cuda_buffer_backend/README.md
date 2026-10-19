@@ -153,7 +153,7 @@ The `cuda_buffer_py` package exposes the same four core operations as C++:
 | Operation | Responsibility |
 | --- | --- |
 | `CudaBuffer.allocate_buffer(size)` | Allocate uninitialized CUDA storage, without acquiring a producer handle. |
-| `CudaBuffer.from_output_buffer(buffer, stream=None)` | Acquire the buffer's single producer write handle. |
+| `CudaBuffer.from_output_buffer(buffer, stream=None)` | Acquire the single producer write handle; promote non-CUDA output using its byte size, without copying contents. |
 | `CudaBuffer.from_input_buffer(buffer, stream=None)` | Acquire a consumer read handle, promoting CPU input automatically. |
 | `CudaBuffer.to_buffer(source, byte_count, handle, stream=None)` | Copy into an existing, open `CudaWriteHandle`. |
 
@@ -186,14 +186,39 @@ publisher.publish(msg)
 
 Leaving the context records the producer event on `stream_ptr` and finalizes
 the payload; it does not synchronize the stream. A second write handle cannot
-be acquired for that buffer. `write_handle.buffer` holds the CUDA buffer and is
-useful when `from_output_buffer()` promotes a non-CUDA value based on its size:
+be acquired for that buffer. Both handle types expose
+`get_promoted_buffer() -> Optional[Buffer]`, matching C++. It returns the new CUDA
+buffer when promotion occurred, or `None` for an already-CUDA argument. There is
+no `.buffer` property. Retrieve the promoted buffer while the handle is open;
+the returned object is the same Python `Buffer` retained by the handle and remains
+valid after the handle closes. Repeated retrieval does not consume the promotion.
+Closed handles reject pointer access and `get_promoted_buffer()` with `RuntimeError`.
+
+The original CPU buffer is unchanged. Assign the promoted output back to the
+message before publishing:
 
 ```python
 with CudaBuffer.from_output_buffer(msg.data, stream_ptr) as write_handle:
-    msg.data = write_handle.buffer
+    promoted = write_handle.get_promoted_buffer()
+    if promoted is not None:
+        msg.data = promoted
     produce_device_data(write_handle.device_ptr, len(msg.data), stream_ptr)
+
+publisher.publish(msg)
 ```
+
+Promotion is implemented in the Python bindings. They allocate a Python-owned
+CUDA buffer before acquiring native handles and remember whether the original
+argument required promotion. Existing CUDA buffers are used directly. Input
+promotion copies CPU contents through an internal producer write scope, closes
+that writer, and acquires a read handle. Output promotion acquires a write handle
+without copying CPU contents. Both paths preserve the C++ single-write lifecycle.
+
+The acquisition functions also accept `bytes`, `bytearray`, `memoryview`, and
+iterables of byte values. Containers use the byte sequence produced by
+`bytes(container)`, including the full byte count of typed arrays or views.
+No temporary native CPU buffer is required. For new GPU payloads, use explicit
+`allocate_buffer()` followed by write-handle acquisition.
 
 For CPU-originated data, allocate storage, acquire a write handle, and use
 `to_buffer()` to copy into it. The copy leaves the handle open for further GPU
@@ -273,6 +298,9 @@ no CPU conversion or stream synchronization in this CUDA-to-CUDA path. If no
 stream is supplied, the backend's process-lifetime internal stream is used.
 CPU fallback input is promoted with a host-to-device copy on the selected
 stream, synchronized before returning so its host source can safely be released.
+To keep or forward that CUDA copy after reading, save
+`read_handle.get_promoted_buffer()` inside the context and retain the returned
+`Buffer`. This does not acquire a producer handle or reopen the finalized payload.
 
 Subscribers opt in to delivery through the CUDA backend with rclpy's
 `acceptable_buffer_backends` argument. CPU remains an implicit fallback when
