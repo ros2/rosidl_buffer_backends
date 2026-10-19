@@ -19,8 +19,11 @@ import textwrap
 import time
 import uuid
 
+import pytest
 
-def test_multiprocess_rclpy_cuda_buffer_transport():
+
+@pytest.mark.parametrize('creation', ['allocate', 'promote_output', 'promote_input'])
+def test_multiprocess_rclpy_cuda_buffer_transport(creation):
     """Validate five Python-created CUDA buffers between rclpy processes."""
     topic = f'cuda_buffer_py_{uuid.uuid4().hex}'
     subscriber_source = textwrap.dedent(f"""
@@ -50,6 +53,7 @@ def test_multiprocess_rclpy_cuda_buffer_transport():
 
             with CudaBuffer.from_input_buffer(msg.data) as handle:
                 assert handle.device_ptr != 0
+                assert handle.get_promoted_buffer() is None
 
             valid = msg.data.to_bytes() == EXPECTED_PAYLOAD
             received.append(valid)
@@ -99,7 +103,19 @@ def test_multiprocess_rclpy_cuda_buffer_transport():
         msg.width = 64
         msg.encoding = '8UC1'
         msg.step = 64
-        msg.data = CudaBuffer.from_cpu(EXPECTED_PAYLOAD)
+        if '{creation}' == 'promote_input':
+            with CudaBuffer.from_input_buffer(EXPECTED_PAYLOAD) as handle:
+                msg.data = handle.get_promoted_buffer()
+        else:
+            if '{creation}' == 'allocate':
+                msg.data = CudaBuffer.allocate_buffer(len(EXPECTED_PAYLOAD))
+            else:
+                msg.data = bytes(len(EXPECTED_PAYLOAD))
+            with CudaBuffer.from_output_buffer(msg.data) as handle:
+                promoted = handle.get_promoted_buffer()
+                if promoted is not None:
+                    msg.data = promoted
+                CudaBuffer.to_buffer(EXPECTED_PAYLOAD, len(EXPECTED_PAYLOAD), handle)
 
         for _ in range(5):
             publisher.publish(msg)

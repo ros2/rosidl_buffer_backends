@@ -2,12 +2,19 @@
 
 CUDA buffer backend plugin for the ROS 2 Buffer system. Enables zero-copy GPU memory sharing between publishers and subscribers on the same host using CUDA VMM (Virtual Memory Management).
 
+See the [design document](docs/cuda_buffer_backend_design.md) for architecture
+and implementation details.
+
+## Prerequisites
+
+- A ROS 2 Rolling source workspace; see
+  [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
+  for the canonical setup.
+- CUDA Toolkit (>= 11.8) on the host.
+
 ## Build
 
-Requires a ROS 2 Rolling source workspace; see
-[Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Installation/Alternatives/Ubuntu-Development-Setup.html)
-for the canonical setup. After cloning this repo into your workspace's
-`src/` directory:
+After cloning this repo into your workspace's `src/` directory:
 
 ```bash
 # Install system dependencies (CUDA toolkit, etc.).
@@ -31,7 +38,7 @@ colcon test-result --verbose
 | Package | Description |
 |---|---|
 | `cuda_buffer` | Core CUDA buffer implementation: memory pool, IPC manager, host endpoint manager, and user-facing `allocate_buffer` / `from_input_buffer` / `from_output_buffer` / `to_buffer` APIs |
-| `cuda_buffer_py` | Python CUDA buffer allocation plus scoped read/write handles for rclpy publishers and subscribers |
+| `cuda_buffer_py` | Python allocation, scoped read/write handles, and copying into open write handles for rclpy or standalone use |
 | `cuda_buffer_backend` | Plugin registration via `pluginlib`, endpoint discovery, and descriptor serialization |
 | `cuda_buffer_backend_msgs` | ROS 2 message definition for `CudaBufferDescriptor` |
 
@@ -141,9 +148,18 @@ cuda_buffer_backend::ReadHandle rh =
 
 ### Python (rclpy)
 
-The `cuda_buffer_py` package exposes the same scoped input/output model to
-rclpy. For a direct CUDA producer, allocate device storage and write it on the
-same stream used by the producing kernel:
+The `cuda_buffer_py` package exposes the same four core operations as C++:
+
+| Operation | Responsibility |
+| --- | --- |
+| `CudaBuffer.allocate_buffer(size)` | Allocate uninitialized CUDA storage, without acquiring a producer handle. |
+| `CudaBuffer.from_output_buffer(buffer, stream=None)` | Acquire the single producer write handle; promote non-CUDA output using its byte size, without copying contents. |
+| `CudaBuffer.from_input_buffer(buffer, stream=None)` | Acquire a consumer read handle, promoting CPU input automatically. |
+| `CudaBuffer.to_buffer(source, byte_count, handle, stream=None)` | Copy into an existing, open `CudaWriteHandle`. |
+
+Standalone use requires no Torch installation. For a direct CUDA producer,
+allocate device storage and write it on the same stream used by the producing
+kernel:
 
 ```python
 from cuda_buffer import CudaBuffer
@@ -168,31 +184,93 @@ with CudaBuffer.from_output_buffer(msg.data, stream_ptr) as write_handle:
 publisher.publish(msg)
 ```
 
-Leaving the context records the producer event on `stream_ptr`; it does not
-synchronize the stream. `write_handle.buffer` holds the CUDA buffer and is
-useful when `from_output_buffer()` promotes a non-CUDA value based on its size:
+Leaving the context records the producer event on `stream_ptr` and finalizes
+the payload; it does not synchronize the stream. A second write handle cannot
+be acquired for that buffer. Both handle types expose
+`get_promoted_buffer() -> Optional[Buffer]`, matching C++. It returns the new CUDA
+buffer when promotion occurred, or `None` for an already-CUDA argument. There is
+no `.buffer` property. Retrieve the promoted buffer while the handle is open;
+the returned object is the same Python `Buffer` retained by the handle and remains
+valid after the handle closes. Repeated retrieval does not consume the promotion.
+Closed handles reject pointer access and `get_promoted_buffer()` with `RuntimeError`.
+
+The original CPU buffer is unchanged. Assign the promoted output back to the
+message before publishing:
 
 ```python
 with CudaBuffer.from_output_buffer(msg.data, stream_ptr) as write_handle:
-    msg.data = write_handle.buffer
+    promoted = write_handle.get_promoted_buffer()
+    if promoted is not None:
+        msg.data = promoted
     produce_device_data(write_handle.device_ptr, len(msg.data), stream_ptr)
+
+publisher.publish(msg)
 ```
 
-For CPU-originated data, `from_cpu()` copies bytes to device memory, while
-`from_size()` creates a zero-initialized device buffer. These convenience
-factories synchronize their initialization before returning:
+Promotion is implemented in the Python bindings. They allocate a Python-owned
+CUDA buffer before acquiring native handles and remember whether the original
+argument required promotion. Existing CUDA buffers are used directly. Input
+promotion copies CPU contents through an internal producer write scope, closes
+that writer, and acquires a read handle. Output promotion acquires a write handle
+without copying CPU contents. Both paths preserve the C++ single-write lifecycle.
+
+The acquisition functions also accept `bytes`, `bytearray`, `memoryview`, and
+iterables of byte values. Containers use the byte sequence produced by
+`bytes(container)`, including the full byte count of typed arrays or views.
+No temporary native CPU buffer is required. For new GPU payloads, use explicit
+`allocate_buffer()` followed by write-handle acquisition.
+
+For CPU-originated data, allocate storage, acquire a write handle, and use
+`to_buffer()` to copy into it. The copy leaves the handle open for further GPU
+writes in the same scope:
 
 ```python
 from cuda_buffer import CudaBuffer
 from sensor_msgs.msg import Image
+
+stream_ptr = get_current_cuda_stream_ptr()
 
 msg = Image()
 msg.height = 480
 msg.width = 640
 msg.encoding = 'rgb8'
 msg.step = 640 * 3
-msg.data = CudaBuffer.from_cpu(host_image_bytes)
+msg.data = CudaBuffer.allocate_buffer(len(host_image_bytes))
+with CudaBuffer.from_output_buffer(msg.data, stream_ptr) as write_handle:
+    CudaBuffer.to_buffer(host_image_bytes, len(host_image_bytes), write_handle, stream_ptr)
+    # Optional additional GPU writes on stream_ptr before the handle closes.
+    produce_device_data(write_handle.device_ptr, len(msg.data), stream_ptr)
 publisher.publish(msg)
+```
+
+`source` accepts host `bytes`, `bytearray`, `memoryview`, or an iterable of byte
+values, or an integer device pointer. The byte count is explicit and must be
+nonnegative and no larger than the destination; host copies also validate the
+source length. A smaller count copies only that prefix. Zero bytes is a no-op
+on an open handle. Closed handles raise `RuntimeError`; invalid sizes, a null
+device pointer for a nonempty copy, and mismatched streams raise `ValueError`.
+For device pointers, the caller must supply a valid allocation of at least
+`byte_count` bytes.
+
+`to_buffer()` uses the handle's stream when `stream` is omitted. An explicit
+stream must match the stream used to acquire the handle, so its completion
+event covers the copy and subsequent writes. It does not allocate a destination,
+acquire another handle, or close the supplied handle. Host copies synchronize
+that stream before returning, keeping temporary host storage alive until the
+copy completes; the caller may then change or release the source. For zero
+initialization, copy `bytes(size)` through the same allocation/write/copy path.
+
+Device-to-device copies are asynchronous. Make the source ready on the copy
+stream and keep its storage alive until the copy completes. A CUDA read handle
+on the same stream provides both ordering and allocation lifetime:
+
+```python
+destination = CudaBuffer.allocate_buffer(len(source_buffer))
+with CudaBuffer.from_output_buffer(destination, stream_ptr) as write_handle:
+    with CudaBuffer.from_input_buffer(source_buffer, stream_ptr) as read_handle:
+        CudaBuffer.to_buffer(
+            read_handle.device_ptr, len(source_buffer), write_handle, stream_ptr)
+    produce_device_data(write_handle.device_ptr, len(destination), stream_ptr)
 ```
 
 Python subscribers can acquire the same scoped CUDA read access as the C++
@@ -218,8 +296,11 @@ promoted CUDA buffer alive, and leaving the context records a read event so the
 backend does not recycle the allocation before queued work completes. There is
 no CPU conversion or stream synchronization in this CUDA-to-CUDA path. If no
 stream is supplied, the backend's process-lifetime internal stream is used.
-CPU fallback input is promoted with an asynchronous host-to-device copy on the
-selected stream.
+CPU fallback input is promoted with a host-to-device copy on the selected
+stream, synchronized before returning so its host source can safely be released.
+To keep or forward that CUDA copy after reading, save
+`read_handle.get_promoted_buffer()` inside the context and retain the returned
+`Buffer`. This does not acquire a producer handle or reopen the finalized payload.
 
 Subscribers opt in to delivery through the CUDA backend with rclpy's
 `acceptable_buffer_backends` argument. CPU remains an implicit fallback when

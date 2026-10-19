@@ -43,9 +43,13 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
 
+  pybind11_add_module(_cuda_buffer_test_utils test/buffer_test_utils.cpp)
+  target_link_libraries(_cuda_buffer_test_utils PRIVATE rosidl_buffer::rosidl_buffer)
+
   ament_add_pytest_test(test_cuda_buffer_py
     test/test_cuda_buffer_py.py
     TIMEOUT 60
+    APPEND_ENV "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}"
   )
 
   ament_add_pytest_test(test_cuda_buffer_py_pubsub
