@@ -10,7 +10,7 @@ find_package(ament_cmake_vendor_package REQUIRED)
 include(cmake/libtorch_cuda_vendor_policy.cmake)
 
 set(LIBTORCH_CUDA_VENDOR_VARIANT "" CACHE STRING
-  "Fallback CUDA variant override (cu130, cu132).")
+  "Fallback CUDA variant override (cu126, cu130, cu132).")
 
 option(FORCE_BUILD_VENDOR_PKG
   "Disable reuse of a platform-provided LibTorch distribution"
@@ -40,8 +40,9 @@ if(LIBTORCH_CUDA_VENDOR_TORCH_DIR)
 endif()
 if(NOT LIBTORCH_CUDA_VENDOR_TORCH_DIR)
   if(NOT CUDAToolkit_FOUND)
-    message(FATAL_ERROR "${PROJECT_NAME}: the pinned CUDA fallback requires a CUDA 13.1 toolkit. "
-      "Install it through rosdep/APT and select it with -DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
+    message(FATAL_ERROR "${PROJECT_NAME}: the pinned CUDA fallback requires a compatible CUDA toolkit "
+      "(12.6 through 12.x for cu126, 13.0+ for cu130, 13.2+ for cu132). "
+      "Install it and select it with CUDAToolkit_ROOT.")
   endif()
   libtorch_cuda_vendor_variant_for_cuda("${CUDAToolkit_VERSION}" _fallback_variant)
   if(_requested_variant)
