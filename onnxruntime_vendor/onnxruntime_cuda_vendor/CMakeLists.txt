@@ -40,10 +40,11 @@ if(ONNXRUNTIME_REUSED_LIBRARY_DIR)
     "prepend-non-duplicate;LD_LIBRARY_PATH;${ONNXRUNTIME_REUSED_LIBRARY_DIR}\n")
   ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/reused_onnxruntime.dsv")
 else()
-  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "13.1")
+  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "12.8" OR
+      NOT CUDAToolkit_VERSION_MAJOR MATCHES "^(12|13)$")
     message(FATAL_ERROR "${PROJECT_NAME}: the pinned ONNX Runtime 1.29.0 CUDA fallback requires "
-      "CUDA >=13.1; selected toolkit is '${CUDAToolkit_VERSION}'. Install CUDA 13.1 through "
-      "rosdep/APT and select it with -DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
+      "CUDA 12.8–12.x or 13.x; selected toolkit is '${CUDAToolkit_VERSION}'. "
+      "Install a compatible toolkit and select it with -DCUDAToolkit_ROOT=<cuda-install-path>.")
   endif()
   set(ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION "${ONNXRUNTIME_CUDA_VENDOR_VERSION}")
   if(NOT ONNXRUNTIME_CORE_VENDOR_SELECTED_VERSION STREQUAL ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION)
@@ -53,6 +54,10 @@ else()
       "with -DFORCE_BUILD_VENDOR_PKG=ON.")
   endif()
   string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
+  if(_system_arch MATCHES "^(aarch64|arm64)$" AND CUDAToolkit_VERSION_MAJOR EQUAL 12)
+    message(FATAL_ERROR "${PROJECT_NAME}: the pinned ONNX Runtime 1.29.0 ARM64 fallback "
+      "requires CUDA 13.x; upstream does not publish an ARM64 CUDA 12 wheel.")
+  endif()
   if(_system_arch MATCHES "^(x86_64|amd64)$")
     set(_archive_stem "onnxruntime-linux-x64-gpu_cuda${CUDAToolkit_VERSION_MAJOR}-${ONNXRUNTIME_CUDA_VENDOR_VERSION}")
     set(_archive_root_pattern "onnxruntime-linux-x64-*")

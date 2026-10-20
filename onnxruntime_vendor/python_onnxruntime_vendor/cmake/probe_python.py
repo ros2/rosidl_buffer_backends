@@ -40,6 +40,11 @@ if require_cuda:
     provider = pathlib.Path(module.__file__).parent / 'capi/libonnxruntime_providers_cuda.so'
     if not provider.is_file():
         raise RuntimeError(f'CUDA provider library is absent: {provider}')
+    if len(sys.argv) > 4:
+        build_info = importlib.import_module(f'{sys.argv[1]}.capi.build_and_package_info')
+        cuda_version = str(getattr(build_info, 'cuda_version', ''))
+        if cuda_version.split('.')[0] != sys.argv[4]:
+            raise RuntimeError(f'Require CUDA {sys.argv[4]}, found {cuda_version}')
 print(pathlib.Path(module.__file__).resolve().parent.parent)
 print(variant)
 print(release)

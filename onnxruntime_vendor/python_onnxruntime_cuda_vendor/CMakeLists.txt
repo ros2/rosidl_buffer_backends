@@ -17,18 +17,28 @@ python_provider_find_compatible(onnxruntime "${PYTHON_ONNXRUNTIME_VENDOR_SUPPORT
 if(_reuse_root)
   python_provider_reuse_hooks("${_reuse_root}")
 else()
-  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "13.1")
+  if(NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION VERSION_LESS "12.8" OR
+      NOT CUDAToolkit_VERSION_MAJOR MATCHES "^(12|13)$")
     message(FATAL_ERROR "${PROJECT_NAME}: the pinned ONNX Runtime 1.29.0 CUDA fallback requires "
-      "CUDA >=13.1; selected toolkit is '${CUDAToolkit_VERSION}'. Install CUDA 13.1 through "
-      "rosdep/APT and select it with -DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
+      "CUDA 12.8–12.x or 13.x; selected toolkit is '${CUDAToolkit_VERSION}'. "
+      "Install a compatible toolkit and select it with -DCUDAToolkit_ROOT=<cuda-install-path>.")
   endif()
   set(PYTHON_ONNXRUNTIME_CUDA_VENDOR_SELECTED_VERSION "${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION}")
   if(CMAKE_CROSSCOMPILING)
     message(FATAL_ERROR "${PROJECT_NAME}: wheel staging requires a native build for the target architecture")
   endif()
   string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
+  if(_system_arch MATCHES "^(aarch64|arm64)$" AND CUDAToolkit_VERSION_MAJOR EQUAL 12)
+    message(FATAL_ERROR "${PROJECT_NAME}: the pinned ONNX Runtime 1.29.0 ARM64 fallback "
+      "requires CUDA 13.x; upstream does not publish an ARM64 CUDA 12 wheel.")
+  endif()
   set(_python_package "onnxruntime-gpu")
-  set(_index_url "https://pypi.org/simple")
+  if(CUDAToolkit_VERSION_MAJOR EQUAL 12)
+    set(_index_url
+      "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/")
+  else()
+    set(_index_url "https://pypi.org/simple")
+  endif()
 
   ament_get_python_install_dir(PYTHON_INSTALL_DIR)
   set(_wheel_dir "${CMAKE_CURRENT_BINARY_DIR}/wheel")
@@ -77,7 +87,7 @@ else()
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env
       "PYTHONPATH=${_python_stage}" "PYTHONNOUSERSITE=1"
       "${Python3_EXECUTABLE}" "${python_onnxruntime_vendor_DIR}/probe_python.py"
-      onnxruntime "${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION}" TRUE
+      onnxruntime "${PYTHON_ONNXRUNTIME_CUDA_VENDOR_VERSION}" TRUE "${CUDAToolkit_VERSION_MAJOR}"
       COMMAND_ERROR_IS_FATAL ANY)
     file(WRITE "${_stage_marker}" "")
   endif()

@@ -400,14 +400,17 @@ session and tensor views use it. In C++, the `Ort::Env` must outlive the stream.
 
 | Component | Debian packages | Source builds |
 | --- | --- | --- |
-| Ubuntu / ROS | Ubuntu **26.04** (Resolute), with ROS 2 Lyrical or Rolling. | A ROS 2 Lyrical or Rolling environment. On Ubuntu **24.04** (Noble), build ROS 2 Lyrical from source. |
-| ONNX Runtime | Version **1.29.0**, supplied by the ROS vendor packages. | Reuses compatible installations of **>=1.23.0 for C++** or **>=1.26.0 for Python**; otherwise, the vendor packages download **1.29.0**. |
-| CUDA Toolkit (example plugin) | The `cuda-toolkit` dependency, installed through APT. | An installed toolkit compatible with the selected provider (**>=13.1** for the pinned fallback); `rosdep` can install `cuda-toolkit` if needed. |
+| Ubuntu / ROS | Ubuntu **26.04** (Resolute), with ROS 2 Lyrical. | A ROS 2 Lyrical environment. On Ubuntu **24.04** (Noble), build ROS 2 Lyrical from source. |
+| ONNX Runtime | Version **1.29.0**, supplied by the ROS vendor packages. | Reuses compatible installations of **>=1.23.0 for C++** or **>=1.26.0 for Python**; otherwise, the vendor packages download **1.29.0**, selecting its CUDA 12 build for toolkit **12.8–12.x** on x86_64, or its CUDA 13 build for toolkit **13.x** on x86_64 and ARM64. |
+| CUDA Toolkit (example plugin) | The `cuda-toolkit` dependency, installed through APT on Resolute. | An installed toolkit compatible with the selected provider; the pinned fallback requires **CUDA 12.8–12.x or 13.x** on x86_64, and **13.x** on ARM64. |
 | cuDNN (example plugin) | Version **9.24.0.43**, supplied by the CUDA vendor package. | A reused ONNX Runtime provider needs its matching cuDNN libraries. The pinned fallback reuses compatible cuDNN **>=9.24,<10** for the toolkit's CUDA major version, or supplies **9.24.0.43**. |
 
-The CUDA plugin requires a CUDA-enabled ONNX Runtime provider. CPU plugins do
-not require CUDA or cuDNN. Reusing a C++ SDK requires its headers, libraries, and
-version metadata (`onnxruntimeConfigVersion.cmake` or `VERSION_NUMBER`).
+For source builds with the CUDA plugin, `rosdep` installs `cuda-toolkit`
+(**CUDA 13.1+**) on Resolute, but `nvidia-cuda-toolkit` (**CUDA 12.0**) on Noble,
+which does not meet the pinned ONNX Runtime fallback's requirement. On Noble,
+manually install a compatible CUDA toolkit and skip rosdep's CUDA installation
+with `rosdep install --skip-keys cuda-toolkit`. See the upstream
+[ONNX Runtime CUDA requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements).
 
 Both APIs require contiguous, row-major tensors. Explicit strides must match
 the contiguous strides for the shape; an empty `strides` field uses that layout.
