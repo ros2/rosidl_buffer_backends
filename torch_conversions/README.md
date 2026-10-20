@@ -345,13 +345,15 @@ for that allocation.
 
 | Component | Debian packages | Source builds |
 | --- | --- | --- |
-| Ubuntu / ROS | Ubuntu **26.04** (Resolute), with ROS 2 Lyrical or Rolling. | A ROS 2 Lyrical or Rolling environment. On Ubuntu **24.04** (Noble), build ROS 2 Lyrical from source. |
-| PyTorch / LibTorch | Version **2.14.0**, supplied by the ROS vendor packages. | Reuses a compatible installation of version **2.5.0 or newer**; otherwise, the vendor packages download **2.14.0**. |
-| CUDA Toolkit (example plugin) | The `cuda-toolkit` dependency, installed through APT. | An installed toolkit compatible with the selected provider (**>=13.1** for the pinned fallback); `rosdep` can install `cuda-toolkit` if needed. |
+| Ubuntu / ROS | Ubuntu **26.04** (Resolute), with ROS 2 Lyrical. | A ROS 2 Lyrical environment. On Ubuntu **24.04** (Noble), build ROS 2 Lyrical from source. |
+| PyTorch / LibTorch | Version **2.14.0**, supplied by the ROS vendor packages. | Reuses a compatible installation **>=2.5.0**; otherwise downloads **2.14.0**. CUDA-enabled Torch downloads use `cu126` with toolkit **12.6–12.x**, or `cu130` with toolkit **13.0+**. The optional `cu132` Torch build requires toolkit **13.2+**. |
+| CUDA Toolkit (example plugin) | The `cuda-toolkit` dependency, installed through APT on Resolute. | An installed toolkit compatible with the selected Torch/LibTorch build; **CUDA >=12.6** for the pinned fallback. |
 
-The CUDA plugin requires a CUDA-enabled PyTorch / LibTorch build, supplied by
-the CUDA vendor packages or reused during a source build. CPU plugins do not
-require CUDA.
+For source builds with the CUDA plugin, `rosdep` installs `cuda-toolkit`
+(**CUDA 13.1+**) on Resolute, but `nvidia-cuda-toolkit` (**CUDA 12.0**) on Noble,
+which does not meet the pinned Torch fallback's requirement. On Noble, manually
+install a compatible CUDA toolkit (**>=12.6**) and skip rosdep's CUDA installation
+with `rosdep install --skip-keys cuda-toolkit`.
 
 For Ubuntu 24.04 source builds, see the
 [ROS 2 Lyrical platform requirements](https://github.com/ros2/ros2_documentation/blob/lyrical/source/Releases/lyrical/supported-platforms.rst).

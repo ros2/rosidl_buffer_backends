@@ -11,7 +11,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 include(cmake/python3_torch_cuda_vendor_policy.cmake)
 
 set(PYTHON3_TORCH_CUDA_VENDOR_CUDA_VARIANT "" CACHE STRING
-  "CUDA wheel variant override (cu130, cu132).")
+  "CUDA wheel variant override (cu126, cu130, cu132).")
 option(FORCE_BUILD_PYTHON3_TORCH_CUDA_VENDOR_PKG
   "Disable reuse of the installed Python Torch distribution"
   OFF)
@@ -45,8 +45,9 @@ if(_reuse_root)
   python_provider_reuse_hooks("${_reuse_root}")
 else()
   if(NOT CUDAToolkit_FOUND)
-    message(FATAL_ERROR "${PROJECT_NAME}: the pinned CUDA fallback requires a CUDA 13.1 toolkit. "
-      "Install it through rosdep/APT and select it with -DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
+    message(FATAL_ERROR "${PROJECT_NAME}: the pinned CUDA fallback requires a compatible CUDA toolkit "
+      "(12.6 through 12.x for cu126, 13.0+ for cu130, 13.2+ for cu132). "
+      "Install it and select it with CUDAToolkit_ROOT.")
   endif()
   python3_torch_cuda_vendor_variant_for_cuda("${CUDAToolkit_VERSION}" _fallback_variant)
   if(_requested_variant)

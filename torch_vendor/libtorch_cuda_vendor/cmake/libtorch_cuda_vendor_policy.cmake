@@ -13,7 +13,7 @@
 # limitations under the License.
 
 set(LIBTORCH_CUDA_VENDOR_VERSION "2.14.0")
-set(LIBTORCH_CUDA_VENDOR_SUPPORTED_VARIANTS cu130 cu132)
+set(LIBTORCH_CUDA_VENDOR_SUPPORTED_VARIANTS cu126 cu130 cu132)
 
 function(libtorch_cuda_vendor_validate_variant variant)
   list(FIND LIBTORCH_CUDA_VENDOR_SUPPORTED_VARIANTS "${variant}" index)
@@ -22,21 +22,29 @@ function(libtorch_cuda_vendor_validate_variant variant)
   endif()
 endfunction()
 
-# The pinned fallback uses cu130 with the CUDA 13.1 toolkit baseline.
+# Select a fallback built for the installed toolkit's CUDA major version.
 function(libtorch_cuda_vendor_variant_for_cuda cuda_version output_variable)
-  if(cuda_version VERSION_LESS "13.1")
-    message(FATAL_ERROR "The pinned Torch 2.14.0 CUDA fallback requires CUDA >=13.1; "
-      "found ${cuda_version}. Install CUDA 13.1 through rosdep/APT and select it with "
-      "-DCUDAToolkit_ROOT=/usr/local/cuda-13.1.")
+  if(cuda_version VERSION_LESS "12.6")
+    message(FATAL_ERROR "The pinned Torch 2.14.0 CUDA fallback requires CUDA >=12.6; "
+      "found ${cuda_version}. Install a compatible toolkit and select it with CUDAToolkit_ROOT.")
+  elseif(cuda_version VERSION_LESS "13.0")
+    set(${output_variable} cu126 PARENT_SCOPE)
+  else()
+    set(${output_variable} cu130 PARENT_SCOPE)
   endif()
-  set(${output_variable} cu130 PARENT_SCOPE)
 endfunction()
 
 function(libtorch_cuda_vendor_validate_variant_for_cuda variant cuda_version)
   libtorch_cuda_vendor_variant_for_cuda("${cuda_version}" default_variant)
   libtorch_cuda_vendor_validate_variant("${variant}")
-  if(variant STREQUAL "cu132" AND cuda_version VERSION_LESS "13.2")
+  if(variant STREQUAL "cu126" AND NOT cuda_version VERSION_LESS "13.0")
+    message(FATAL_ERROR "Torch cu126 requires a CUDA 12.x toolkit; selected CUDA toolkit is "
+      "${cuda_version}. Select cu130 or a compatible toolkit with CUDAToolkit_ROOT.")
+  elseif(variant STREQUAL "cu130" AND cuda_version VERSION_LESS "13.0")
+    message(FATAL_ERROR "Torch cu130 requires a CUDA >=13.0 toolkit; selected CUDA toolkit is "
+      "${cuda_version}. Select cu126 or a compatible toolkit with CUDAToolkit_ROOT.")
+  elseif(variant STREQUAL "cu132" AND cuda_version VERSION_LESS "13.2")
     message(FATAL_ERROR "Torch cu132 requires a CUDA >=13.2 toolkit; selected CUDA toolkit is "
-      "${cuda_version}. Select cu130 or set CUDAToolkit_ROOT to a compatible toolkit.")
+      "${cuda_version}. Select ${default_variant} or a compatible toolkit with CUDAToolkit_ROOT.")
   endif()
 endfunction()
