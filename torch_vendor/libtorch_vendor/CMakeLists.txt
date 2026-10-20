@@ -7,11 +7,10 @@ project(libtorch_vendor)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_vendor_package REQUIRED)
 
-include(cmake/libtorch_vendor_common.cmake)
+include(cmake/libtorch_vendor_helpers.cmake)
 set(LIBTORCH_VENDOR_VERSION "${LIBTORCH_VENDOR_FALLBACK_VERSION}")
 
 option(FORCE_BUILD_VENDOR_PKG "Stage the pinned distribution instead of reusing LibTorch" OFF)
-include(cmake/libtorch_vendor_reuse.cmake)
 libtorch_vendor_find_compatible(FALSE LIBTORCH_VENDOR_TORCH_DIR LIBTORCH_VENDOR_VARIANT
   LIBTORCH_VENDOR_SELECTED_VERSION)
 if(NOT LIBTORCH_VENDOR_TORCH_DIR)
@@ -19,7 +18,6 @@ if(NOT LIBTORCH_VENDOR_TORCH_DIR)
   set(LIBTORCH_VENDOR_VARIANT cpu)
   string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
   if(_system_arch MATCHES "^(aarch64|arm64)$")
-    include(cmake/libtorch_vendor_wheel.cmake)
     libtorch_vendor_stage_wheel("${LIBTORCH_VENDOR_VERSION}" "cpu" _vendor_source_root)
     set(_torch_root "${_vendor_source_root}/torch")
     set(LIBTORCH_VENDOR_SDK_SUBDIR "/torch")
@@ -61,9 +59,12 @@ if(NOT LIBTORCH_VENDOR_TORCH_DIR)
     file(REMOVE "${_torch_root}/lib/${_library}")
   endforeach()
 
+  libtorch_vendor_prepare_libraries("${_vendor_source_root}")
+
   install(DIRECTORY "${_vendor_source_root}/"
     DESTINATION "opt/${PROJECT_NAME}"
     USE_SOURCE_PERMISSIONS
+    PATTERN ".elf-normalized" EXCLUDE
     PATTERN ".complete" EXCLUDE)
 
   ament_index_register_resource("vendor_packages"

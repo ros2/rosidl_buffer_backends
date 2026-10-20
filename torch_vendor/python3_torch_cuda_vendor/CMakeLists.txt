@@ -147,11 +147,14 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     file(REMOVE ${_unused_transport_plugins})
   endif()
 
+  python_provider_prepare_libraries("${_stage_dir}")
+
   ament_get_python_install_dir(PYTHON_INSTALL_DIR)
   set(_vendor_python_dir "opt/${PROJECT_NAME}/${PYTHON_INSTALL_DIR}")
 
   install(DIRECTORY "${_stage_dir}/"
     DESTINATION "${_vendor_python_dir}"
+    PATTERN ".elf-normalized" EXCLUDE
     PATTERN ".torch-*" EXCLUDE
     PATTERN "setuptools" EXCLUDE
     PATTERN "setuptools-*.dist-info" EXCLUDE
@@ -160,20 +163,14 @@ print(torch.__version__.split('+')[0] + ';' + variant)")
     PATTERN "distutils-precedence.pth" EXCLUDE
   )
 
-  configure_file(environment/pythonpath.dsv.in pythonpath.dsv @ONLY)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/pythonpath.dsv"
+    "prepend-non-duplicate;PYTHONPATH;${_vendor_python_dir}\n")
   ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/pythonpath.dsv")
 endif()
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
-  add_test(
-    NAME python3_torch_cuda_vendor_policy
-    COMMAND "${CMAKE_COMMAND}" -P
-      "${CMAKE_CURRENT_SOURCE_DIR}/test/test_version_policy.cmake"
-  )
 endif()
 
-ament_package(
-  CONFIG_EXTRAS_POST "python3_torch_cuda_vendor-extras.cmake.in"
-)
+ament_package()

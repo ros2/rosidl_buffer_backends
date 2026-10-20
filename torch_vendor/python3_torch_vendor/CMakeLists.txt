@@ -9,7 +9,6 @@ find_package(ament_cmake_python REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(PYTHON3_TORCH_VENDOR_TORCH_VERSION "2.14.0")
-set(PYTHON3_TORCH_VENDOR_SUPPORTED_VERSION_RANGE ">=2.5.0")
 option(FORCE_BUILD_VENDOR_PKG "Stage the pinned Python provider instead of reusing it" OFF)
 include(cmake/python_provider_reuse.cmake)
 python_provider_find_compatible(torch "${PYTHON3_TORCH_VENDOR_SUPPORTED_VERSION_RANGE}" FALSE
@@ -72,10 +71,13 @@ if torch.__version__.split('+')[0] != '${PYTHON3_TORCH_VENDOR_TORCH_VERSION}' or
     file(WRITE "${_marker}" "")
   endif()
 
+  python_provider_prepare_libraries("${_stage_dir}")
+
   ament_get_python_install_dir(PYTHON_INSTALL_DIR)
   set(_vendor_python_dir "opt/${PROJECT_NAME}/${PYTHON_INSTALL_DIR}")
   install(DIRECTORY "${_stage_dir}/"
     DESTINATION "${_vendor_python_dir}"
+    PATTERN ".elf-normalized" EXCLUDE
     PATTERN ".torch-*" EXCLUDE
     PATTERN "setuptools" EXCLUDE
     PATTERN "setuptools-*.dist-info" EXCLUDE
@@ -83,7 +85,8 @@ if torch.__version__.split('+')[0] != '${PYTHON3_TORCH_VENDOR_TORCH_VERSION}' or
     PATTERN "pkg_resources" EXCLUDE
     PATTERN "distutils-precedence.pth" EXCLUDE)
 
-  configure_file(environment/pythonpath.dsv.in pythonpath.dsv @ONLY)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/pythonpath.dsv"
+    "prepend-non-duplicate;PYTHONPATH;${_vendor_python_dir}\n")
   ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/pythonpath.dsv")
 
 endif()
@@ -94,4 +97,4 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_package(CONFIG_EXTRAS_POST "python3_torch_vendor-extras.cmake.in")
+ament_package()

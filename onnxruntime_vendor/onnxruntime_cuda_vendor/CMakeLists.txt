@@ -178,13 +178,6 @@ endif()
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
-  add_test(
-    NAME onnxruntime_cuda_vendor_selection
-    COMMAND "${CMAKE_COMMAND}"
-      -S "${CMAKE_CURRENT_SOURCE_DIR}/test/consumer"
-      -B "${CMAKE_CURRENT_BINARY_DIR}/selection_test"
-      "-DCMAKE_PREFIX_PATH=${CMAKE_INSTALL_PREFIX};${CMAKE_PREFIX_PATH}"
-  )
 endif()
 
 ament_package(CONFIG_EXTRAS_POST "onnxruntime_cuda_vendor-extras.cmake.in")

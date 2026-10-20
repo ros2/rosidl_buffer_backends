@@ -12,6 +12,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_vendor_package</buildtool_depend>
 
+  <build_depend>binutils</build_depend>
   <build_depend>python3-pip</build_depend>
 
   <test_depend>ament_cmake_xmllint</test_depend>
