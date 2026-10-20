@@ -6,8 +6,11 @@
   <description>Python bindings for creating CUDA-backed rosidl buffers for rclpy.</description>
 
   <maintainer email="yuankunz@nvidia.com">Yuankun Zhu</maintainer>
+
   <license>Apache-2.0</license>
+
   <author email="yuankunz@nvidia.com">Yuankun Zhu</author>
+  <author email="cyc@nvidia.com">CY Chen</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
