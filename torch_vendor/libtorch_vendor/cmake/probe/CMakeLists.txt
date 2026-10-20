@@ -22,11 +22,25 @@ find_path(_torch_config_dir TorchConfig.cmake
   HINTS "${Torch_DIR}" ENV Torch_DIR
   PATH_SUFFIXES Torch share/cmake/Torch)
 if(NOT _torch_config_dir)
-  reject_provider("No existing TorchConfig.cmake was found")
+  find_package(Python3 QUIET COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    execute_process(
+      COMMAND "${Python3_EXECUTABLE}" -c
+        "import torch; print(torch.utils.cmake_prefix_path)"
+      RESULT_VARIABLE python_result OUTPUT_VARIABLE python_prefix
+      ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE TIMEOUT 60)
+    if(python_result EQUAL 0)
+      find_path(_torch_config_dir TorchConfig.cmake
+        PATHS "${python_prefix}" PATH_SUFFIXES Torch NO_DEFAULT_PATH)
+    endif()
+  endif()
+endif()
+if(NOT _torch_config_dir)
+  reject_provider("No existing TorchConfig.cmake was found in CMake paths or Python Torch")
 endif()
 set(Torch_DIR "${_torch_config_dir}")
 get_filename_component(torch_root "${Torch_DIR}/../../.." ABSOLUTE)
-include("${CMAKE_CURRENT_LIST_DIR}/../libtorch_vendor_common.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/../libtorch_vendor_helpers.cmake")
 if(EXISTS "${torch_root}/lib/libtorch_cuda.so")
   libtorch_vendor_find_cuda()
 endif()

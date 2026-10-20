@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+set(PYTHON3_TORCH_VENDOR_SUPPORTED_VERSION_RANGE ">=2.5.0")
+
 set(_python_provider_probe "${CMAKE_CURRENT_LIST_DIR}/probe_python.py")
 function(python_provider_find_compatible module version require_cuda output_root output_variant)
   set(${output_root} "" PARENT_SCOPE)
@@ -54,3 +56,24 @@ macro(python_provider_reuse_hooks root)
     "prepend-non-duplicate;PYTHONPATH;${root}\n")
   ament_environment_hooks("${CMAKE_CURRENT_BINARY_DIR}/reused_python.dsv")
 endmacro()
+
+function(python_provider_prepare_libraries root)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR EXISTS "${root}/.elf-normalized")
+    return()
+  endif()
+  # Rewriting the ELF layout keeps debugedit from corrupting section headers
+  # placed before later sections by upstream wheel/archive processing. Preserve
+  # symbols so Debian's normal dh_strip can still generate debug packages.
+  file(GLOB_RECURSE libraries LIST_DIRECTORIES FALSE "${root}/*.so" "${root}/*.so.*")
+  foreach(library IN LISTS libraries)
+    if(IS_SYMLINK "${library}")
+      continue()
+    endif()
+    file(READ "${library}" magic LIMIT 4 HEX)
+    if(magic STREQUAL "7f454c46")
+      execute_process(COMMAND "${CMAKE_OBJCOPY}" --preserve-dates "${library}"
+        COMMAND_ERROR_IS_FATAL ANY)
+    endif()
+  endforeach()
+  file(WRITE "${root}/.elf-normalized" "")
+endfunction()

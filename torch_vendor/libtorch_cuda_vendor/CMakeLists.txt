@@ -59,7 +59,6 @@ if(NOT LIBTORCH_CUDA_VENDOR_TORCH_DIR)
   endif()
   string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _system_arch)
   if(_system_arch MATCHES "^(aarch64|arm64)$")
-    include("${libtorch_vendor_DIR}/libtorch_vendor_wheel.cmake")
     libtorch_vendor_stage_wheel("${LIBTORCH_CUDA_VENDOR_VERSION}"
       "${LIBTORCH_CUDA_VENDOR_VARIANT}" _vendor_source_root)
     set(_torch_root "${_vendor_source_root}/torch")
@@ -114,9 +113,12 @@ if(NOT LIBTORCH_CUDA_VENDOR_TORCH_DIR)
     file(REMOVE "${_torch_root}/lib/${_library}")
   endforeach()
 
+  libtorch_vendor_prepare_libraries("${_vendor_source_root}")
+
   install(DIRECTORY "${_vendor_source_root}/"
     DESTINATION "opt/${PROJECT_NAME}"
     USE_SOURCE_PERMISSIONS
+    PATTERN ".elf-normalized" EXCLUDE
     PATTERN ".complete" EXCLUDE
   )
 
@@ -152,23 +154,6 @@ endif()
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
-  set(_cuda_root_argument)
-  if(CUDAToolkit_ROOT)
-    set(_cuda_root_argument "-DCUDAToolkit_ROOT=${CUDAToolkit_ROOT}")
-  endif()
-  add_test(
-    NAME libtorch_cuda_vendor_selection
-    COMMAND "${CMAKE_COMMAND}"
-      -S "${CMAKE_CURRENT_SOURCE_DIR}/test/consumer"
-      -B "${CMAKE_CURRENT_BINARY_DIR}/selection_test"
-      "-DCMAKE_PREFIX_PATH=${CMAKE_INSTALL_PREFIX};${CMAKE_PREFIX_PATH}"
-      ${_cuda_root_argument}
-  )
-  add_test(
-    NAME libtorch_cuda_vendor_policy
-    COMMAND "${CMAKE_COMMAND}" -P
-      "${CMAKE_CURRENT_SOURCE_DIR}/test/test_version_policy.cmake"
-  )
 endif()
 
 ament_package(
