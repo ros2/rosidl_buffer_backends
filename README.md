@@ -13,6 +13,8 @@ copying when supported, with automatic fallback to the default CPU path.
   packages for HTP-CPU zero-copy sharing using dma-buf memory.
 - **libtorch_vendor** -- Vendor package that downloads and installs the
   pre-built LibTorch C++ distribution.
+- **ros2buffer** -- ROS 2 CLI command for inspecting buffer backend support
+  advertised by publishers and subscribers on a topic.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
 - **torch_conversions** -- Header-only helper library that converts between
   `tensor_msgs/ExperimentalTensor` and `at::Tensor` and exposes DLPack import /
