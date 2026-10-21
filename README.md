@@ -3,7 +3,7 @@
 Vendor-specific storage backends for `rosidl::Buffer`, enabling ROS 2
 publishers and subscribers to share accelerator-accessible memory without
 copying when supported, with automatic fallback to the default CPU path.
-PyTorch conversion libraries use the same buffer infrastructure.
+PyTorch and ONNX Runtime conversion libraries use the same buffer infrastructure.
 
 ## Packages
 
@@ -17,6 +17,16 @@ PyTorch conversion libraries use the same buffer infrastructure.
 - **python3_torch_vendor** -- CPU Python Torch provider.
 - **python3_torch_cuda_vendor** -- CUDA Python Torch provider.
 - **tensor_msgs** -- DLPack-aligned `ExperimentalTensor.msg` definition.
+- **onnxruntime_core_vendor** -- CPU ONNX Runtime C++ provider.
+- **onnxruntime_cuda_vendor** -- CUDA ONNX Runtime C++ provider.
+- **python_onnxruntime_vendor** -- CPU ONNX Runtime Python provider.
+- **python_onnxruntime_cuda_vendor** -- CUDA ONNX Runtime Python provider.
+- **onnxruntime_conversions** -- C++ `Ort::Value` API and plugin registry.
+- **onnxruntime_conversions_cpu** -- C++ host-memory implementation.
+- **onnxruntime_conversions_cuda** -- C++ CUDA implementation.
+- **onnxruntime_conversions_py** -- Python `OrtValue` API and plugin registry.
+- **onnxruntime_conversions_py_cpu** -- Python host-memory implementation.
+- **onnxruntime_conversions_py_cuda** -- Python CUDA implementation.
 - **torch_conversions** -- C++ `at::Tensor` API and runtime plugin registry.
 - **torch_conversions_cpu** -- C++ host-memory implementation.
 - **torch_conversions_cuda** -- C++ CUDA implementation backed by `cuda_buffer`.
@@ -58,6 +68,7 @@ PyTorch conversion libraries use the same buffer infrastructure.
 
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
 - [`qc_buffer_backend/README.md`](qc_buffer_backend/README.md)
+- [`onnxruntime_conversions/README.md`](onnxruntime_conversions/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
 
 ## License
