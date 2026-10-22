@@ -65,10 +65,10 @@ public:
   std::string get_backend_metadata() const override;
 
 private:
-  const detail::IpcMetadata & local_metadata() const;
+  const detail::IpcMetadata & initialize_local_ipc_metadata() const;
   mutable std::once_flag metadata_once_;
   mutable detail::IpcMetadata local_metadata_;
-  mutable std::string metadata_wire_;
+  mutable std::string local_ipc_metadata_;
 
   using EndpointKey = std::array<uint8_t, RMW_GID_STORAGE_SIZE>;
   mutable std::map<EndpointKey, detail::IpcDecision> ipc_decision_cache_;

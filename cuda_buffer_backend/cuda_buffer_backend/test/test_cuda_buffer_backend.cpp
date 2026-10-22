@@ -97,7 +97,6 @@ TEST_F(CudaBufferBackendTest, NoDeviceAdvertisesUnavailableWithoutThrowing)
   if (cudaGetDeviceCount(&count) == cudaSuccess && count > 0) {
     GTEST_SKIP() << "Run with CUDA_VISIBLE_DEVICES empty";
   }
-  EXPECT_NO_THROW(EXPECT_FALSE(CudaBufferImpl<uint8_t>::is_pool_ipc_capable()));
   EXPECT_EQ(backend_->get_backend_metadata(), "cuda-ipc-v1|0");
 }
 

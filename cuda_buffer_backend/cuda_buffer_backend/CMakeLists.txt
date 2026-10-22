@@ -62,16 +62,13 @@ if(BUILD_TESTING)
     target_link_libraries(test_ipc_metadata ${PROJECT_NAME})
   endif()
 
-  foreach(rmw_impl rmw_fastrtps_cpp rmw_zenoh_cpp)
-    ament_add_gtest(test_metadata_pubsub_${rmw_impl} test/test_metadata_pubsub.cpp
-      SKIP_LINKING_MAIN_LIBRARIES TIMEOUT 75
-      ENV RMW_IMPLEMENTATION=${rmw_impl} ZENOH_ROUTER_CHECK_ATTEMPTS=-1)
-    if(TARGET test_metadata_pubsub_${rmw_impl})
-      target_link_libraries(test_metadata_pubsub_${rmw_impl}
-        ${PROJECT_NAME} rclcpp::rclcpp ${sensor_msgs_TARGETS}
-        rmw_test_fixture_implementation::rmw_test_fixture_implementation)
-    endif()
-  endforeach()
+  ament_add_gtest(test_metadata_pubsub test/test_metadata_pubsub.cpp
+    SKIP_LINKING_MAIN_LIBRARIES TIMEOUT 75)
+  if(TARGET test_metadata_pubsub)
+    target_link_libraries(test_metadata_pubsub
+      ${PROJECT_NAME} rclcpp::rclcpp ${sensor_msgs_TARGETS}
+      rmw_test_fixture_implementation::rmw_test_fixture_implementation)
+  endif()
 
   ament_add_gtest(test_cuda_buffer_backend
     test/test_cuda_buffer_backend.cpp

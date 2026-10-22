@@ -37,7 +37,7 @@ colcon test-result --verbose
 
 | Package | Description |
 |---|---|
-| `cuda_buffer` | Core CUDA buffer implementation: memory pool, IPC manager, host endpoint manager, and user-facing `allocate_buffer` / `from_input_buffer` / `from_output_buffer` / `to_buffer` APIs |
+| `cuda_buffer` | Core CUDA buffer implementation: memory pool, IPC manager, and user-facing `allocate_buffer` / `from_input_buffer` / `from_output_buffer` / `to_buffer` APIs |
 | `cuda_buffer_py` | Python allocation, scoped read/write handles, and copying into open write handles for rclpy or standalone use |
 | `cuda_buffer_backend` | Plugin registration via `pluginlib`, endpoint discovery, and descriptor serialization |
 | `cuda_buffer_backend_msgs` | ROS 2 message definition for `CudaBufferDescriptor` |
@@ -405,12 +405,12 @@ mismatch without requiring a usable GPU. Backend tests verify immutable metadata
 concurrent access, no-device probing, unknown-peer fallback, and descriptor
 approval from discovery alone without endpoint registration.
 
-`test_metadata_pubsub_rmw_fastrtps_cpp` and
-`test_metadata_pubsub_rmw_zenoh_cpp` verify correct CUDA and host data delivery in
-one process, separate-process CUDA delivery, and separate-process UID-mismatch
-fallback. They use the RMW test-isolation fixture (including an isolated Zenoh
-router) and skip GPU cases when IPC-capable CUDA is unavailable. Discovery and
-message reception determine progress; sleeps are not used as ordering barriers.
+`test_metadata_pubsub` uses the currently selected RMW implementation to verify
+correct CUDA and host data delivery in one process, separate-process CUDA
+delivery, and separate-process UID-mismatch fallback. It uses the RMW
+test-isolation fixture (including an isolated router when using Zenoh) and skips
+GPU cases when IPC-capable CUDA is unavailable. Discovery and message reception
+determine progress; sleeps are not used as ordering barriers.
 
 ## License
 

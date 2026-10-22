@@ -49,7 +49,7 @@ CudaBufferBackend::create_empty_descriptor() const
   return std::make_shared<cuda_buffer_backend_msgs::msg::CudaBufferDescriptor>();
 }
 
-const detail::IpcMetadata & CudaBufferBackend::local_metadata() const
+const detail::IpcMetadata & CudaBufferBackend::initialize_local_ipc_metadata() const
 {
   // Freeze the pool identity before advertising any endpoint. Discovery and
   // metadata generation share this snapshot, even on different caller threads.
@@ -57,15 +57,15 @@ const detail::IpcMetadata & CudaBufferBackend::local_metadata() const
       auto metadata = detail::collect_ipc_metadata();
       auto wire = detail::serialize_ipc_metadata(metadata);
       local_metadata_ = std::move(metadata);
-      metadata_wire_ = std::move(wire);
+      local_ipc_metadata_ = std::move(wire);
   });
   return local_metadata_;
 }
 
 std::string CudaBufferBackend::get_backend_metadata() const
 {
-  (void)local_metadata();
-  return metadata_wire_;
+  (void)initialize_local_ipc_metadata();
+  return local_ipc_metadata_;
 }
 
 std::pair<bool, std::vector<std::set<uint32_t>>>
@@ -79,7 +79,7 @@ CudaBufferBackend::on_discovering_endpoint(
   const auto advertised = endpoint_supported_backends.find("cuda");
   if (advertised != endpoint_supported_backends.end()) {
     if (const auto peer = detail::parse_ipc_metadata(advertised->second)) {
-      decision = detail::decide_ipc(local_metadata(), *peer);
+      decision = detail::decide_ipc(initialize_local_ipc_metadata(), *peer);
     }
   }
   EndpointKey key;
