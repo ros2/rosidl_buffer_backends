@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FastDDS profile: force shared-memory-only transport on localhost.
+
+  The pipeline nodes exchange only the small IntelMemoryBufferImageFrame
+  descriptor over DDS (the pixels travel zero-copy via the dma_buf fd); the
+  descriptor delivery still crosses the kernel. By default FastDDS uses the UDP
+  loopback transport, which routes each descriptor through the kernel network
+  stack. Declaring an explicit SHM-only transport moves that delivery to a
+  shared-memory ring buffer, cutting the per-frame delivery cost that shows up
+  in the buffer-ready->read latency.
+
+  Applied by setting FASTRTPS_DEFAULT_PROFILES_FILE to this file (done in the
+  launch file). is_default_profile="true" makes it apply to every participant
+  created in the process without naming it explicitly.
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>shm_transport</transport_id>
+        <type>SHM</type>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="shm_only_participant" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>shm_transport</transport_id>
+        </userTransports>
+        <!-- Do not add the built-in UDP transports; SHM only. -->
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>
