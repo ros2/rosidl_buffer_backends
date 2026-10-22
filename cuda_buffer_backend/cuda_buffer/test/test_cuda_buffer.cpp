@@ -15,11 +15,26 @@
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
 
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <set>
+#include <string>
+#include <thread>
 #include <vector>
 
+#include "cuda_buffer/cuda_buffer.hpp"
 #include "cuda_buffer/cuda_buffer_api.hpp"
 #include "rosidl_buffer/buffer.hpp"
+
+extern char ** environ;
 
 class CudaBufferTest : public ::testing::Test
 {
@@ -343,8 +358,154 @@ TEST_F(CudaBufferTest, GpuPipeline_NoIntermediateCpuSync)
   }
 }
 
+// -- Reading must not leave /dev/shm/cuda.shm.* segments behind --
+//
+// The CUDA driver creates /dev/shm/cuda.shm.<device>.<hex pid>.<n> when a
+// process creates its first interprocess event, and does not remove it when the
+// process exits. The test runs a fresh process (this binary, re-executed in a
+// child mode) so that no earlier CUDA call can have created the segment, and
+// checks which segments are named for the child's pid after it has exited.
+
+namespace
+{
+constexpr const char * kChildFlag = "--cuda-buffer-shm-child=";
+constexpr int kChildNoDevice = 77;
+
+// Child mode "read": reads a CUDA buffer without ever creating an interprocess
+// event other than through ReadHandle. The buffer is built from cudaMalloc
+// memory so that no allocation-time (write) event exists.
+// Child mode "control": creates one interprocess event directly.
+int run_shm_child(const std::string & mode)
+{
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess || count == 0) {
+    return kChildNoDevice;
+  }
+  if (cudaSetDevice(0) != cudaSuccess) {return 1;}
+  if (mode == "control") {
+    cudaEvent_t ev{nullptr};
+    if (cudaEventCreateWithFlags(
+        &ev, cuda_buffer_backend::CUDA_BUFFER_DEFAULT_EVENT_FLAGS) != cudaSuccess)
+    {
+      return 1;
+    }
+    cudaEventDestroy(ev);
+    return 0;
+  }
+  if (mode != "read") {return 2;}
+
+  constexpr size_t N = 4096;
+  static std::atomic<bool> freed{false};
+  cudaStream_t stream{nullptr};
+  if (cudaStreamCreate(&stream) != cudaSuccess) {return 1;}
+  void * ptr = nullptr;
+  if (cudaMalloc(&ptr, N) != cudaSuccess) {return 1;}
+  {
+    cuda_buffer_backend::CudaBuffer buf(
+      ptr, N, 0, [](uint8_t * p) {
+        cudaFree(p);
+        freed = true;
+      });
+    std::vector<uint8_t> host(N);
+    for (int i = 0; i < 3; ++i) {
+      cuda_buffer_backend::ReadHandle rh = buf.get_read_handle(stream);
+      if (cudaMemcpyAsync(
+          host.data(), rh.get_ptr(), N, cudaMemcpyDeviceToHost, stream) != cudaSuccess)
+      {
+        return 1;
+      }
+      if (cudaStreamSynchronize(stream) != cudaSuccess) {return 1;}
+    }  // each ReadHandle destructor records a read event
+  }
+  // The buffer's events and memory are released by a background thread that is
+  // not joined at exit. Wait for it, so that process teardown does not race it.
+  for (int i = 0; i < 500 && !freed; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  if (!freed) {return 1;}
+  cudaStreamDestroy(stream);
+  return 0;
+}
+
+// Runs this binary in child mode and returns the child's pid and exit status.
+bool run_child(const std::string & mode, pid_t & pid, int & exit_code)
+{
+  const std::string self = std::filesystem::read_symlink("/proc/self/exe").string();
+  const std::string flag = kChildFlag + mode;
+  char * argv[] = {const_cast<char *>(self.c_str()), const_cast<char *>(flag.c_str()), nullptr};
+  if (posix_spawn(&pid, self.c_str(), nullptr, nullptr, argv, environ) != 0) {return false;}
+  int status = 0;
+  if (waitpid(pid, &status, 0) != pid) {return false;}
+  exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  return true;
+}
+
+// Names in /dev/shm of the form cuda.shm.<device>.<hex pid>.<n> for this pid.
+std::set<std::string> cuda_segments_of(pid_t pid)
+{
+  char hex[32];
+  std::snprintf(hex, sizeof(hex), "%x", static_cast<unsigned>(pid));
+  std::set<std::string> found;
+  for (const auto & entry : std::filesystem::directory_iterator("/dev/shm")) {
+    const std::string name = entry.path().filename().string();
+    if (name.rfind("cuda.shm.", 0) != 0) {continue;}
+    // fields: cuda, shm, <device>, <hex pid>, <n>
+    std::vector<std::string> fields;
+    size_t start = 0;
+    for (size_t dot; (dot = name.find('.', start)) != std::string::npos; start = dot + 1) {
+      fields.push_back(name.substr(start, dot - start));
+    }
+    fields.push_back(name.substr(start));
+    if (fields.size() >= 4 && fields[3] == hex) {found.insert(name);}
+  }
+  return found;
+}
+
+void remove_segments(const std::set<std::string> & names)
+{
+  for (const auto & n : names) {
+    std::filesystem::remove("/dev/shm/" + n);
+  }
+}
+}  // namespace
+
+TEST(CudaBufferShmTest, ReadingDoesNotLeaveShmSegments)
+{
+  // Positive control: a process that creates an interprocess event leaves a
+  // segment named for its pid. Without it, "no segment" proves nothing.
+  pid_t control_pid = 0;
+  int control_code = -1;
+  ASSERT_TRUE(run_child("control", control_pid, control_code));
+  if (control_code == kChildNoDevice) {
+    GTEST_SKIP() << "no CUDA device: this test needs a GPU and is not run here";
+  }
+  ASSERT_EQ(0, control_code) << "control child failed";
+  const auto control_segments = cuda_segments_of(control_pid);
+  remove_segments(control_segments);
+  if (control_segments.empty()) {
+    GTEST_SKIP() << "this CUDA driver creates no /dev/shm/cuda.shm.* segment for an "
+      "interprocess event, so the leak cannot be observed here";
+  }
+
+  pid_t pid = 0;
+  int code = -1;
+  ASSERT_TRUE(run_child("read", pid, code));
+  ASSERT_EQ(0, code) << "read child failed";
+  const auto leaked = cuda_segments_of(pid);
+  remove_segments(leaked);
+  std::string names;
+  for (const auto & n : leaked) {
+    names += " " + n;
+  }
+  EXPECT_TRUE(leaked.empty())
+    << "reading a CUDA buffer left segments behind in /dev/shm:" << names;
+}
+
 int main(int argc, char ** argv)
 {
+  if (argc > 1 && std::strncmp(argv[1], kChildFlag, std::strlen(kChildFlag)) == 0) {
+    return run_shm_child(argv[1] + std::strlen(kChildFlag));
+  }
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

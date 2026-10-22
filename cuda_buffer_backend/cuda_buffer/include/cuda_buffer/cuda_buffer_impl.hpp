@@ -38,7 +38,7 @@ namespace cuda_buffer_backend
 CUDA_BUFFER_PUBLIC std::shared_ptr<CudaMemoryPool> get_or_create_global_pool();
 
 // Process-wide stream for internal ops (clone, to_cpu, resize).
-// Intentionally leaked; destroyed by cudaDeviceReset in ~CudaMemoryPool.
+// Intentionally leaked; the CUDA driver releases it at process exit.
 inline cudaStream_t get_internal_stream()
 {
   static cudaStream_t s = [] {
