@@ -95,6 +95,7 @@ public:
 
   void release_write_event_ownership()
   {
+    std::lock_guard<std::mutex> lock(events_mutex_);
     owns_write_event_ = false;
   }
 
