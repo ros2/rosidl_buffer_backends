@@ -231,6 +231,12 @@ private:
     // The default clone=true returns an independent tensor instead.
     auto input_tensor = torch_conversions::from_input_tensor_msg(received, /*clone=*/false);
 
+    // Empty messages, including dropped stale CUDA IPC descriptors, have no tensor.
+    if (!input_tensor.defined() || input_tensor.numel() == 0) {
+      RCLCPP_WARN(get_logger(), "Skipping tensor with empty or unavailable storage");
+      return;
+    }
+
     // Application code: read the shared tensor without modifying it.
     const auto mean = input_tensor.to(torch::kFloat32).mean().item<double>();
 

@@ -61,6 +61,9 @@ if(BUILD_TESTING)
   add_launch_test(test/test_torch_tensor_inter_pubsub_fastrtps_launch.py
     TARGET test_torch_tensor_inter_pubsub_fastrtps_launch TIMEOUT 30
     RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
+  add_launch_test(test/test_torch_tensor_empty_input_fastrtps_launch.py
+    TARGET test_torch_tensor_empty_input_fastrtps_launch TIMEOUT 45
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
 endif()
 
 ament_package()

@@ -44,6 +44,13 @@ private:
     // Borrow the message storage; the message stays alive throughout this callback.
     auto input_tensor = torch_conversions::from_input_tensor_msg(received, /*clone=*/false);
 
+    // A late CUDA IPC descriptor can be dropped after its storage is recycled.
+    // Empty messages also have no tensor to reduce; keep serving later messages.
+    if (!input_tensor.defined() || input_tensor.numel() == 0) {
+      RCLCPP_WARN(get_logger(), "Skipping tensor with empty or unavailable storage");
+      return;
+    }
+
     // Replace these reductions with your own processing of the read-only tensor.
     const auto minimum = input_tensor.min().item<double>();
     const auto maximum = input_tensor.max().item<double>();

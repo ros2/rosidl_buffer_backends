@@ -13,8 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import re
+import signal
 import subprocess
+import time
 import unittest
 
 from launch import LaunchDescription
@@ -79,6 +82,31 @@ class TestTorchTensorInterPubSubFastRTPS(unittest.TestCase):
         self.assertGreaterEqual(len(samples), 5)
         for received_backend, minimum, maximum in samples:
             self.assertEqual(received_backend, 'cuda')
+            self.assertEqual(float(minimum), float(maximum))
+            self.assertGreaterEqual(float(minimum), 0)
+            self.assertLessEqual(float(maximum), 255)
+
+        # Let the independent publisher recycle storage before queued descriptors
+        # can be imported. The example must skip unavailable tensors and recover,
+        # rather than reducing an undefined tensor and aborting.
+        skipped_before = output.count('Skipping tensor with empty or unavailable storage')
+        received_before = max(map(int, re.findall(r'count=(\d+)\)', output)))
+        pid = subscriber.process_details['pid']
+        os.kill(pid, signal.SIGSTOP)
+        try:
+            time.sleep(1.0)  # Exceeds the CUDA pool's 100 ms publish grace window.
+        finally:
+            os.kill(pid, signal.SIGCONT)
+
+        proc_output.assertWaitFor(
+            f'count={received_before + 5})', process=subscriber, timeout=10)
+        output = b''.join(event.text for event in proc_output[subscriber]).decode()
+        self.assertGreater(
+            output.count('Skipping tensor with empty or unavailable storage'),
+            skipped_before)
+        self.assertIn('Dropping stale descriptor: IPC failed', output)
+        # Check values after recovery as well as those received before the pause.
+        for minimum, maximum in re.findall(r'min=([^,]+), max=([^,]+), count=', output):
             self.assertEqual(float(minimum), float(maximum))
             self.assertGreaterEqual(float(minimum), 0)
             self.assertLessEqual(float(maximum), 255)
