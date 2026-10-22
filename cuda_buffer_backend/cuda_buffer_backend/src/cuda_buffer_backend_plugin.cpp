@@ -145,9 +145,11 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
   }
 
   if (!decided) {
-    // The subscriber was never classified: it is not in the local endpoint
-    // registry (another host, or a host with no usable device). It cannot
-    // import a CUDA descriptor, so use the host path.
+    // The subscriber was never classified. If it is missing from the local
+    // endpoint registry it is on another host or has not registered yet; if
+    // it is present with ipc_capable=false it has no usable device. Neither
+    // can import a CUDA descriptor, so use the host path. A miss is not
+    // cached, so a same-host peer gets a CUDA descriptor once registered.
     rmw_gid_t peer;
     peer.implementation_identifier = "";
     std::memcpy(peer.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);

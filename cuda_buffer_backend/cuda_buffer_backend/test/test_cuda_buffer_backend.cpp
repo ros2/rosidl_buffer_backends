@@ -83,11 +83,12 @@ TEST_F(CudaBufferBackendTest, OnDiscoveringEndpointDoesNotThrow)
       endpoint_info, existing_endpoints, supported_backends));
 }
 
-// Needs a CUDA device. A subscriber that the publisher cannot find in the
-// local endpoint registry (another host, or a host with no device) must not
-// be sent a CUDA descriptor: it could not import it. The publisher must fall
-// back to the host path, which create_descriptor_with_endpoint signals with
-// nullptr.
+// Needs a CUDA device. A subscriber missing from the local endpoint registry
+// is on another host or has not registered yet (a peer with no usable device
+// is found, with ipc_capable=false). Either way it must not be sent a CUDA
+// descriptor yet: the publisher falls back to the host path, which
+// create_descriptor_with_endpoint signals with nullptr. The miss is not
+// cached, so a same-host peer gets a CUDA descriptor once it registers.
 TEST_F(CudaBufferBackendTest, NoDescriptorForUnknownSubscriber)
 {
   rmw_topic_endpoint_info_t endpoint_info;
