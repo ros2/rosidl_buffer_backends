@@ -55,6 +55,24 @@ if(BUILD_TESTING)
   find_package(std_msgs REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
 
+  # Run the same delayed-registration delivery test through both RMWs. Zenoh
+  # uses its local session, so no external router is required for this test.
+  foreach(rmw_impl rmw_fastrtps_cpp rmw_zenoh_cpp)
+    ament_add_gtest(test_delayed_registration_${rmw_impl}
+      test/test_delayed_registration.cpp SKIP_LINKING_MAIN_LIBRARIES TIMEOUT 30
+      ENV RMW_IMPLEMENTATION=${rmw_impl} ZENOH_ROUTER_CHECK_ATTEMPTS=-1)
+    if(TARGET test_delayed_registration_${rmw_impl})
+      target_link_libraries(test_delayed_registration_${rmw_impl}
+        ${PROJECT_NAME} rclcpp::rclcpp ${sensor_msgs_TARGETS})
+      target_link_options(test_delayed_registration_${rmw_impl} PRIVATE -Wl,--export-dynamic)
+    endif()
+  endforeach()
+
+  ament_add_gtest(test_ipc_decisions test/test_ipc_decisions.cpp TIMEOUT 30)
+  if(TARGET test_ipc_decisions)
+    target_link_libraries(test_ipc_decisions ${PROJECT_NAME})
+  endif()
+
   ament_add_gtest(test_cuda_buffer_backend
     test/test_cuda_buffer_backend.cpp
   )

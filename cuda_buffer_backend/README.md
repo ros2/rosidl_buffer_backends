@@ -324,7 +324,9 @@ def callback(msg):
 
 ## IPC Behavior
 
-The RMW layer calls `on_discovering_endpoint()` for each subscriber to decide between zero-copy IPC and CPU fallback:
+The RMW layer calls `on_discovering_endpoint()` to establish peer CUDA support.
+The backend approves descriptor transport only after the host registry also
+confirms compatibility:
 
 | Condition | Path |
 |---|---|
@@ -332,6 +334,98 @@ The RMW layer calls `on_discovering_endpoint()` for each subscriber to decide be
 | Different GPU, different user, different host, or VMM unavailable | CPU fallback via `to_cpu()` |
 
 The publisher's pool checks a shared-memory refcount before recycling a block, ensuring all IPC subscribers have released their handles.
+
+### Late host registration
+
+Discovery and host registration can arrive in either order. Eligible discovered
+peers with no host record remain pending and use host serialization. One listener
+per `HostEndpointManager` observes registry changes, updates the local cache, and
+notifies subscribers. The backend then resolves pending peers using the same
+compatibility predicate as discovery. Registry records for undiscovered peers
+never authorize CUDA transport. Missing and rejected decisions return a null
+descriptor; descriptor creation never refreshes or scans the shared registry.
+The existing descriptor/export and same-process event checks still apply.
+
+The backend owns one mutex-protected peer state map (pending, approved, rejected).
+Discovery enrolls a peer before querying the manager cache while holding that
+mutex. Registry refresh locks the registry and then the manager cache, releases
+both, and only then invokes callbacks. Thus an update is either visible to the
+lookup or resolves the pending peer afterward. The callback captures weak shared
+decision state, not the backend object, so backend destruction during delivery
+is safe. Subscription setup adds the subscriber and captures its snapshot under
+the cache lock; replay can overlap live delivery and subscribers must tolerate
+duplicates. Resetting a subscription drops future enrollment in delivery batches;
+a batch already in flight can retain its callable. Callbacks must capture safe
+shared/weak state, return promptly, and must not destroy the manager itself.
+Subscriber exceptions are isolated.
+
+There is currently no endpoint-removal callback in `BufferBackend`. Pending and
+resolved peers remain until backend destruction; this includes peers on other
+hosts that never appear in the local registry. Capability, device ID, and UID
+are assumed stable for an endpoint lifetime. GIDs must not be reused for a new
+endpoint while its backend decision remains alive. The existing backend domain
+selection remains domain 0; this change does not add a domain-selection API.
+
+### Registry protocol and operation
+
+The v2 registry is Linux-specific: a shared 32-bit generation word plus
+`FUTEX_WAIT` / `FUTEX_WAKE(INT_MAX)` provides race-free broadcast. A file lock
+(`flock`) and a per-manager mutex serialize registry writes and cache snapshots.
+Unlike the previous named semaphore, the file lock is released automatically
+when a process dies. The generation advances before mutation and the endpoint's
+active flag is committed last. A crashed partial replacement is inactive.
+Listeners handle coalesced and spurious wakeups and take an initial snapshot.
+Shutdown changes the generation, wakes the listener, joins it, retires local
+records, and then unmaps memory. The instance table keeps weak references so the
+last manager owner actually triggers teardown.
+
+A one-second futex timeout checks **only the generation word**, recovering a
+writer that dies after mutation but before its wake syscall. It does not scan an
+unchanged registry, and never runs on the publish path. Listener failures are
+logged and do not escape the thread; unresolved peers continue using host data.
+Live processes must not indefinitely hold the registry lock, and applications
+must not fork and reuse an already initialized manager in the child (exec a new
+process instead). PID reuse and endpoint removal are not solved by this protocol.
+
+Names include the layout version (`/ros2_hem_v2_d<domain>_h<host-hash>`).
+Initialization is serialized by the file lock, checks size and version before
+interpreting entries, and commits the version last. An interrupted version-zero
+initialization is retried; incompatible sizes, versions, or bounds are rejected
+without resizing the existing object. V1 writers use a different registry and
+are **not** supported for event-driven CUDA convergence: v2 publishers use host
+fallback for peers registered only in v1. Legacy publisher behavior is unchanged. All peers needing CUDA IPC must use the v2 implementation and compatible
+shared-memory permissions. Old layout objects are never reinterpreted.
+
+The named v2 registry persists after manager shutdown, preventing a last-endpoint
+unlink from splitting still-attached managers into different registries. Dead
+records are reclaimed during initialization and registration. Administrators may
+remove the corresponding `/dev/shm/ros2_hem_v2_*` objects only when all users of
+those registries have stopped (or let reboot clear them). Synchronization objects
+have no separate cleanup owner.
+
+### Verification
+
+`test_host_endpoint_manager` needs no usable CUDA device and covers local updates,
+subscribe/snapshot races, multi-process broadcast, pre-listener registration,
+callback exception isolation, teardown during delivery, process death while
+holding the registry lock, and size/version rejection. `test_ipc_decisions`
+exercises both pending/lookup races with promise barriers, negative compatibility,
+and repeated cache reads without additional lookups.
+
+`test_delayed_registration_rmw_fastrtps_cpp` and
+`test_delayed_registration_rmw_zenoh_cpp` require an IPC-capable CUDA GPU (otherwise
+they skip). A test-only ELF override defers subscription registration until a
+host-backed image is delivered, then requires a CUDA-backed image with identical
+contents on the same channel. Timers produce messages; the host-delivery callback
+is the ordering barrier. No production timing hooks or RMW ordering changes are
+needed. The multi-process manager test separately verifies cross-process wakeups.
+
+Source inspection confirmed both RMWs ignore the initial discovery return and
+retain an endpoint channel: Fast DDS `2a0fc2f1cd7d3c068404ff641e75b3e7284c08ed`
+and Zenoh `dda52d6d9bc863b4b6c86a0b4fd1c6788f4a651e`. Their endpoint serialization
+uses the shared FastCDR buffer serializer, which falls back to host bytes on a
+null descriptor. RMWs that permanently select a route from the initial discovery
+return would require a separate renegotiation mechanism.
 
 ## License
 

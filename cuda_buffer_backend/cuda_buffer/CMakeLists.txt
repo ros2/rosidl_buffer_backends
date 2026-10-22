@@ -14,6 +14,7 @@ find_package(rosidl_buffer REQUIRED)
 find_package(cuda_buffer_backend_msgs REQUIRED)
 find_package(rmw REQUIRED)
 find_package(rcutils REQUIRED)
+find_package(Threads REQUIRED)
 
 find_package(CUDAToolkit REQUIRED)
 message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_BIN_DIR}")
@@ -39,6 +40,7 @@ target_link_libraries(${PROJECT_NAME}
     rcutils::rcutils
     ${cuda_buffer_backend_msgs_TARGETS}
   PRIVATE
+    Threads::Threads
     CUDA::cudart
     CUDA::cuda_driver
     rt
@@ -68,6 +70,12 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_host_endpoint_manager test/test_host_endpoint_manager.cpp
+    SKIP_LINKING_MAIN_LIBRARIES TIMEOUT 60)
+  if(TARGET test_host_endpoint_manager)
+    target_link_libraries(test_host_endpoint_manager ${PROJECT_NAME} Threads::Threads rt)
+  endif()
 
   ament_add_gtest(test_cuda_buffer
     test/test_cuda_buffer.cpp

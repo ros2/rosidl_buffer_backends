@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "cuda_buffer/cuda_buffer_impl.hpp"
+#include "cuda_buffer_backend/ipc_decisions.hpp"
 #include "cuda_buffer/host_endpoint_manager.hpp"
 #include "rosidl_buffer_backend/buffer_backend.hpp"
 
@@ -74,10 +75,9 @@ private:
   mutable std::shared_ptr<host_endpoint_manager::HostEndpointManager> endpoint_manager_;
   mutable std::mutex manager_mutex_;
 
-  mutable std::unordered_map<
-    host_endpoint_manager::GidKey, bool,
-    host_endpoint_manager::GidKeyHash> ipc_decision_cache_;
-  mutable std::mutex ipc_cache_mutex_;
+  std::shared_ptr<detail::IpcDecisions> ipc_decisions_ =
+    std::make_shared<detail::IpcDecisions>();
+  mutable host_endpoint_manager::HostEndpointManager::UpdateSubscription subscription_;
 };
 
 }  // namespace cuda_buffer_backend

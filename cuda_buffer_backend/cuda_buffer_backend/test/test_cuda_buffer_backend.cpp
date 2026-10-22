@@ -56,6 +56,25 @@ TEST_F(CudaBufferBackendTest, OnDiscoveringEndpointWithoutCudaSupport)
   EXPECT_FALSE(result.first);
 }
 
+TEST_F(CudaBufferBackendTest, UndiscoveredPeerUsesHostFallback)
+{
+  rmw_topic_endpoint_info_t endpoint_info{};
+  for (int i = 0; i < 100; ++i) {
+    EXPECT_EQ(backend_->create_descriptor_with_endpoint(nullptr, endpoint_info), nullptr);
+  }
+}
+
+TEST_F(CudaBufferBackendTest, CapabilityProbeWithoutUsableDevice)
+{
+  int count = 0;
+  if (cudaGetDeviceCount(&count) == cudaSuccess && count > 0) {
+    GTEST_SKIP() << "Run with CUDA_VISIBLE_DEVICES empty to exercise this path";
+  }
+  EXPECT_NO_THROW(EXPECT_FALSE(CudaBufferImpl<uint8_t>::is_pool_ipc_capable()));
+  rmw_topic_endpoint_info_t endpoint_info{};
+  EXPECT_FALSE(backend_->on_discovering_endpoint(endpoint_info, {}, {{"cuda", ""}}).first);
+}
+
 int main(int argc, char ** argv)
 {
   testing::InitGoogleTest(&argc, argv);

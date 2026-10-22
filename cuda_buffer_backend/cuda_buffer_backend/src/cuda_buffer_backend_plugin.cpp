@@ -56,8 +56,20 @@ CudaBufferBackend::get_endpoint_manager() const
 
   if (!endpoint_manager_) {
     size_t domain_id = 0;
-    endpoint_manager_ = host_endpoint_manager::HostEndpointManager::get_instance(domain_id);
-    endpoint_manager_->set_ipc_capable(CudaBufferImpl<uint8_t>::is_pool_ipc_capable());
+    auto manager = host_endpoint_manager::HostEndpointManager::get_instance(domain_id);
+    manager->set_ipc_capable(CudaBufferImpl<uint8_t>::is_pool_ipc_capable());
+    const int device = manager->get_device_id();
+    const uint32_t uid = manager->get_uid();
+    std::weak_ptr<detail::IpcDecisions> weak_decisions = ipc_decisions_;
+    // Snapshot callbacks touch only shared decision state; they cannot re-enter
+    // manager initialization or access a destroyed backend.
+    subscription_ = manager->subscribe_endpoint_updates(
+      [weak_decisions, device, uid](const auto & key, const auto & info) {
+        if (auto decisions = weak_decisions.lock()) {
+          decisions->update(key, info, device, uid);
+        }
+      });
+    endpoint_manager_ = std::move(manager);
   }
 
   return endpoint_manager_;
@@ -87,43 +99,22 @@ CudaBufferBackend::on_discovering_endpoint(
 {
   (void)existing_endpoints;
 
-  bool supports_cuda = endpoint_supported_backends.find("cuda") !=
-    endpoint_supported_backends.end();
-  if (!supports_cuda) {
+  const bool eligible = endpoint_supported_backends.count("cuda") != 0 &&
+    CudaBufferImpl<uint8_t>::is_pool_ipc_capable();
+  const host_endpoint_manager::GidKey key(endpoint_info.endpoint_gid);
+  if (!eligible) {
+    ipc_decisions_->discover(key, false, -1, 0, []() {
+        return host_endpoint_manager::LocalityInfo{};
+    });
     return {false, {}};
   }
 
-  if (!CudaBufferImpl<uint8_t>::is_pool_ipc_capable()) {
-    return {false, {}};
-  }
-
-  rmw_gid_t gid;
-  gid.implementation_identifier = "";
+  rmw_gid_t gid{};
   std::memcpy(gid.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);
-
   auto manager = get_endpoint_manager();
-  manager->refresh_from_remote();
-
-  auto locality_info = manager->query_endpoint_locality(gid);
-
-  bool is_ipc_capable = false;
-
-  if (locality_info.found && locality_info.ipc_capable) {
-    auto loc = locality_info.locality;
-    if (loc == host_endpoint_manager::EndpointLocality::INTRA_PROCESS) {
-      is_ipc_capable = true;
-    } else if (loc == host_endpoint_manager::EndpointLocality::INTER_PROCESS_SAME_HOST) {
-      is_ipc_capable =
-        (locality_info.device_id == manager->get_device_id()) &&
-        (locality_info.uid == manager->get_uid());
-    }
-  }
-
-  if (locality_info.found) {
-    std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
-    host_endpoint_manager::GidKey key(endpoint_info.endpoint_gid);
-    ipc_decision_cache_[key] = is_ipc_capable;
-  }
+  const bool is_ipc_capable = ipc_decisions_->discover(
+    key, true, manager->get_device_id(), manager->get_uid(),
+    [&]() {return manager->query_endpoint_locality(gid);});
 
   return {is_ipc_capable, {}};
 }
@@ -134,12 +125,8 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
 {
   host_endpoint_manager::GidKey key(endpoint_info.endpoint_gid);
 
-  {
-    std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
-    auto it = ipc_decision_cache_.find(key);
-    if (it != ipc_decision_cache_.end() && !it->second) {
-      return nullptr;
-    }
+  if (!ipc_decisions_->approved(key)) {
+    return nullptr;
   }
 
   auto * cuda_impl = dynamic_cast<CudaBufferImpl<uint8_t> *>(

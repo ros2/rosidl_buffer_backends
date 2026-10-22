@@ -166,8 +166,13 @@ public:
 
   static bool is_pool_ipc_capable()
   {
-    auto pool = get_or_create_global_pool();
-    return pool && pool->is_ipc_capable();
+    try {
+      auto pool = get_or_create_global_pool();
+      return pool && pool->is_ipc_capable();
+    } catch (const CudaError &) {
+      // Capability probing must also work on hosts without a usable device.
+      return false;
+    }
   }
 
 private:

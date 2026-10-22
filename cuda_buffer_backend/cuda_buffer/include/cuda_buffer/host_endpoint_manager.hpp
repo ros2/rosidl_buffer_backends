@@ -16,6 +16,7 @@
 #define CUDA_BUFFER__HOST_ENDPOINT_MANAGER_HPP_
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -23,7 +24,9 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "cuda_buffer/visibility_control.h"
 #include "rmw/types.h"
@@ -100,6 +103,17 @@ public:
   HostEndpointManager(HostEndpointManager &&) = delete;
   HostEndpointManager & operator=(HostEndpointManager &&) = delete;
 
+  using EndpointUpdateCallback = std::function<void(const GidKey &, const LocalityInfo &)>;
+  // Resetting the token excludes it from future delivery batches. An in-flight
+  // batch retains the callable; capture weak state, never an unprotected target.
+  using UpdateSubscription = std::shared_ptr<const EndpointUpdateCallback>;
+
+  // Replays the current snapshot and subscribes atomically with cache updates.
+  // Callbacks run without registry/cache locks, may overlap, and must tolerate
+  // duplicate records (snapshot replay can overlap a live notification).
+  // Callbacks must return promptly and must not destroy the manager itself.
+  UpdateSubscription subscribe_endpoint_updates(EndpointUpdateCallback callback);
+
   void set_ipc_capable(bool capable) {local_ipc_capable_ = capable;}
 
   bool register_publisher(const rmw_gid_t & gid, const char * topic_name);
@@ -122,7 +136,7 @@ private:
   static uint32_t hash_string(const std::string & str);
 
   static std::mutex instances_mutex_;
-  static std::unordered_map<size_t, std::shared_ptr<HostEndpointManager>> instances_;
+  static std::unordered_map<size_t, std::weak_ptr<HostEndpointManager>> instances_;
 
   const size_t domain_id_;
   uint64_t instance_id_;
@@ -131,7 +145,11 @@ private:
   int shm_fd_;
   void * shm_ptr_;
   size_t shm_size_;
-  void * shm_mutex_;
+  std::mutex registry_mutex_;
+  std::atomic<bool> stopping_{false};
+  std::thread listener_;
+
+  void listen() noexcept;
   std::string shm_name_;
 
   struct CachedEndpointInfo
@@ -146,9 +164,11 @@ private:
   mutable std::unordered_map<GidKey, CachedEndpointInfo, GidKeyHash> local_cache_;
   mutable std::mutex cache_mutex_;
 
+  std::vector<std::weak_ptr<const EndpointUpdateCallback>> subscribers_;
+
   int local_device_id_;
   uint32_t local_uid_;
-  bool local_ipc_capable_{false};
+  std::atomic<bool> local_ipc_capable_{false};
 };
 
 }  // namespace host_endpoint_manager
