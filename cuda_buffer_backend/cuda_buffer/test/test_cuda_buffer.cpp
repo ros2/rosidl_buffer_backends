@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
+#include <rcutils/logging.h>
 
 #include <spawn.h>
 #include <sys/wait.h>
@@ -21,6 +22,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -501,13 +503,47 @@ TEST(CudaBufferShmTest, ReadingDoesNotLeaveShmSegments)
     << "reading a CUDA buffer left segments behind in /dev/shm:" << names;
 }
 
-// Needs no CUDA device: with none usable this must return false, not throw.
+namespace
+{
+int g_pool_warnings = 0;
+rcutils_logging_output_handler_t g_previous_handler = nullptr;
+
+void count_pool_warnings(
+  const rcutils_log_location_t * location, int severity, const char * name,
+  rcutils_time_point_value_t timestamp, const char * format, va_list * args)
+{
+  if (severity == RCUTILS_LOG_SEVERITY_WARN && name != nullptr &&
+    std::strcmp(name, "cuda_buffer_backend") == 0 &&
+    std::strstr(format, "CUDA memory pool unavailable") != nullptr)
+  {
+    ++g_pool_warnings;
+  }
+  g_previous_handler(location, severity, name, timestamp, format, args);
+}
+}  // namespace
+
+// Needs no CUDA device: with none usable this must return false, not throw,
+// and report why only once however often it is asked.
 TEST(CudaBufferPoolTest, IsPoolIpcCapableDoesNotThrow)
 {
+  ASSERT_EQ(RCUTILS_RET_OK, rcutils_logging_initialize());
+  g_previous_handler = rcutils_logging_get_output_handler();
+  rcutils_logging_set_output_handler(count_pool_warnings);
+
   bool capable = false;
   EXPECT_NO_THROW(
     capable = cuda_buffer_backend::CudaBufferImpl<uint8_t>::is_pool_ipc_capable());
+  const int after_first = g_pool_warnings;
+  EXPECT_NO_THROW(
+    capable = cuda_buffer_backend::CudaBufferImpl<uint8_t>::is_pool_ipc_capable());
+  const int after_second = g_pool_warnings;
+
+  rcutils_logging_set_output_handler(g_previous_handler);
+
+  EXPECT_LE(after_first, 1);
+  EXPECT_EQ(after_first, after_second);
   RecordProperty("ipc_capable", capable ? "true" : "false");
+  RecordProperty("pool_warnings", after_second);
 }
 
 int main(int argc, char ** argv)
