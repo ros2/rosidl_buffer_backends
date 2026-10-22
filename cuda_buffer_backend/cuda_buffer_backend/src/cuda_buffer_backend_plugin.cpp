@@ -204,6 +204,8 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
   if (write_event) {
     cudaIpcEventHandle_t event_handle;
     CUDA_CHECK(cudaIpcGetEventHandle(&event_handle, write_event));
+    pool->retain_exported_event(block, write_event, uid);
+    cuda_impl->get_cuda_buffer().release_write_event_ownership();
     std::memcpy(
       descriptor->ipc_event_handle.data(), &event_handle, sizeof(cudaIpcEventHandle_t));
   } else {
@@ -274,10 +276,12 @@ std::unique_ptr<void, void (*)(void *)> CudaBufferBackend::from_descriptor_with_
         cudaError_t ev_err = cudaIpcOpenEventHandle(&imported_event, event_handle);
         if (ev_err == cudaSuccess) {
           imported_buffer.set_write_event(imported_event, true);
-        } else {
+        } else if (descriptor->vmm_pid == static_cast<int32_t>(getpid())) {
           // Same-process: IPC event handles can't be opened in the originating
-          // process.
+          // process. The publisher synchronized this event before publishing.
           (void)cudaGetLastError();
+        } else {
+          throw CudaError(__FILE__, __LINE__, "cudaIpcOpenEventHandle", ev_err);
         }
       }
 
@@ -288,7 +292,7 @@ std::unique_ptr<void, void (*)(void *)> CudaBufferBackend::from_descriptor_with_
         }};
     } catch (const std::exception & e) {
       RCUTILS_LOG_WARN_NAMED("cuda_buffer_backend",
-        "IPC import failed, falling back to CPU: %s", e.what());
+        "IPC import failed; dropping descriptor: %s", e.what());
     }
   }
 

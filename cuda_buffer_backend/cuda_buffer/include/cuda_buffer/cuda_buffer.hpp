@@ -93,6 +93,12 @@ public:
 
   cudaEvent_t get_write_event() const {return write_event_;}
 
+  void release_write_event_ownership()
+  {
+    std::lock_guard<std::mutex> lock(events_mutex_);
+    owns_write_event_ = false;
+  }
+
   void finalize_write_handle() const;
 
   size_t size() const {return size_;}

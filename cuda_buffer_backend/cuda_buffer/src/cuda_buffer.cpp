@@ -16,6 +16,7 @@
 
 #include <rcutils/logging_macros.h>
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <thread>
@@ -59,6 +60,7 @@ public:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     queue_.push_back({std::move(events), std::move(ptr)});
+    ++enqueue_epoch_;
     cv_.notify_one();
   }
 
@@ -67,6 +69,7 @@ private:
   {
     std::vector<cudaEvent_t> events;
     std::unique_ptr<uint8_t, std::function<void(uint8_t *)>> device_ptr;
+    bool query_error_reported{false};
   };
 
   BufferRecycler()
@@ -74,26 +77,75 @@ private:
     thread_ = std::thread(&BufferRecycler::run, this);
   }
 
-  void run()
+  static bool is_complete(PendingWork & work)
   {
-    while (true) {
-      PendingWork work;
-      {
-        std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this] {return !queue_.empty() || !running_;});
-        if (queue_.empty() && !running_) {break;}
-        if (queue_.empty()) {continue;}
-        work = std::move(queue_.front());
-        queue_.pop_front();
-      }
-      for (cudaEvent_t ev : work.events) {
-        if (ev) {
-          cudaEventSynchronize(ev);
-          cudaEventDestroy(ev);
-          (void)cudaGetLastError();
+    bool complete = true;
+    for (cudaEvent_t event : work.events) {
+      if (!event) {continue;}
+      const cudaError_t status = cudaEventQuery(event);
+      if (status == cudaErrorNotReady) {
+        complete = false;
+      } else if (status != cudaSuccess) {
+        // An error does not prove that work using the storage has completed.
+        // Keep the entry quarantined rather than risking premature reuse.
+        complete = false;
+        if (!work.query_error_reported) {
+          RCUTILS_LOG_WARN_NAMED(
+            "cuda_buffer_backend", "cudaEventQuery failed in recycler; retaining buffer: %s",
+            cudaGetErrorName(status));
+          work.query_error_reported = true;
         }
       }
-      work.device_ptr.reset();
+      if (status != cudaSuccess) {
+        (void)cudaGetLastError();
+      }
+    }
+    return complete;
+  }
+
+  static void release(PendingWork & work)
+  {
+    for (cudaEvent_t event : work.events) {
+      if (event) {
+        cudaEventDestroy(event);
+        (void)cudaGetLastError();
+      }
+    }
+    work.device_ptr.reset();
+  }
+
+  void run()
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (true) {
+      cv_.wait(lock, [this] {return !queue_.empty() || !running_;});
+      if (queue_.empty() && !running_) {break;}
+
+      std::deque<PendingWork> completed;
+      for (auto work = queue_.begin(); work != queue_.end(); ) {
+        if (is_complete(*work)) {
+          completed.push_back(std::move(*work));
+          work = queue_.erase(work);
+        } else {
+          ++work;
+        }
+      }
+      const uint64_t observed_epoch = enqueue_epoch_;
+      const bool has_pending = !queue_.empty();
+
+      lock.unlock();
+      for (auto & work : completed) {
+        release(work);
+      }
+      lock.lock();
+
+      if (has_pending && !queue_.empty()) {
+        cv_.wait_for(
+          lock, std::chrono::milliseconds(1),
+          [this, observed_epoch] {
+            return !running_ || enqueue_epoch_ != observed_epoch;
+          });
+      }
     }
   }
 
@@ -101,6 +153,7 @@ private:
   std::mutex mutex_;
   std::condition_variable cv_;
   std::thread thread_;
+  uint64_t enqueue_epoch_{0};
   bool running_{true};
 };
 
@@ -131,7 +184,25 @@ CudaBuffer::~CudaBuffer()
   }
 
   if (!events_to_sync.empty() && recycler_) {
-    recycler_->enqueue(std::move(events_to_sync), std::move(device_ptr_));
+    bool completed = true;
+    for (cudaEvent_t event : events_to_sync) {
+      if (event && cudaEventQuery(event) != cudaSuccess) {
+        completed = false;
+        break;
+      }
+    }
+    if (completed) {
+      // Return completed storage immediately instead of letting a busy cleanup
+      // worker retain it while the pool allocates replacement blocks.
+      for (cudaEvent_t event : events_to_sync) {
+        if (event) {
+          cudaEventDestroy(event);
+          (void)cudaGetLastError();
+        }
+      }
+    } else {
+      recycler_->enqueue(std::move(events_to_sync), std::move(device_ptr_));
+    }
   }
 }
 
