@@ -115,6 +115,26 @@ CudaBuffer::CudaBuffer(
 {
 }
 
+CudaBuffer CudaBuffer::adopt(
+  void * ptr, size_t size, int device_id, std::shared_ptr<void> keepalive)
+{
+  // The keepalive rides in the deleter rather than in a member of its own, and
+  // that placement is the whole contract. ~CudaBuffer hands device_ptr_ to the
+  // BufferRecycler, which destroys it only after synchronizing every
+  // outstanding read and write event -- so a keepalive captured here is
+  // released once the GPU is finished, not when the last C++ reference drops.
+  // A member would be destroyed at the wrong moment: the owner would be told
+  // "done" while a kernel was still reading its memory.
+  //
+  // The deleter itself frees nothing. Adopted storage is not ours; the owner
+  // reclaims it when its keepalive tells it to.
+  CudaBuffer buffer(
+    ptr, size, device_id,
+    [keepalive = std::move(keepalive)](uint8_t *) {});
+  buffer.adopted_ = true;
+  return buffer;
+}
+
 CudaBuffer::~CudaBuffer()
 {
   std::vector<cudaEvent_t> events_to_sync;

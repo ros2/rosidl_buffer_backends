@@ -38,6 +38,7 @@ add_library(${PROJECT_NAME} SHARED
   src/cuda_buffer_impl.cpp
   src/cuda_buffer_ipc_manager.cpp
   src/cuda_memory_pool.cpp
+  src/external_memory_pool.cpp
   src/host_endpoint_manager.cpp
 )
 
@@ -89,6 +90,47 @@ if(BUILD_TESTING)
   )
   if(TARGET test_cuda_buffer)
     target_link_libraries(test_cuda_buffer
+      ${PROJECT_NAME}
+      rosidl_buffer::rosidl_buffer
+      CUDA::cudart
+      CUDA::cuda_driver
+      rt
+    )
+  endif()
+
+  # A stand-in RMW for test_transport_pool. Built -fvisibility=hidden like a
+  # real one, so the explicit default visibility on the protocol's two entry
+  # points is genuinely exercised rather than incidentally true.
+  add_library(rmw_faketransport MODULE test/fake_transport_provider.cpp)
+  target_link_libraries(rmw_faketransport ${PROJECT_NAME})
+  set_target_properties(rmw_faketransport PROPERTIES
+    PREFIX "lib"
+    SUFFIX ".so"
+    CXX_VISIBILITY_PRESET hidden)
+
+  ament_add_gtest(test_transport_pool
+    test/test_transport_pool.cpp
+  )
+  if(TARGET test_transport_pool)
+    target_link_libraries(test_transport_pool
+      ${PROJECT_NAME}
+      rosidl_buffer::rosidl_buffer
+      CUDA::cudart
+      CUDA::cuda_driver
+      rt
+    )
+    add_dependencies(test_transport_pool rmw_faketransport)
+    # The client resolves the provider by soname, so it has to be findable the
+    # way rmw_implementation would find a real RMW.
+    set_property(TEST test_transport_pool APPEND PROPERTY
+      ENVIRONMENT "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rmw_faketransport>:$ENV{LD_LIBRARY_PATH}")
+  endif()
+
+  ament_add_gtest(test_external_memory_pool
+    test/test_external_memory_pool.cpp
+  )
+  if(TARGET test_external_memory_pool)
+    target_link_libraries(test_external_memory_pool
       ${PROJECT_NAME}
       rosidl_buffer::rosidl_buffer
       CUDA::cudart
