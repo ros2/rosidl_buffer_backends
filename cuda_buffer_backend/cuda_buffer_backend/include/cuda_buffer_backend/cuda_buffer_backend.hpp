@@ -71,6 +71,12 @@ public:
 private:
   std::shared_ptr<host_endpoint_manager::HostEndpointManager> get_endpoint_manager() const;
 
+  /// Whether a peer can import a CUDA descriptor from this process: it is in
+  /// this process, or on this host with the same device and uid.
+  static bool can_import_descriptor(
+    const host_endpoint_manager::LocalityInfo & peer,
+    const host_endpoint_manager::HostEndpointManager & manager);
+
   mutable std::shared_ptr<host_endpoint_manager::HostEndpointManager> endpoint_manager_;
   mutable std::mutex manager_mutex_;
 
