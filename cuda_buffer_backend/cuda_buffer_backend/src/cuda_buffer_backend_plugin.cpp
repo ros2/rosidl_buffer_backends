@@ -155,15 +155,21 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
     // registry it is on another host or has not registered yet; if it is
     // present it may have no usable device, or use another device or uid.
     // None of these can import a CUDA descriptor, so use the host path.
-    // Nothing is cached here, so a same-host peer gets a CUDA descriptor
-    // once it registers.
+    // A peer found in the registry is cached, as in on_discovering_endpoint.
+    // A miss is not cached, so a same-host peer gets a CUDA descriptor once
+    // it registers.
     rmw_gid_t peer;
     peer.implementation_identifier = "";
     std::memcpy(peer.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);
     auto peer_manager = get_endpoint_manager();
     peer_manager->refresh_from_remote();
     auto peer_locality = peer_manager->query_endpoint_locality(peer);
-    if (!can_import_descriptor(peer_locality, *peer_manager)) {
+    bool can_import = can_import_descriptor(peer_locality, *peer_manager);
+    if (peer_locality.found) {
+      std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
+      ipc_decision_cache_[key] = can_import;
+    }
+    if (!can_import) {
       return nullptr;
     }
   }
