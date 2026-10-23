@@ -1,0 +1,189 @@
+# Derived from the upstream CUDA package; modified for HIP by ObeliskGate, 2026.
+cmake_minimum_required(VERSION 3.20)
+project(hip_buffer_backend)
+
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake_auto REQUIRED)
+ament_auto_find_build_dependencies()
+
+ament_auto_add_library(${PROJECT_NAME} SHARED
+  src/hip_buffer_backend_plugin.cpp
+)
+
+target_include_directories(${PROJECT_NAME} PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+)
+
+target_link_libraries(${PROJECT_NAME}
+  ${hip_buffer_backend_msgs_TARGETS}
+  rosidl_buffer_backend::rosidl_buffer_backend
+  rosidl_runtime_cpp::rosidl_runtime_cpp
+  rosidl_buffer_backend_registry::rosidl_buffer_backend_registry
+  rosidl_typesupport_cpp::rosidl_typesupport_cpp
+  pluginlib::pluginlib
+  hip_buffer::hip_buffer
+  rcutils::rcutils
+)
+
+# Keep runtime search paths for linked shared-library dependencies when this
+# plugin is loaded through pluginlib.
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  INSTALL_RPATH_USE_LINK_PATH TRUE
+)
+
+pluginlib_export_plugin_description_file(rosidl_buffer_backend hip_buffer_plugin.xml)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(rclcpp REQUIRED)
+  find_package(rclcpp_components REQUIRED)
+  find_package(sensor_msgs REQUIRED)
+  find_package(std_msgs REQUIRED)
+  find_package(launch_testing_ament_cmake REQUIRED)
+
+  ament_add_gtest(test_hip_buffer_backend
+    test/test_hip_buffer_backend.cpp
+  )
+  if(TARGET test_hip_buffer_backend)
+    target_link_libraries(test_hip_buffer_backend
+      ${PROJECT_NAME}
+      rosidl_buffer_backend::rosidl_buffer_backend
+      rosidl_runtime_cpp::rosidl_runtime_cpp
+      rosidl_buffer_backend_registry::rosidl_buffer_backend_registry
+      ${hip_buffer_backend_msgs_TARGETS}
+    )
+  endif()
+
+  # Uses exec'd importer processes and real HIP VMM allocations. Unsupported
+  # HIP/VMM capabilities skip; stale descriptor acceptance is a real failure.
+  ament_add_gtest(test_hip_buffer_lifecycle
+    test/test_hip_buffer_lifecycle.cpp
+    TIMEOUT 180
+  )
+  if(TARGET test_hip_buffer_lifecycle)
+    target_link_libraries(test_hip_buffer_lifecycle
+      ${PROJECT_NAME}
+      hip_buffer::hip_buffer
+      rosidl_buffer_backend::rosidl_buffer_backend
+      rosidl_runtime_cpp::rosidl_runtime_cpp
+      ${hip_buffer_backend_msgs_TARGETS}
+    )
+  endif()
+
+  ament_auto_add_library(hip_image_publisher_component SHARED
+    test/src/hip_image_publisher_node.cpp
+  )
+  target_link_libraries(hip_image_publisher_component
+    hip_buffer::hip_buffer
+    rclcpp::rclcpp
+    rclcpp_components::component
+    ${sensor_msgs_TARGETS}
+    ${std_msgs_TARGETS}
+    rosidl_runtime_cpp::rosidl_runtime_cpp
+  )
+  rclcpp_components_register_nodes(hip_image_publisher_component
+    "HipImagePublisher")
+
+  ament_auto_add_library(hip_image_dso_publisher_component SHARED
+    test/src/hip_image_dso_publisher_node.cpp
+  )
+  set_target_properties(hip_image_dso_publisher_component PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+  )
+  target_link_libraries(hip_image_dso_publisher_component
+    hip_buffer::hip_buffer
+    rclcpp::rclcpp
+    rclcpp_components::component
+    ${sensor_msgs_TARGETS}
+    rosidl_runtime_cpp::rosidl_runtime_cpp
+  )
+  rclcpp_components_register_nodes(hip_image_dso_publisher_component
+    "HipImageDsoPublisher")
+
+  ament_auto_add_library(hip_image_subscriber_component SHARED
+    test/src/hip_image_subscriber_node.cpp
+  )
+  target_link_libraries(hip_image_subscriber_component
+    hip_buffer::hip_buffer
+    rclcpp::rclcpp
+    rclcpp_components::component
+    ${sensor_msgs_TARGETS}
+    ${std_msgs_TARGETS}
+    rosidl_runtime_cpp::rosidl_runtime_cpp
+  )
+  rclcpp_components_register_nodes(hip_image_subscriber_component
+    "HipImageSubscriber")
+
+  ament_auto_add_library(hip_image_gpu_relay_component SHARED
+    test/src/hip_image_gpu_relay_node.cpp
+  )
+  target_link_libraries(hip_image_gpu_relay_component
+    hip_buffer::hip_buffer
+    rclcpp::rclcpp
+    rclcpp_components::component
+    ${sensor_msgs_TARGETS}
+    ${std_msgs_TARGETS}
+    rosidl_runtime_cpp::rosidl_runtime_cpp
+  )
+  rclcpp_components_register_nodes(hip_image_gpu_relay_component
+    "HipImageGpuRelay")
+
+  add_launch_test(test/test_hip_image_inter_pubsub_fastrtps_launch.py
+    TARGET test_hip_image_inter_pubsub_fastrtps_launch
+    TIMEOUT 30
+  )
+
+  add_launch_test(test/test_hip_image_intra_pubsub_fastrtps_launch.py
+    TARGET test_hip_image_intra_pubsub_fastrtps_launch
+    TIMEOUT 30
+  )
+
+  add_launch_test(test/test_hip_image_mixed_pubsub_fastrtps_launch.py
+    TARGET test_hip_image_mixed_pubsub_fastrtps_launch
+    TIMEOUT 30
+  )
+
+  add_launch_test(test/test_hip_image_multiprocess_fastrtps_launch.py
+    TARGET test_hip_image_multiprocess_fastrtps_launch
+    TIMEOUT 45
+  )
+
+  add_launch_test(test/test_hip_image_pool_dso_fastrtps_launch.py
+    TARGET test_hip_image_pool_dso_fastrtps_launch
+    TIMEOUT 45
+  )
+
+  add_launch_test(test/test_hip_image_cpu_fallback_fastrtps_launch.py
+    TARGET test_hip_image_cpu_fallback_fastrtps_launch
+    TIMEOUT 60
+  )
+
+  add_launch_test(test/test_hip_image_mixed_no_duplicate_fastrtps_launch.py
+    TARGET test_hip_image_mixed_no_duplicate_fastrtps_launch
+    TIMEOUT 45
+  )
+
+  add_launch_test(test/test_hip_image_multi_pub_fastrtps_launch.py
+    TARGET test_hip_image_multi_pub_fastrtps_launch
+    TIMEOUT 45
+  )
+
+  add_launch_test(test/test_hip_image_gpu_pipeline_fastrtps_launch.py
+    TARGET test_hip_image_gpu_pipeline_fastrtps_launch
+    TIMEOUT 45
+  )
+endif()
+
+ament_auto_package(USE_SCOPED_HEADER_INSTALL_DIR)
