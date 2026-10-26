@@ -101,6 +101,24 @@ TEST(DmaBufIpcRegisterFd, RepeatedRegisterReturnsSameSocket)
   close(fd);
 }
 
+TEST(DmaBufIpcRegisterFd, StillRegisteredAtProcessExitExitsCleanly)
+{
+  // e.g. wrap_dmabuf() camera buffers, which no pool ever unregisters.
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    int fd = memfd_create("test_dmabuf_ipc_exit", 0);
+    if (fd < 0 || DmaBufIpc::register_fd(4242u, fd).empty()) {
+      _exit(2);
+    }
+    exit(0);  // runs static destructors, unlike _exit()
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child terminated by signal " << WTERMSIG(status);
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+}
+
 TEST(DmaBufIpcReceiveFd, BogusSocketPathThrows)
 {
   EXPECT_THROW(DmaBufIpc::receive_fd("/tmp/does_not_exist.sock"), std::runtime_error);

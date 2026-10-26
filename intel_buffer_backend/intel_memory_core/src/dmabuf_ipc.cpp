@@ -42,7 +42,28 @@ struct RegisteredBlockInfo {
   std::string socket_path;
   std::thread server_thread;
 };
-static std::unordered_map<uint32_t, RegisteredBlockInfo> s_registered_blocks;
+
+// Unblock the server thread's accept(), join it and remove the socket.
+static void stop_server(RegisteredBlockInfo & info)
+{
+  shutdown(info.server_socket, SHUT_RDWR);
+  if (info.server_thread.joinable()) {
+    info.server_thread.join();
+  }
+  close(info.server_socket);
+  unlink(info.socket_path.c_str());
+}
+
+struct RegisteredBlocks : std::unordered_map<uint32_t, RegisteredBlockInfo>
+{
+  ~RegisteredBlocks()
+  {
+    for (auto & entry : *this) {
+      stop_server(entry.second);
+    }
+  }
+};
+static RegisteredBlocks s_registered_blocks;
 
 std::string DmaBufIpc::register_fd(uint32_t block_id, int fd)
 {
@@ -139,12 +160,7 @@ void DmaBufIpc::unregister_block(uint32_t block_id)
     s_registered_blocks.erase(it);
   }
 
-  shutdown(info.server_socket, SHUT_RDWR);
-  if (info.server_thread.joinable()) {
-    info.server_thread.join();
-  }
-  close(info.server_socket);
-  unlink(info.socket_path.c_str());
+  stop_server(info);
 }
 
 std::string DmaBufIpc::register_block(PoolBlock * block)

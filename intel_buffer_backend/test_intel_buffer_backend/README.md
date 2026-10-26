@@ -10,7 +10,7 @@ This ROS2 pipeline has 4 nodes.
 
 | # | Node | Role | Buffer interaction |
 |---|------|------|--------------------|
-| 1 | `video_dmabuf_sim` (`video_publisher_node`) | Source. `simulated` = video file → `allocate_buffer` + one `write_to_buffer` memcpy; `camera` = V4L2 → `wrap_dmabuf` (zero copy) | **Produces** `IntelMemoryBufferImageFrame` |
+| 1 | `video_dmabuf_sim` (`video_publisher_node`) | Source. `simulated` = video file → `allocate_buffer` + one `write_to_buffer` memcpy; `camera` = V4L2 → `wrap_dmabuf` (zero copy) | **Produces** `sensor_msgs/Image` whose `data` is an IntelBuffer (sent as an `IntelBufferDescriptor`) |
 | 2 | `openvino_pipeline` (`openvino_pipeline_node`) | Imports frame, runs SSD object detection on the iGPU via OpenVINO, publishes `vision_msgs/Detection2DArray` | **Imports** frame (zero copy → `ov::Tensor`) |
 | 3 | `detection_visualizer` (`detection_visualizer_node`) | Imports frame + detections, draws boxes, publishes annotated `sensor_msgs/Image` | **Imports** frame |
 | 4 | `rviz2` | Displays annotated image | standard ROS |
@@ -30,7 +30,7 @@ flowchart LR
     SRC --> POOL --> BK1
   end
 
-  DDS(["DDS control plane\nIntelMemoryBufferImageFrame ~200 B\n(descriptor only)"])
+  DDS(["DDS control plane\nsensor_msgs/Image fields +\nIntelBufferDescriptor ~200 B"])
   SHM[["Shared physical DRAM\n(USM alloc / dma_buf pages)"]]
 
   subgraph SUB1["OpenVINO process"]
@@ -92,6 +92,33 @@ ros2 launch test_intel_memory_buffer_backend test_intel_buffer_backend_openvino.
 - If the `source_mode` is `simulated` then `video_path` is required.
 - If `source_mode` is `camera` then don't need to pass `video_path`, but `camera_device`
 camera device path(which supports NV12) has to be passed, example /dev/video0.
+- In `camera` mode, low light can make the camera's auto-exposure drop its frame
+rate (e.g. 30 → 15 fps), which adds a full frame period to the end-to-end
+capture→visualized latency. The publisher logs the delivered fps every 100 frames;
+pass `camera_fixed_framerate:=true` to keep the configured rate (images may be
+darker; the camera setting is restored on exit).
 - Tested this ROS2 pipeline with UVC webcam.
 - OpenVINO models those are tested - [ssdlite_mobilenet_v2](https://docs.openvino.ai/2023.3/omz_models_model_ssdlite_mobilenet_v2.html)
 and [face-detection-retail-0004](https://docs.openvino.ai/2023.3/omz_models_model_face_detection_retail_0004.html)
+
+## End-to-end integration test
+
+`test_intel_buffer_e2e` checks the standard-message path automatically. A separate
+publisher process (`intel_buffer_e2e_publisher`) publishes `sensor_msgs/msg/Image`
+with IntelBuffer-backed `data`, and the test subscribes through RMW, so descriptor
+creation and import happen only in the RMW/backend callbacks. It runs once per
+transport (`L0_USM`, `DMA_BUF`, `EXTERNAL_MEMMAP`, and `WRAP_DMABUF`, which
+uses the camera's `wrap_dmabuf()` path) and checks that:
+
+- a subscriber accepting `intel_buffer` receives the data on that backend, through
+  the requested transport, with intact content and `Image` metadata;
+- a default (CPU-only) subscriber on the same topic receives the same bytes,
+  converted automatically;
+- subscriber references are released, so the publisher's buffer pool doesn't grow.
+
+Transports the machine can't provide are skipped.
+
+```bash
+colcon test --packages-select test_intel_buffer_backend
+colcon test-result --verbose
+```

@@ -13,8 +13,9 @@
 // limitations under the License.
 
 /// @file usm_video_publisher_node.cpp
-/// @brief Camera publisher with two source modes. Publishes IntelBufferDescriptor (metadata
-/// only — ~200 bytes on the wire). Pixel data stays in shared physical memory.
+/// @brief Camera publisher with two source modes. Publishes sensor_msgs/Image whose data
+/// is an IntelBuffer; the backend serializes it as an IntelBufferDescriptor (~200 bytes
+/// on the wire). Pixel data stays in shared physical memory.
 ///
 ///   "simulated" — video file → allocate_buffer() + write_to_buffer()
 ///                 (backing store selected via transport_mode: L0_USM/DMA_BUF),
@@ -42,15 +43,12 @@
 #include <opencv2/imgproc.hpp>
 
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/image.hpp"
 #include "intel_buffer/intel_buffer_api.hpp"
 #include "intel_memory_core/intel_memory_buffer_pool.hpp"
-#include "intel_memory_core/l0_usm_ipc.hpp"
 #include "intel_memory_core/l0_external_memmap.hpp"
-#include "intel_memory_core/dmabuf_ipc.hpp"
-#include "intel_buffer_backend_msgs/msg/intel_buffer_descriptor.hpp"
 
 #include "latency_stats.hpp"
-using IntelBufferDescriptor = intel_buffer_backend_msgs::msg::IntelBufferDescriptor;
 
 namespace
 {
@@ -78,6 +76,7 @@ public:
     this->declare_parameter<std::string>("source_mode", "simulated");
     this->declare_parameter<std::string>("video_path", "");
     this->declare_parameter<std::string>("camera_device", "/dev/video0");
+    this->declare_parameter<bool>("camera_fixed_framerate", false);
     this->declare_parameter<double>("framerate", 0.0);
     this->declare_parameter<bool>("loop", true);
     this->declare_parameter<std::string>("raw_format", "YUYV");
@@ -87,6 +86,7 @@ public:
     source_mode_ = this->get_parameter("source_mode").as_string();
     video_path_ = this->get_parameter("video_path").as_string();
     camera_device_ = this->get_parameter("camera_device").as_string();
+    camera_fixed_framerate_ = this->get_parameter("camera_fixed_framerate").as_bool();
     loop_ = this->get_parameter("loop").as_bool();
     raw_format_ = this->get_parameter("raw_format").as_string();
     std::string transport_mode = this->get_parameter("intel_memory_buffer_type").as_string();
@@ -95,7 +95,7 @@ public:
 
     select_transport(transport_mode);
 
-    publisher_ = this->create_publisher<IntelBufferDescriptor>(
+    publisher_ = this->create_publisher<sensor_msgs::msg::Image>(
       frame_topic, rclcpp::SensorDataQoS());
 
     if (source_mode_ == "camera") {
@@ -283,8 +283,36 @@ private:
       ioctl(v4l2_fd_, VIDIOC_QBUF, &buf);
     }
 
+    if (camera_fixed_framerate_) {
+      disable_dynamic_framerate();
+    }
+
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     ioctl(v4l2_fd_, VIDIOC_STREAMON, &type);
+  }
+
+  void disable_dynamic_framerate()
+  {
+    struct v4l2_control ctrl{};
+    ctrl.id = V4L2_CID_EXPOSURE_AUTO_PRIORITY;
+    if (ioctl(v4l2_fd_, VIDIOC_G_CTRL, &ctrl) < 0) {
+      RCLCPP_WARN(this->get_logger(),
+        "camera_fixed_framerate: %s has no exposure_dynamic_framerate control "
+        "(errno=%d); frame rate left to the driver", camera_device_.c_str(), errno);
+      return;
+    }
+    const int original = ctrl.value;
+    ctrl.value = 0;
+    if (ioctl(v4l2_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+      RCLCPP_WARN(this->get_logger(),
+        "camera_fixed_framerate: failed to disable exposure_dynamic_framerate "
+        "on %s (errno=%d)", camera_device_.c_str(), errno);
+      return;
+    }
+    saved_exposure_auto_priority_ = original;
+    RCLCPP_INFO(this->get_logger(),
+      "camera_fixed_framerate: exposure_dynamic_framerate disabled on %s (was %d)",
+      camera_device_.c_str(), original);
   }
 
   void cleanup_dmabuf_source()
@@ -292,6 +320,13 @@ private:
     if (v4l2_fd_ >= 0) {
       int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
       ioctl(v4l2_fd_, VIDIOC_STREAMOFF, &type);
+      if (saved_exposure_auto_priority_ >= 0) {
+        struct v4l2_control ctrl{};
+        ctrl.id = V4L2_CID_EXPOSURE_AUTO_PRIORITY;
+        ctrl.value = saved_exposure_auto_priority_;
+        ioctl(v4l2_fd_, VIDIOC_S_CTRL, &ctrl);
+        saved_exposure_auto_priority_ = -1;
+      }
       for (int fd : v4l2_dmabuf_fds_) {
         if (fd >= 0) close(fd);
       }
@@ -405,35 +440,21 @@ private:
   void publish_frame_dmabuf(rosidl::Buffer<uint8_t> & buffer, uint32_t buf_index,
                             uint64_t capture_ns)
   {
-    IntelBufferDescriptor msg;
+    auto * impl = dynamic_cast<intel_buffer_backend::IntelBufferImpl<uint8_t> *>(
+      buffer.get_impl());
+    if (impl && impl->get_block()) {
+      impl->get_block()->block_id = buf_index;
+    }
+
+    sensor_msgs::msg::Image msg;
     set_stamp_ns(msg.header.stamp,
       capture_ns != 0 ? static_cast<int64_t>(capture_ns) : mono_now_ns());
     msg.header.frame_id = "camera";
     msg.width = width_;
     msg.height = height_;
-    msg.stride = stride_;
+    msg.step = stride_;     // Y-plane bytes per row
     msg.encoding = "nv12";  // camera DMA-BUF is NV12; GPU/visualizer convert
-    msg.frame_seq = frame_seq_;
-    msg.transport_mode = IntelBufferDescriptor::TRANSPORT_DMA_BUF;
-
-    auto & desc = msg.dmabuf_desc;
-    desc.size = frame_bytes_;
-    desc.local_ptr = 0;  // cross-process only for real camera
-    desc.publisher_pid = static_cast<int32_t>(getpid());
-    desc.dmabuf_pid = static_cast<int32_t>(getpid());
-    desc.dmabuf_pool_block_id = buf_index;
-    desc.dmabuf_block_size = frame_bytes_;
-
-    auto * impl = dynamic_cast<intel_buffer_backend::IntelBufferImpl<uint8_t> *>(
-      buffer.get_impl());
-    if (impl && impl->get_block()) {
-      auto * block = impl->get_block();
-      block->block_id = buf_index;
-      desc.dmabuf_socket_path =
-        intel_buffer_backend::DmaBufIpc::register_block(block);
-    }
-
-    msg.buffer_ready_stamp_ns = this->now().nanoseconds();
+    msg.data = std::move(buffer);
 
     if (capture_ns != 0) {
       uint64_t ready_mono_ns = static_cast<uint64_t>(
@@ -456,119 +477,55 @@ private:
       publish_stats_.report(
         this->get_logger(), "publisher publish() serialize cost (descriptor)");
     }
+    if (frame_seq_ == 1) {
+      rate_window_start_ = std::chrono::steady_clock::now();
+      rate_window_start_seq_ = frame_seq_;
+    }
     if (frame_seq_ % 100 == 0) {
+      auto now = std::chrono::steady_clock::now();
+      double delivered_fps = (frame_seq_ - rate_window_start_seq_) /
+        std::chrono::duration<double>(now - rate_window_start_).count();
+      rate_window_start_ = now;
+      rate_window_start_seq_ = frame_seq_;
       RCLCPP_INFO(this->get_logger(),
-        "published %u frames [dmabuf] transport=DMA_BUF (zero-copy from camera)",
-        frame_seq_);
+        "published %u frames [dmabuf] transport=DMA_BUF (zero-copy from camera), "
+        "camera delivering %.1f fps (configured %.1f)",
+        frame_seq_, delivered_fps, fps_);
     }
   }
 
   void publish_frame(rosidl::Buffer<uint8_t> & buffer)
   {
-    IntelBufferDescriptor msg;
+    const char * transport = "DMA_BUF";
+    auto * impl = dynamic_cast<intel_buffer_backend::IntelBufferImpl<uint8_t> *>(
+      buffer.get_impl());
+    if (impl && impl->get_block()) {
+      if (impl->get_block()->transport == intel_buffer_backend::TransportMode::LEVEL_ZERO_USM) {
+        transport = "L0_USM";
+      } else if (impl->get_block()->transport ==
+        intel_buffer_backend::TransportMode::EXTERNAL_MEMMAP)
+      {
+        transport = "EXTERNAL_MEMMAP";
+      }
+    }
+
+    sensor_msgs::msg::Image msg;
     set_stamp_ns(msg.header.stamp, mono_now_ns());
     msg.header.frame_id = "camera";
     msg.width = width_;
     msg.height = height_;
-    msg.stride = stride_;
+    msg.step = stride_;
     msg.encoding = "bgr8";
-    msg.frame_seq = frame_seq_;
+    // The backend serializes this as an IntelBufferDescriptor — zero copy IPC token
+    msg.data = std::move(buffer);
 
-    // Fill transport descriptor — zero copy IPC token
-    fill_descriptor(buffer, msg);
-
-    msg.buffer_ready_stamp_ns = this->now().nanoseconds();
     publisher_->publish(msg);
     frame_seq_++;
 
     if (frame_seq_ % 100 == 0) {
-      const char * transport = "DMA_BUF";
-      if (msg.transport_mode == IntelBufferDescriptor::TRANSPORT_LEVEL_ZERO_USM) {
-        transport = "L0_USM";
-      } else if (msg.transport_mode ==
-        IntelBufferDescriptor::TRANSPORT_EXTERNAL_MEMMAP)
-      {
-        transport = "EXTERNAL_MEMMAP";
-      }
       RCLCPP_INFO(this->get_logger(),
         "published %u frames [%s] transport=%s",
         frame_seq_, source_mode_.c_str(), transport);
-    }
-  }
-
-  void fill_descriptor(rosidl::Buffer<uint8_t> & buffer, IntelBufferDescriptor & msg)
-  {
-    auto * impl = dynamic_cast<intel_buffer_backend::IntelBufferImpl<uint8_t> *>(
-      buffer.get_impl());
-    if (!impl) return;
-
-    auto * block = impl->get_block();
-    if (!block) return;
-
-    if (block->transport == intel_buffer_backend::TransportMode::EXTERNAL_MEMMAP) {
-      msg.transport_mode = IntelBufferDescriptor::TRANSPORT_EXTERNAL_MEMMAP;
-      auto & desc = msg.extmap_desc;
-      desc.size = impl->size();
-      desc.shm_name = block->extmap_shm_name;
-      desc.local_ptr = reinterpret_cast<uint64_t>(block->ptr);
-      desc.publisher_pid = static_cast<int32_t>(getpid());
-      return;
-    }
-
-    auto pool = intel_buffer_backend::IntelBufferImpl<uint8_t>::get_or_create_global_pool();
-
-    if (block->transport == intel_buffer_backend::TransportMode::LEVEL_ZERO_USM) {
-      msg.transport_mode = IntelBufferDescriptor::TRANSPORT_LEVEL_ZERO_USM;
-      auto & desc = msg.l0_desc;
-      desc.size = impl->size();
-      desc.local_ptr = reinterpret_cast<uint64_t>(block->ptr);
-      desc.publisher_pid = static_cast<int32_t>(getpid());
-      desc.ze_device_ordinal = block->ze_device_ordinal;
-      std::memcpy(desc.ze_device_uuid.data(), block->ze_device_uuid,
-        sizeof(block->ze_device_uuid));
-      desc.block_id = block->block_id;
-
-      if (pool) {
-        desc.pool_id = pool->pool_id();
-        desc.pool_generation = pool->generation();
-        desc.ipc_uid = pool->assign_uid(block);
-      }
-
-      // Delegate L0 IPC handle export to the library (no ze* calls in node code)
-      if (block->ze_context && block->ptr) {
-        uint64_t handle_size = 0;
-        uint64_t context_id = 0;
-        if (!intel_buffer_backend::L0UsmIpc::export_handle(
-            block,
-            desc.ze_ipc_handle.data(),
-            handle_size,
-            context_id))
-        {
-          RCLCPP_WARN_ONCE(this->get_logger(),
-            "L0UsmIpc::export_handle failed");
-        } else {
-          desc.ze_ipc_handle_size = handle_size;
-          desc.ze_context_id = context_id;
-          if (pool) {
-            desc.l0_socket_path = pool->register_block_for_ipc(block);
-          }
-        }
-      }
-    } else {
-      msg.transport_mode = IntelBufferDescriptor::TRANSPORT_DMA_BUF;
-      auto & desc = msg.dmabuf_desc;
-      desc.size = impl->size();
-      desc.local_ptr = reinterpret_cast<uint64_t>(block->ptr);
-      desc.publisher_pid = static_cast<int32_t>(getpid());
-      desc.dmabuf_pid = static_cast<int32_t>(getpid());
-      desc.dmabuf_pool_block_id = block->block_id;
-      desc.dmabuf_block_size = block->size;
-      if (pool) {
-        desc.pool_id = pool->pool_id();
-        desc.pool_generation = pool->generation();
-        desc.ipc_uid = pool->assign_uid(block);
-        desc.dmabuf_socket_path = pool->register_block_for_ipc(block);
-      }
     }
   }
 
@@ -585,9 +542,13 @@ private:
   std::vector<int> v4l2_dmabuf_fds_;
   std::thread capture_thread_;              // camera: frame-arrival-driven publish
   std::atomic<bool> capture_running_{false};
+  bool camera_fixed_framerate_{false};
+  int saved_exposure_auto_priority_{-1};    // original control value to restore; -1 = untouched
+  std::chrono::steady_clock::time_point rate_window_start_{};  // delivered-fps window
+  uint32_t rate_window_start_seq_{0};
 
   // Common
-  rclcpp::Publisher<IntelBufferDescriptor>::SharedPtr publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr wait_timer_;
 

@@ -200,12 +200,9 @@ classDiagram
     <<core — consumer side>>
     +import(shm_name, size) void*  %% cached by name
   }
-  class IntelMemoryBufferImageFrame {
+  class IntelBufferDescriptor {
     <<msg / DDS ~200 B>>
-    Header header
-    uint32 width, height, stride
-    string encoding
-    uint32 frame_seq
+    %% backend-specific only; image metadata lives in sensor_msgs/Image
     uint8 transport_mode
     L0UsmDescriptor l0_desc
     DmaBufDescriptor dmabuf_desc
@@ -246,14 +243,14 @@ classDiagram
   IntelMemoryBufferBackend --> IntelMemoryIPCManager
   IntelMemoryBufferBackend --> L0ExternalMemMap : EXTERNAL_MEMMAP branch
   IntelMemoryBufferBackend --> ExternalMemMapImporter : import on subscriber
-  IntelMemoryBufferBackend ..> IntelMemoryBufferImageFrame : create / from descriptor
+  IntelMemoryBufferBackend ..> IntelBufferDescriptor : create / from descriptor
   IntelMemoryIPCManager --> L0UsmIpc
   IntelMemoryIPCManager --> DmaBufIpc
   IntelMemoryBufferPool ..> DmaBufIpc : register_block_for_ipc
   L0ExternalMemMap --> SharedSysmem : producer owns region
-  IntelMemoryBufferImageFrame *-- L0UsmDescriptor
-  IntelMemoryBufferImageFrame *-- DmaBufDescriptor
-  IntelMemoryBufferImageFrame *-- ExternalMemMapDescriptor
+  IntelBufferDescriptor *-- L0UsmDescriptor
+  IntelBufferDescriptor *-- DmaBufDescriptor
+  IntelBufferDescriptor *-- ExternalMemMapDescriptor
 ```
 
 ### 4.2 Buffer lifecycle & reference counting
@@ -340,28 +337,27 @@ sequenceDiagram
         Note over BK: fill l0_desc (size, handle, ordinal,<br/>local_ptr, publisher_pid)
       else block.transport == DMA_BUF
         BK->>POOL: assign_uid(block) → ipc_uid
-        BK->>POOL: register_block_for_ipc(block) → socket_path
-        POOL->>IPC: register_block(block)  (AF_UNIX server)
+        BK->>IPC: register_block(block) → socket_path  (AF_UNIX server;<br/>pool blocks and wrap_dmabuf() blocks alike)
         Note over BK: fill dmabuf_desc (size, socket_path,<br/>dmabuf_pid, block_id, local_ptr)
       else block.transport == EXTERNAL_MEMMAP
         Note over BK: block came from wrap_external_memmap(),<br/>never from POOL — no assign_uid,<br/>no register_block_for_ipc
         Note over BK: fill extmap_desc (size, extmap_shm_name,<br/>local_ptr, publisher_pid)
       end
-      BK-->>SER: IntelMemoryBufferImageFrame (descriptor ~200 B)
+      BK-->>SER: IntelBufferDescriptor (descriptor ~200 B)
     end
   end
 
-  SER->>DDS: serialized IntelMemoryBufferImageFrame → wire
+  SER->>DDS: serialized IntelBufferDescriptor → wire
 ```
 
 **Who triggers what:** DDS/RMW never calls the backend — it only carries the
-already-serialized `IntelMemoryBufferImageFrame`. The trigger is `publish()` → the **rclcpp
+already-serialized `IntelBufferDescriptor`. The trigger is `publish()` → the **rclcpp
 serialization layer**, which (seeing a non-CPU `Buffer` member) calls
 `create_descriptor_with_endpoint()` **once per matched subscriber**. That call is
 the sole entry point: it reads the `PoolBlock` off the impl, calls `assign_uid()`
 on the pool, then — branching on `block->transport` — either
-`L0UsmIpc::export_handle()` or the pool's `register_block_for_ipc()` (which starts
-the `AF_UNIX` server via `DmaBufIpc`). A `nullptr` return means "this peer can't
+`L0UsmIpc::export_handle()` or `IntelMemoryIPCManager::register_block()` (which
+starts the `AF_UNIX` server via `DmaBufIpc`). A `nullptr` return means "this peer can't
 do zero-copy" and the layer falls back to normal CPU serialization for it.
 
 ### 5.2 Subscriber node Import + GPU inference (consumer side)
@@ -378,7 +374,7 @@ sequenceDiagram
   participant SHM as Shared DRAM (L0 USM / dma_buf / extmemmap pages)
 
   Note over DDS,DES: descriptor arrives on the wire
-  DDS->>DES: serialized IntelMemoryBufferImageFrame (~200 B)
+  DDS->>DES: serialized IntelBufferDescriptor (~200 B)
   DES->>BK: from_descriptor_with_endpoint(descriptor, endpoint_info)
 
   alt local_ptr != 0 && publisher_pid == getpid()  (intra-process)
@@ -402,11 +398,11 @@ sequenceDiagram
     Note over BK: cached by shm_name for process lifetime;<br/>no IPCMetadata refcount segment (block never came from POOL)
   end
 
-  BK-->>DES: IntelMemoryBufferImpl (custom deleter → refcount-- on destroy, if pool-managed)
+  BK-->>DES: IntelMemoryBufferImpl (~IntelBufferImpl → refcount-- on destroy, if pool-managed)
   DES-->>SUB: msg with Buffer bound to shared pages
   SUB->>SHM: get_usm_ptr(buffer) — read same pages (zero copy)
   SUB->>SUB: wrap as ov::Tensor (NV12/BGR) → GPU preprocess + SSD infer
-  Note over SUB,SHM: on buffer destruction the deleter does refcount--,<br/>freeing the block for pool reuse (n/a for EXTERNAL_MEMMAP — no pool block)
+  Note over SUB,SHM: on buffer destruction ~IntelBufferImpl does refcount--,<br/>freeing the block for pool reuse (n/a for EXTERNAL_MEMMAP — no pool block)
 ```
 
 **Who triggers what:** as on the publish side, DDS/RMW only delivers the
@@ -416,9 +412,11 @@ layer** calls `from_descriptor_with_endpoint()`, which branches on
 (`local_ptr != 0 && publisher_pid == getpid()`) it wraps `local_ptr` directly and
 skips IPC entirely; for `LEVEL_ZERO_USM`/`DMA_BUF` it imports through
 `IntelMemoryIPCManager` (`import_level_zero_block` / `import_dmabuf_block`), bumps
-the shared-memory `refcount`, and returns an `IntelMemoryBufferImpl` whose custom
-deleter decrements that `refcount` on destruction (see §4.2) so the pool can
-recycle the block. For `EXTERNAL_MEMMAP` there is no pool block or refcount to
+the shared-memory `refcount`, and returns an `IntelMemoryBufferImpl` whose
+destructor decrements that `refcount` (see §4.2) so the pool can recycle the
+block. (The release lives in the destructor, not the deleter returned by
+`from_descriptor_with_endpoint()`: the type support re-wraps the raw impl in a
+`Buffer` and drops that deleter.) For `EXTERNAL_MEMMAP` there is no pool block or refcount to
 manage: `ExternalMemMapImporter::import()` opens the producer's `SharedSysmem`
 region by name and maps it via `L0ExternalMemMap::map()`, caching the result by
 `shm_name` for the process lifetime (mapping the same physical pages twice into
@@ -436,7 +434,7 @@ Sample ROS2 workload using intel buffer backend is found at [Sample](../intel_bu
 | `intel_memory_core` | plain CMake (ROS-free) | Memory pool, both pool-managed IPC mechanisms (`l0_usm_ipc`, `dmabuf_ipc`), IPC manager, `IPCMetadata` refcount, plus the non-pool `l0_external_memmap` (`L0ExternalMemMap`, `SharedSysmem`, `ExternalMemMapImporter`) |
 | `intel_buffer` | ament (header-only) | `rosidl::Buffer` adapter over the core (`IntelMemoryBufferImpl`, `intel_memory_buffer_api`, `wrap_external_memmap()`/`ExternalMemMapRing`) |
 | `intel_buffer_backend` | ament | `rosidl::BufferBackend` plugin: descriptor create/import (branches on `LEVEL_ZERO_USM` / `DMA_BUF` / `EXTERNAL_MEMMAP`) |
-| `intel_buffer_backend_msgs` | ament | `IntelMemoryBufferImageFrame`, `L0UsmDescriptor`, `DmaBufDescriptor`, `ExternalMemMapDescriptor` |
+| `intel_buffer_backend_msgs` | ament | `IntelBufferDescriptor`, `L0UsmDescriptor`, `DmaBufDescriptor`, `ExternalMemMapDescriptor` |
 | `test_intel_buffer_backend` | ament | Sample pipeline nodes (camera publisher, OpenVINO inference, visualizer) + launch |
 
 ---

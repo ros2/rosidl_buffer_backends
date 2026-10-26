@@ -14,7 +14,6 @@
 
   <depend>intel_buffer</depend>
   <depend>intel_memory_core</depend>
-  <depend>intel_buffer_backend_msgs</depend>
   <!-- Runtime-only: the backend plugin is loaded by pluginlib, not linked. -->
   <exec_depend>intel_buffer_backend</exec_depend>
   <depend>rclcpp</depend>
@@ -24,6 +23,9 @@
 
   <exec_depend>rviz2</exec_depend>
   <exec_depend>ros2launch</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_cmake_ros</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
