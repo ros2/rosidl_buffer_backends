@@ -232,12 +232,16 @@ TEST(IntelBufferBackendFromDescriptor, IntraProcessExternalMemmapShortcutWrapsLo
   frame->extmap_desc.size = size;
   frame->extmap_desc.local_ptr = reinterpret_cast<uint64_t>(heap);
   frame->extmap_desc.publisher_pid = static_cast<int32_t>(getpid());
+  frame->extmap_desc.slot_generation = 7;
 
   auto result = backend.from_descriptor_with_endpoint(frame.get(), endpoint);
   ASSERT_NE(result.get(), nullptr);
   auto * impl = static_cast<IntelBufferImpl<uint8_t> *>(result.get());
   EXPECT_EQ(impl->size(), size);
   EXPECT_EQ(impl->data(), heap);
+  ASSERT_NE(impl->get_block(), nullptr);
+  EXPECT_EQ(impl->get_block()->extmap_generation, 7u);
+  EXPECT_EQ(impl->get_block()->size, 0u);
 }
 
 TEST(IntelBufferBackendFromDescriptor, ZeroSizeExternalMemmapDescriptorReturnsEmptyBuffer)

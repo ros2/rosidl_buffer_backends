@@ -228,7 +228,8 @@ std::shared_ptr<void> IntelBufferBackend::create_descriptor_with_endpoint(
     desc.dmabuf_pool_block_id = block->block_id;
     desc.dmabuf_block_size = block->size;
 
-    std::string socket_path = pool->register_block_for_ipc(block);
+    std::string socket_path = block->dmabuf_fd >= 0 ?
+      IntelMemoryIPCManager::register_block(block) : "";
     if (socket_path.empty()) {
       return nullptr;
     }
@@ -255,20 +256,23 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
         throw std::runtime_error("external-memmap descriptor has zero size");
       }
       void * ptr = nullptr;
+      size_t region_size = 0;
       if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
         // Intra-process: the producer's mapping is already valid here.
         ptr = reinterpret_cast<void *>(d.local_ptr);
       } else {
-        ptr = ExternalMemMapImporter::import(d.shm_name, d.size, d.publisher_pid);
+        ptr = ExternalMemMapImporter::import(
+          d.shm_name, d.size, d.publisher_pid, &region_size);
         if (!ptr) {
           throw std::runtime_error("external-memmap import failed for " + d.shm_name);
         }
       }
       auto imported_block = std::make_unique<PoolBlock>();
       imported_block->ptr = ptr;
-      imported_block->size = d.size;
+      imported_block->size = region_size;
       imported_block->transport = TransportMode::EXTERNAL_MEMMAP;
       imported_block->extmap_shm_name = d.shm_name;
+      imported_block->extmap_generation = d.slot_generation;
 
       auto result = std::make_unique<IntelBufferImpl<uint8_t>>(
         imported_block.release(), d.size, false, /*standalone=*/true);
@@ -333,14 +337,11 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
 
     imported_block->dmabuf_fd = import_result.dmabuf_fd;
 
+    // ~IntelBufferImpl releases imported_block->ipc_meta.
     auto result = std::make_unique<IntelBufferImpl<uint8_t>>(
       imported_block.release(), block_size, false, /*standalone=*/true);
     return {result.release(), [](void * p) {
-        auto * impl = static_cast<IntelBufferImpl<uint8_t> *>(p);
-        if (impl->get_block() && impl->get_block()->ipc_meta) {
-          IntelMemoryIPCManager::release_block(impl->get_block()->ipc_meta);
-        }
-        delete impl;
+        delete static_cast<IntelBufferImpl<uint8_t> *>(p);
       }};
   } catch (const std::exception & e) {
     RCUTILS_LOG_WARN_NAMED("intel_buffer_backend",

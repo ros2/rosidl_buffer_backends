@@ -15,7 +15,8 @@
 """Intel USM zero-copy pipeline: camera → iGPU inference → RViz2 visualization.
 
 Pipeline:
-  1) video_dmabuf_sim      — Publishes IntelMemoryBufferImageFrame (descriptor + fallback data)
+  1) video_dmabuf_sim      — Publishes sensor_msgs/Image backed by an IntelBuffer
+                             (the backend sends an IntelBufferDescriptor, not pixels)
   2) openvino_pipeline     — Imports buffer (zero-copy), runs GPU inference,
                              publishes Detection2DArray
   3) detection_visualizer  — Imports buffer, draws bounding boxes, publishes
@@ -67,6 +68,7 @@ def generate_launch_description():
     transport_mode = LaunchConfiguration("transport_mode")
     video_path = LaunchConfiguration("video_path")
     camera_device = LaunchConfiguration("camera_device")
+    camera_fixed_framerate = LaunchConfiguration("camera_fixed_framerate")
     framerate = LaunchConfiguration("framerate")
     loop = LaunchConfiguration("loop")
     raw_format = LaunchConfiguration("raw_format")
@@ -112,6 +114,14 @@ def generate_launch_description():
                 default_value="/dev/video0",
                 description="V4L2 device (used when source_mode=camera).",
             ),
+            DeclareLaunchArgument(
+                "camera_fixed_framerate",
+                default_value="false",
+                description="Camera mode: disable the camera's exposure_dynamic_framerate "
+                            "so low-light auto-exposure cannot drop the frame rate "
+                            "(which adds a frame period to capture->visualized "
+                            "latency). Images may be darker; restored on exit.",
+            ),
 
             # --- Common parameters ---
             DeclareLaunchArgument(
@@ -142,7 +152,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "frame_topic",
                 default_value="/usm/camera0/frame",
-                description="IntelMemoryBufferImageFrame topic (descriptor + data).",
+                description="sensor_msgs/Image frame topic (data backed by an IntelBuffer).",
             ),
             DeclareLaunchArgument(
                 "detections_topic",
@@ -165,7 +175,7 @@ def generate_launch_description():
                 description="Launch RViz2 for visualization.",
             ),
 
-            # --- Node 1: Camera publisher (IntelMemoryBufferImageFrame) ---
+            # --- Node 1: Camera publisher (sensor_msgs/Image backed by IntelBuffer) ---
             Node(
                 package="test_intel_buffer_backend",
                 executable="video_publisher_node",
@@ -173,9 +183,10 @@ def generate_launch_description():
                 parameters=[
                     {
                         "source_mode": source_mode,
-                        "intel_buffer_type": transport_mode,
+                        "intel_memory_buffer_type": transport_mode,
                         "video_path": video_path,
                         "camera_device": camera_device,
+                        "camera_fixed_framerate": camera_fixed_framerate,
                         "framerate": framerate,
                         "loop": loop,
                         "raw_format": raw_format,

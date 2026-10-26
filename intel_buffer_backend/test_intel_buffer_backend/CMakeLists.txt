@@ -36,7 +36,6 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(intel_buffer REQUIRED)
 find_package(intel_memory_core REQUIRED)
-find_package(intel_buffer_backend_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(vision_msgs REQUIRED)
@@ -44,7 +43,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(OpenVINO REQUIRED COMPONENTS Runtime)
 
-# --- Camera publisher (camera/video → IntelMemoryBufferImageFrame descriptor) ---
+# --- Camera publisher (camera/video → sensor_msgs/Image backed by IntelBuffer) ---
 add_library(video_publisher_component SHARED
   src/video_publisher_node.cpp
 )
@@ -54,9 +53,9 @@ target_include_directories(video_publisher_component PRIVATE
 target_link_libraries(video_publisher_component
   intel_buffer::intel_buffer
   intel_memory_core::intel_memory_core
-  ${intel_buffer_backend_msgs_TARGETS}
   rclcpp::rclcpp
   rclcpp_components::component
+  ${sensor_msgs_TARGETS}
   ${OpenCV_LIBRARIES}
 )
 rclcpp_components_register_node(video_publisher_component
@@ -64,7 +63,7 @@ rclcpp_components_register_node(video_publisher_component
   EXECUTABLE video_publisher_node
 )
 
-# --- OpenVINO inference (IntelMemoryBufferImageFrame → import → GPU/NPU) ---
+# --- OpenVINO inference (sensor_msgs/Image → IntelBuffer → GPU/NPU) ---
 add_library(openvino_pipeline_component SHARED
   src/openvino_pipeline_node.cpp
 )
@@ -74,9 +73,9 @@ target_include_directories(openvino_pipeline_component PRIVATE
 target_link_libraries(openvino_pipeline_component
   intel_buffer::intel_buffer
   intel_memory_core::intel_memory_core
-  ${intel_buffer_backend_msgs_TARGETS}
   rclcpp::rclcpp
   rclcpp_components::component
+  ${sensor_msgs_TARGETS}
   ${vision_msgs_TARGETS}
   ${OpenCV_LIBRARIES}
   openvino::runtime
@@ -96,7 +95,6 @@ target_include_directories(detection_visualizer_component PRIVATE
 target_link_libraries(detection_visualizer_component
   intel_buffer::intel_buffer
   intel_memory_core::intel_memory_core
-  ${intel_buffer_backend_msgs_TARGETS}
   rclcpp::rclcpp
   rclcpp_components::component
   ${sensor_msgs_TARGETS}
@@ -130,5 +128,32 @@ install(DIRECTORY launch/
 install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
+
+  # --- End-to-end rosidl::Buffer test: sensor_msgs/Image through RMW/backend ---
+  # Publisher runs as its own process so imports are cross-process.
+  add_executable(intel_buffer_e2e_publisher test/intel_buffer_e2e_publisher.cpp)
+  target_link_libraries(intel_buffer_e2e_publisher
+    intel_buffer::intel_buffer
+    intel_memory_core::intel_memory_core
+    rclcpp::rclcpp
+    ${sensor_msgs_TARGETS}
+  )
+
+  ament_add_ros_isolated_gtest(test_intel_buffer_e2e test/test_intel_buffer_e2e.cpp
+    TIMEOUT 300)
+  target_compile_definitions(test_intel_buffer_e2e PRIVATE
+    INTEL_BUFFER_E2E_PUBLISHER="$<TARGET_FILE:intel_buffer_e2e_publisher>")
+  target_link_libraries(test_intel_buffer_e2e
+    intel_buffer::intel_buffer
+    intel_memory_core::intel_memory_core
+    rclcpp::rclcpp
+    ${sensor_msgs_TARGETS}
+  )
+  add_dependencies(test_intel_buffer_e2e intel_buffer_e2e_publisher)
+endif()
 
 ament_package()

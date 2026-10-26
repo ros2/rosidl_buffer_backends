@@ -24,14 +24,9 @@
 #include "sensor_msgs/msg/image.hpp"
 #include "vision_msgs/msg/detection2_d_array.hpp"
 #include "intel_buffer/intel_buffer_api.hpp"
-#include "intel_memory_core/intel_memory_ipc_manager.hpp"
-#include "intel_memory_core/l0_external_memmap.hpp"
-#include "intel_buffer_backend_msgs/msg/intel_buffer_descriptor.hpp"
-#include <unistd.h>
 
 #include "latency_stats.hpp"
 
-using IntelBufferDescriptor = intel_buffer_backend_msgs::msg::IntelBufferDescriptor;
 using Detection2DArray = vision_msgs::msg::Detection2DArray;
 
 namespace
@@ -66,9 +61,11 @@ public:
 
     image_pub_ = this->create_publisher<sensor_msgs::msg::Image>(ann_topic, 10);
 
-    frame_sub_ = this->create_subscription<IntelBufferDescriptor>(
+    rclcpp::SubscriptionOptions sub_opts;
+    sub_opts.acceptable_buffer_backends = "intel_buffer";
+    frame_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
       frame_topic, rclcpp::QoS(rclcpp::KeepLast(1)).best_effort(),
-      std::bind(&UsmDetectionVisualizer::on_frame, this, std::placeholders::_1));
+      std::bind(&UsmDetectionVisualizer::on_frame, this, std::placeholders::_1), sub_opts);
 
     det_sub_ = this->create_subscription<Detection2DArray>(
       det_topic, 10,
@@ -86,7 +83,7 @@ private:
     latest_detections_ = msg;
   }
 
-  void on_frame(const IntelBufferDescriptor::SharedPtr msg)
+  void on_frame(const sensor_msgs::msg::Image::SharedPtr msg)
   {
     // Throttle output rate
     auto now_ns = this->now().nanoseconds();
@@ -104,43 +101,27 @@ private:
         static_cast<int64_t>(msg->header.stamp.nanosec);
     }
 
-    auto import = import_buffer(*msg);
-    const uint8_t * frame_ptr = static_cast<const uint8_t *>(import.ptr);
+    // The intel_buffer backend has already imported the shared pages into msg->data.
+    const uint8_t * frame_ptr = intel_buffer_backend::get_usm_ptr(msg->data);
     if (!frame_ptr) {
       RCLCPP_WARN_ONCE(this->get_logger(), "buffer import returned null");
       return;
     }
 
-    if (msg->buffer_ready_stamp_ns != 0) {
-      double read_delay_ms = static_cast<double>(
-        this->now().nanoseconds() - static_cast<int64_t>(msg->buffer_ready_stamp_ns)) / 1e6;
-      read_delay_ms_accum_ += read_delay_ms;
-      read_delay_count_++;
-      if (read_delay_count_ == 100) {
-        RCLCPP_INFO(this->get_logger(),
-          "buffer-ready->read delay: avg %.3f ms over last 100 frames",
-          read_delay_ms_accum_ / 100.0);
-        read_delay_ms_accum_ = 0.0;
-        read_delay_count_ = 0;
-      }
-    }
-
     cv::Mat annotated;
     if (msg->encoding == "nv12") {
-      size_t y_step = (msg->stride >= static_cast<size_t>(img_w))
-        ? msg->stride : static_cast<size_t>(img_w);
+      size_t y_step = (msg->step >= static_cast<size_t>(img_w))
+        ? msg->step : static_cast<size_t>(img_w);
       cv::Mat nv12(img_h * 3 / 2, img_w, CV_8UC1,
         const_cast<uint8_t *>(frame_ptr), y_step);
       cv::cvtColor(nv12, annotated, cv::COLOR_YUV2BGR_NV12);
     } else {
       size_t min_step = static_cast<size_t>(img_w) * 3;
-      size_t step = (msg->stride >= min_step) ? msg->stride : min_step;
+      size_t step = (msg->step >= min_step) ? msg->step : min_step;
       cv::Mat canvas(img_h, img_w, CV_8UC3,
         const_cast<uint8_t *>(frame_ptr), step);
       canvas.copyTo(annotated);
     }
-
-    intel_buffer_backend::IntelMemoryIPCManager::release_block(import.ipc_meta);
 
     // Draw bounding boxes from latest detections
     {
@@ -239,47 +220,7 @@ private:
     }
   }
 
-  intel_buffer_backend::IntelMemoryIPCManager::ImportResult import_buffer(
-    const IntelBufferDescriptor & frame)
-  {
-    if (frame.transport_mode == IntelBufferDescriptor::TRANSPORT_EXTERNAL_MEMMAP) {
-      const auto & d = frame.extmap_desc;
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
-        return {reinterpret_cast<void *>(d.local_ptr), nullptr};
-      }
-      if (d.size == 0) return {nullptr, nullptr};
-      return {intel_buffer_backend::ExternalMemMapImporter::import(
-          d.shm_name, d.size, d.publisher_pid), nullptr};
-    }
-
-    if (frame.transport_mode == IntelBufferDescriptor::TRANSPORT_LEVEL_ZERO_USM) {
-      const auto & d = frame.l0_desc;
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
-        return {reinterpret_cast<void *>(d.local_ptr), nullptr};
-      }
-      if (d.size == 0) return {nullptr, nullptr};
-      try {
-        return intel_buffer_backend::IntelMemoryIPCManager::import_level_zero_block(
-          d.ze_ipc_handle.data(), d.ze_ipc_handle_size,
-          d.ze_device_ordinal, d.ze_device_uuid.data(), d.size,
-          d.publisher_pid, d.block_id, d.ipc_uid, d.l0_socket_path, d.pool_id);
-      } catch (...) { return {nullptr, nullptr}; }
-    } else if (frame.transport_mode == IntelBufferDescriptor::TRANSPORT_DMA_BUF) {
-      const auto & d = frame.dmabuf_desc;
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
-        return {reinterpret_cast<void *>(d.local_ptr), nullptr};
-      }
-      if (d.size == 0) return {nullptr, nullptr};
-      try {
-        return intel_buffer_backend::IntelMemoryIPCManager::import_dmabuf_block(
-          d.dmabuf_socket_path, d.dmabuf_pid,
-          d.dmabuf_pool_block_id, d.dmabuf_block_size, d.ipc_uid, d.pool_id);
-      } catch (...) { return {nullptr, nullptr}; }
-    }
-    return {nullptr, nullptr};
-  }
-
-  rclcpp::Subscription<IntelBufferDescriptor>::SharedPtr frame_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr frame_sub_;
   rclcpp::Subscription<Detection2DArray>::SharedPtr det_sub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
 
@@ -287,8 +228,6 @@ private:
   Detection2DArray::SharedPtr latest_detections_;
   int64_t min_period_ns_{0};
   int64_t last_publish_ns_{0};
-  double read_delay_ms_accum_{0.0};   // sum of buffer-ready->read ms in the window
-  size_t read_delay_count_{0};        // stamped frames in the window
   LatencyStats e2e_stats_{60};        // reported per 100 frames
   size_t e2e_count_{0};               // stamped frames seen (drives the per-100 report)
 };

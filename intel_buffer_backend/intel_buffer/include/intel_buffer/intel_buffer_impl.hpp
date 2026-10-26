@@ -25,6 +25,7 @@
 #include <sys/mman.h>
 
 #include "intel_memory_core/intel_memory_buffer_pool.hpp"
+#include "intel_memory_core/intel_memory_ipc_manager.hpp"
 #include "rosidl_buffer/buffer_impl_base.hpp"
 #include "rosidl_buffer/cpu_buffer_impl.hpp"
 
@@ -71,6 +72,9 @@ public:
       return;
     }
     if (standalone_) {
+      if (block_->ipc_meta) {
+        intel_memory_core::IntelMemoryIPCManager::release_block(block_->ipc_meta);
+      }
 
       if (owns_block_) {
         free_standalone_resource(block_);

@@ -22,24 +22,18 @@
 #include <opencv2/imgproc.hpp>
 
 #include "rclcpp/rclcpp.hpp"
-#include "rclcpp/serialization.hpp"
-#include "rclcpp/serialized_message.hpp"
+#include "sensor_msgs/msg/image.hpp"
 #include "vision_msgs/msg/detection2_d_array.hpp"
 #include "vision_msgs/msg/detection2_d.hpp"
 #include "vision_msgs/msg/object_hypothesis_with_pose.hpp"
 #include "intel_buffer/intel_buffer_api.hpp"
-#include "intel_memory_core/intel_memory_ipc_manager.hpp"
 #include "intel_memory_core/gpu_cl_dmabuf_import.hpp"
 #include "intel_memory_core/l0_external_memmap.hpp"
-#include "intel_buffer_backend_msgs/msg/intel_buffer_descriptor.hpp"
-#include <unistd.h>
 
 #include <openvino/openvino.hpp>
 #include <openvino/runtime/intel_gpu/remote_properties.hpp>
 
 #include "latency_stats.hpp"
-
-using IntelBufferDescriptor = intel_buffer_backend_msgs::msg::IntelBufferDescriptor;
 
 namespace
 {
@@ -87,9 +81,11 @@ public:
         "(source resolution needed for the static NV12 preprocessor)");
     }
 
-    frame_sub_ = this->create_subscription<IntelBufferDescriptor>(
+    rclcpp::SubscriptionOptions sub_opts;
+    sub_opts.acceptable_buffer_backends = "intel_buffer";
+    frame_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
       frame_topic, rclcpp::QoS(rclcpp::KeepLast(1)).best_effort(),
-      std::bind(&UsmOpenvinoPipeline::on_frame, this, std::placeholders::_1));
+      std::bind(&UsmOpenvinoPipeline::on_frame, this, std::placeholders::_1), sub_opts);
 
     RCLCPP_INFO(this->get_logger(),
       "USM OpenVINO pipeline: ready, subscribed to %s", frame_topic.c_str());
@@ -248,7 +244,7 @@ private:
     return compile_model();
   }
 
-  void on_frame(const IntelBufferDescriptor::SharedPtr msg)
+  void on_frame(const sensor_msgs::msg::Image::SharedPtr msg)
   {
     int img_h = msg->height;
     int img_w = msg->width;
@@ -261,16 +257,11 @@ private:
 
     auto compute_start = std::chrono::steady_clock::now();
 
-    auto import = import_buffer(*msg);
-    const uint8_t * frame_ptr = static_cast<const uint8_t *>(import.ptr);
+    const auto * impl = dynamic_cast<const intel_buffer_backend::IntelBufferImpl<uint8_t> *>(
+      msg->data.get_impl());
+    const intel_buffer_backend::PoolBlock * block = impl ? impl->get_block() : nullptr;
+    const uint8_t * frame_ptr = impl ? impl->data() : nullptr;
     if (!frame_ptr) return;
-
-    if (msg->buffer_ready_stamp_ns != 0) {
-      double read_delay_ms = static_cast<double>(
-        this->now().nanoseconds() - static_cast<int64_t>(msg->buffer_ready_stamp_ns)) / 1e6;
-      read_delay_ms_accum_ += read_delay_ms;
-      read_delay_count_++;
-    }
 
     if (msg->header.stamp.sec != 0 || msg->header.stamp.nanosec != 0) {
       int64_t capture_ns = static_cast<int64_t>(msg->header.stamp.sec) * 1000000000ll +
@@ -280,21 +271,6 @@ private:
       capture_read_count_++;
     }
 
-    if (infer_count_ % kSerdesSampleStride == 0) {
-      static rclcpp::Serialization<IntelBufferDescriptor> serde;
-      rclcpp::SerializedMessage serialized;
-      auto ser_start = std::chrono::steady_clock::now();
-      serde.serialize_message(msg.get(), &serialized);
-      serialize_stats_.add(std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - ser_start).count());
-
-      IntelBufferDescriptor roundtrip;
-      auto deser_start = std::chrono::steady_clock::now();
-      serde.deserialize_message(&serialized, &roundtrip);
-      deserialize_stats_.add(std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - deser_start).count());
-    }
-
     ov::Tensor input_tensor;
     cv::Mat staged;
 
@@ -302,7 +278,7 @@ private:
       ov::Shape input_shape = {1,
         static_cast<size_t>(img_h) * 3 / 2,
         static_cast<size_t>(img_w), 1};
-      input_tensor = try_make_zero_copy_tensor(import, msg->transport_mode, input_shape);
+      input_tensor = try_make_zero_copy_tensor(*block, input_shape);
       if (!input_tensor) {
         input_tensor = ov::Tensor(ov::element::u8, input_shape,
           const_cast<uint8_t *>(frame_ptr));
@@ -334,7 +310,7 @@ private:
         static_cast<size_t>(img_h),
         static_cast<size_t>(img_w), 3};
       // True zero-copy via GPU RemoteTensor (see nv12 branch); host fallback.
-      input_tensor = try_make_zero_copy_tensor(import, msg->transport_mode, input_shape);
+      input_tensor = try_make_zero_copy_tensor(*block, input_shape);
       if (!input_tensor) {
         input_tensor = ov::Tensor(ov::element::u8, input_shape,
           const_cast<uint8_t *>(frame_ptr));
@@ -360,31 +336,18 @@ private:
       std::chrono::steady_clock::now() - compute_start).count();
     compute_stats_.add(compute_ms);
 
-    if (msg->transport_mode == IntelBufferDescriptor::TRANSPORT_EXTERNAL_MEMMAP &&
+    if (block->transport == intel_buffer_backend::TransportMode::EXTERNAL_MEMMAP &&
       !intel_buffer_backend::ExternalMemMapImporter::generation_unchanged(
-        import.ptr, import.region_size, msg->extmap_desc.slot_generation))
+        block->ptr, block->size, block->extmap_generation))
     {
       torn_frames_++;
     }
 
-    intel_buffer_backend::IntelMemoryIPCManager::release_block(import.ipc_meta);
-
     infer_count_++;
     if (infer_count_ % 1000 == 0) {
       compute_stats_.report(this->get_logger(), "buffer-read+preproc+infer latency");
-      serialize_stats_.report(
-        this->get_logger(), "subscriber CDR serialize cost (sampled, descriptor)");
-      deserialize_stats_.report(
-        this->get_logger(), "subscriber CDR deserialize cost (sampled, descriptor)");
     }
     if (infer_count_ % 100 == 0) {
-      if (read_delay_count_ > 0) {
-        RCLCPP_INFO(this->get_logger(),
-          "buffer-ready->read delay: avg %.3f ms over last %zu frames",
-          read_delay_ms_accum_ / static_cast<double>(read_delay_count_), read_delay_count_);
-        read_delay_ms_accum_ = 0.0;
-        read_delay_count_ = 0;
-      }
       if (capture_read_count_ > 0) {
         RCLCPP_INFO(this->get_logger(),
           "capture->read delay: avg %.3f ms over last %zu frames",
@@ -430,14 +393,12 @@ private:
   }
 
   ov::Tensor try_make_zero_copy_tensor(
-    const intel_buffer_backend::IntelMemoryIPCManager::ImportResult & import,
-    uint8_t transport_mode,
-    const ov::Shape & shape)
+    const intel_buffer_backend::PoolBlock & block, const ov::Shape & shape)
   {
-    if (transport_mode == IntelBufferDescriptor::TRANSPORT_EXTERNAL_MEMMAP) {
-      return try_make_host_ptr_tensor(import.ptr, import.region_size, shape);
+    if (block.transport == intel_buffer_backend::TransportMode::EXTERNAL_MEMMAP) {
+      return try_make_host_ptr_tensor(block.ptr, block.size, shape);
     }
-    return try_make_remote_tensor(import.dmabuf_fd, shape);
+    return try_make_remote_tensor(block.dmabuf_fd, shape);
   }
 
   ov::Tensor try_make_host_ptr_tensor(void * host_ptr, uint64_t region_size, const ov::Shape & shape)
@@ -548,59 +509,6 @@ private:
     return n;
   }
 
-  intel_buffer_backend::IntelMemoryIPCManager::ImportResult import_buffer(
-    const IntelBufferDescriptor& frame)
-  {
-    if (frame.transport_mode == IntelBufferDescriptor::TRANSPORT_EXTERNAL_MEMMAP) {
-      const auto & d = frame.extmap_desc;
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
-        return {reinterpret_cast<void *>(d.local_ptr), nullptr};
-      }
-      if (d.size == 0) return {nullptr, nullptr};
-      size_t region_size = 0;
-      void * ptr = intel_buffer_backend::ExternalMemMapImporter::import(
-        d.shm_name, d.size, d.publisher_pid, &region_size);
-      if (!ptr) {
-        RCLCPP_ERROR(this->get_logger(),
-          "external-memmap import failed for %s", d.shm_name.c_str());
-        return {nullptr, nullptr};
-      }
-      return {ptr, nullptr, -1, region_size};
-    }
-
-    // Intra-process fast path: same process, direct pointer access
-    if (frame.transport_mode == IntelBufferDescriptor::TRANSPORT_LEVEL_ZERO_USM) {
-      const auto & d = frame.l0_desc;
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
-        return {reinterpret_cast<void *>(d.local_ptr), nullptr};
-      }
-      if (d.size == 0) return {nullptr, nullptr};
-      try {
-        return intel_buffer_backend::IntelMemoryIPCManager::import_level_zero_block(
-          d.ze_ipc_handle.data(), d.ze_ipc_handle_size,
-          d.ze_device_ordinal, d.ze_device_uuid.data(), d.size,
-          d.publisher_pid, d.block_id, d.ipc_uid, d.l0_socket_path, d.pool_id);
-      } catch (const std::exception & e) {
-        RCLCPP_ERROR(this->get_logger(), "L0 IPC import failed: %s", e.what());
-        return {nullptr, nullptr};
-      }
-    } else {
-      const auto & d = frame.dmabuf_desc;
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
-        return {reinterpret_cast<void *>(d.local_ptr), nullptr};
-      }
-      if (d.size == 0) return {nullptr, nullptr};
-      try {
-        return intel_buffer_backend::IntelMemoryIPCManager::import_dmabuf_block(
-          d.dmabuf_socket_path, d.dmabuf_pid,
-          d.dmabuf_pool_block_id, d.dmabuf_block_size, d.ipc_uid, d.pool_id);
-      } catch (const std::exception & e) {
-        RCLCPP_ERROR(this->get_logger(), "DMA-BUF import failed: %s", e.what());
-        return {nullptr, nullptr};
-      }
-    }
-  }
-
   void publish_ssd_detections(
     const std_msgs::msg::Header & header, int img_h, int img_w)
   {
@@ -708,7 +616,7 @@ private:
     det_pub_->publish(det_array);
   }
 
-  rclcpp::Subscription<IntelBufferDescriptor>::SharedPtr frame_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr frame_sub_;
   rclcpp::Publisher<vision_msgs::msg::Detection2DArray>::SharedPtr det_pub_;
 
   std::string model_path_;
@@ -738,14 +646,8 @@ private:
   size_t infer_count_{0};
 
   LatencyStats compute_stats_{60};    // buffer-read+preproc+infer, reported per 1000
-  double read_delay_ms_accum_{0.0};   // sum of buffer-ready->read ms in the window
-  size_t read_delay_count_{0};        // stamped frames in the window
   double capture_read_ms_accum_{0.0}; // sum of capture->read ms in the window
   size_t capture_read_count_{0};      // capture-stamped frames in the window
-
-  static constexpr size_t kSerdesSampleStride = 10;
-  LatencyStats serialize_stats_{6};    // warmup scaled to the sample rate
-  LatencyStats deserialize_stats_{6};
 };
 
 #include "rclcpp_components/register_node_macro.hpp"
