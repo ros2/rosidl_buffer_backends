@@ -124,9 +124,14 @@ private:
   {
     if (!read_events_ || !cuda_is_stream_usable(stream_)) {return;}
 
+    // Read events are only queried and synchronised in this process (see
+    // CudaBuffer::reap_completed_read_events), never exported with
+    // cudaIpcGetEventHandle. cudaEventInterprocess is therefore not needed, and
+    // it makes the CUDA driver create a per-process /dev/shm/cuda.shm.* segment
+    // that it does not remove at process exit.
     cudaEvent_t ev{nullptr};
     CUDA_CHECK_NOTHROW(
-      cudaEventCreateWithFlags(&ev, CUDA_BUFFER_DEFAULT_EVENT_FLAGS),
+      cudaEventCreateWithFlags(&ev, CUDA_BUFFER_MINIMUM_EVENT_FLAGS),
       return);
     CUDA_CHECK_NOTHROW(cudaEventRecord(ev, stream_), {cudaEventDestroy(ev); return;});
     std::lock_guard<std::mutex> lg(*events_mutex_);
