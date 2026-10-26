@@ -385,12 +385,19 @@ void CudaVmmIPCManager::FDDispatcher::handle_client(int server_socket, int fd_to
 std::shared_ptr<CudaVmmIPCManager::FDDispatcher>
 CudaVmmIPCManager::get_dispatcher()
 {
-  // Process-lifetime FD dispatcher. It owns a worker thread and should not
-  // be torn down during static destruction while subscribers may still be
-  // importing VMM handles.
-  static auto * dispatcher = new std::shared_ptr<FDDispatcher>(
-    new FDDispatcher());
-  return *dispatcher;
+  // Managers own the worker while their exported blocks can still be served.
+  // A permanent strong reference leaves the thread executing library code after
+  // a component unloads its CUDA buffer backend. A weak cache lets the last
+  // manager stop and join the worker before that library can be unloaded.
+  static std::mutex mutex;
+  static std::weak_ptr<FDDispatcher> cached;
+  std::lock_guard<std::mutex> lock(mutex);
+  auto dispatcher = cached.lock();
+  if (!dispatcher) {
+    dispatcher = std::make_shared<FDDispatcher>();
+    cached = dispatcher;
+  }
+  return dispatcher;
 }
 
 CudaVmmIPCManager::CudaVmmIPCManager()

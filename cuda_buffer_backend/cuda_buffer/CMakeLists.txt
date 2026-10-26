@@ -69,6 +69,13 @@ if(BUILD_TESTING)
 
   find_package(ament_cmake_gtest REQUIRED)
 
+  ament_add_gtest(test_ipc_dispatcher_lifetime
+    test/test_ipc_dispatcher_lifetime.cpp
+  )
+  if(TARGET test_ipc_dispatcher_lifetime)
+    target_link_libraries(test_ipc_dispatcher_lifetime ${PROJECT_NAME})
+  endif()
+
   ament_add_gtest(test_cuda_buffer
     test/test_cuda_buffer.cpp
   )
