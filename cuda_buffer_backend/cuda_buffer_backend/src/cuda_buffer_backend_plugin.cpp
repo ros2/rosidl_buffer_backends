@@ -49,34 +49,23 @@ CudaBufferBackend::create_empty_descriptor() const
   return std::make_shared<cuda_buffer_backend_msgs::msg::CudaBufferDescriptor>();
 }
 
-std::shared_ptr<host_endpoint_manager::HostEndpointManager>
-CudaBufferBackend::get_endpoint_manager() const
+const detail::IpcMetadata & CudaBufferBackend::initialize_local_ipc_metadata() const
 {
-  std::lock_guard<std::mutex> lock(manager_mutex_);
-
-  if (!endpoint_manager_) {
-    size_t domain_id = 0;
-    endpoint_manager_ = host_endpoint_manager::HostEndpointManager::get_instance(domain_id);
-    endpoint_manager_->set_ipc_capable(CudaBufferImpl<uint8_t>::is_pool_ipc_capable());
-  }
-
-  return endpoint_manager_;
+  // Freeze the pool identity before advertising any endpoint. Discovery and
+  // metadata generation share this snapshot, even on different caller threads.
+  std::call_once(metadata_once_, [this]() {
+      auto metadata = detail::collect_ipc_metadata();
+      auto wire = detail::serialize_ipc_metadata(metadata);
+      local_metadata_ = std::move(metadata);
+      local_ipc_metadata_ = std::move(wire);
+  });
+  return local_metadata_;
 }
 
-void CudaBufferBackend::on_creating_endpoint(
-  const rmw_topic_endpoint_info_t & endpoint_info) const
+std::string CudaBufferBackend::get_backend_metadata() const
 {
-  auto manager = get_endpoint_manager();
-
-  rmw_gid_t gid;
-  gid.implementation_identifier = "";
-  std::memcpy(gid.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);
-
-  if (endpoint_info.endpoint_type == RMW_ENDPOINT_PUBLISHER) {
-    manager->register_publisher(gid, endpoint_info.topic_type);
-  } else if (endpoint_info.endpoint_type == RMW_ENDPOINT_SUBSCRIPTION) {
-    manager->register_subscription(gid, endpoint_info.topic_type);
-  }
+  (void)initialize_local_ipc_metadata();
+  return local_ipc_metadata_;
 }
 
 std::pair<bool, std::vector<std::set<uint32_t>>>
@@ -86,60 +75,37 @@ CudaBufferBackend::on_discovering_endpoint(
   const std::unordered_map<std::string, std::string> & endpoint_supported_backends)
 {
   (void)existing_endpoints;
-
-  bool supports_cuda = endpoint_supported_backends.find("cuda") !=
-    endpoint_supported_backends.end();
-  if (!supports_cuda) {
-    return {false, {}};
-  }
-
-  if (!CudaBufferImpl<uint8_t>::is_pool_ipc_capable()) {
-    return {false, {}};
-  }
-
-  rmw_gid_t gid;
-  gid.implementation_identifier = "";
-  std::memcpy(gid.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);
-
-  auto manager = get_endpoint_manager();
-  manager->refresh_from_remote();
-
-  auto locality_info = manager->query_endpoint_locality(gid);
-
-  bool is_ipc_capable = false;
-
-  if (locality_info.found && locality_info.ipc_capable) {
-    auto loc = locality_info.locality;
-    if (loc == host_endpoint_manager::EndpointLocality::INTRA_PROCESS) {
-      is_ipc_capable = true;
-    } else if (loc == host_endpoint_manager::EndpointLocality::INTER_PROCESS_SAME_HOST) {
-      is_ipc_capable =
-        (locality_info.device_id == manager->get_device_id()) &&
-        (locality_info.uid == manager->get_uid());
+  detail::IpcDecision decision;
+  const auto advertised = endpoint_supported_backends.find("cuda");
+  if (advertised != endpoint_supported_backends.end()) {
+    if (const auto peer = detail::parse_ipc_metadata(advertised->second)) {
+      decision = detail::decide_ipc(initialize_local_ipc_metadata(), *peer);
     }
   }
-
-  if (locality_info.found) {
+  EndpointKey key;
+  std::copy_n(endpoint_info.endpoint_gid, key.size(), key.begin());
+  {
     std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
-    host_endpoint_manager::GidKey key(endpoint_info.endpoint_gid);
-    ipc_decision_cache_[key] = is_ipc_capable;
+    ipc_decision_cache_[key] = decision;
   }
-
-  return {is_ipc_capable, {}};
+  return {decision.approved, {}};
 }
 
 std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
   const void * impl,
   const rmw_topic_endpoint_info_t & endpoint_info) const
 {
-  host_endpoint_manager::GidKey key(endpoint_info.endpoint_gid);
+  EndpointKey key;
+  std::copy_n(endpoint_info.endpoint_gid, key.size(), key.begin());
+  detail::IpcDecision decision;
 
   {
     std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
     auto it = ipc_decision_cache_.find(key);
-    if (it != ipc_decision_cache_.end() && !it->second) {
+    if (it == ipc_decision_cache_.end() || !it->second.approved) {
       return nullptr;
     }
+    decision = it->second;
   }
 
   auto * cuda_impl = dynamic_cast<CudaBufferImpl<uint8_t> *>(
@@ -187,14 +153,7 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
 
   cudaEvent_t write_event = cuda_impl->get_cuda_buffer().get_write_event();
 
-  rmw_gid_t gid;
-  gid.implementation_identifier = "";
-  std::memcpy(gid.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);
-  auto locality = get_endpoint_manager()->query_endpoint_locality(gid);
-  if (locality.found &&
-    locality.locality == host_endpoint_manager::EndpointLocality::INTRA_PROCESS &&
-    write_event)
-  {
+  if (decision.same_process && write_event) {
     RCUTILS_LOG_WARN_ONCE_NAMED("cuda_buffer_backend",
       "Same-process CUDA IPC requires cudaEventSynchronize on the publish path. "
       "Enable intra-process communication to avoid this overhead.");

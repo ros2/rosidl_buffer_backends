@@ -17,6 +17,7 @@ message(STATUS "${PROJECT_NAME}: CUDA ${CUDAToolkit_VERSION} from ${CUDAToolkit_
 
 ament_auto_add_library(${PROJECT_NAME} SHARED
   src/cuda_buffer_backend_plugin.cpp
+  src/ipc_metadata.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -50,10 +51,24 @@ if(BUILD_TESTING)
 
   find_package(ament_cmake_gtest REQUIRED)
   find_package(rclcpp REQUIRED)
+  find_package(rmw_test_fixture_implementation REQUIRED)
   find_package(rclcpp_components REQUIRED)
   find_package(sensor_msgs REQUIRED)
   find_package(std_msgs REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
+
+  ament_add_gtest(test_ipc_metadata test/test_ipc_metadata.cpp)
+  if(TARGET test_ipc_metadata)
+    target_link_libraries(test_ipc_metadata ${PROJECT_NAME})
+  endif()
+
+  ament_add_gtest(test_metadata_pubsub test/test_metadata_pubsub.cpp
+    SKIP_LINKING_MAIN_LIBRARIES TIMEOUT 75)
+  if(TARGET test_metadata_pubsub)
+    target_link_libraries(test_metadata_pubsub
+      ${PROJECT_NAME} rclcpp::rclcpp ${sensor_msgs_TARGETS}
+      rmw_test_fixture_implementation::rmw_test_fixture_implementation)
+  endif()
 
   ament_add_gtest(test_cuda_buffer_backend
     test/test_cuda_buffer_backend.cpp

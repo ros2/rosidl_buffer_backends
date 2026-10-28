@@ -15,7 +15,9 @@
 #ifndef CUDA_BUFFER_BACKEND__CUDA_BUFFER_BACKEND_HPP_
 #define CUDA_BUFFER_BACKEND__CUDA_BUFFER_BACKEND_HPP_
 
+#include <array>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -25,7 +27,7 @@
 #include <vector>
 
 #include "cuda_buffer/cuda_buffer_impl.hpp"
-#include "cuda_buffer/host_endpoint_manager.hpp"
+#include "cuda_buffer_backend/ipc_metadata.hpp"
 #include "rosidl_buffer_backend/buffer_backend.hpp"
 
 namespace cuda_buffer_backend
@@ -55,28 +57,21 @@ public:
     const void * descriptor,
     const rmw_topic_endpoint_info_t & endpoint_info) const override;
 
-  void on_creating_endpoint(
-    const rmw_topic_endpoint_info_t & endpoint_info) const override;
-
   std::pair<bool, std::vector<std::set<uint32_t>>> on_discovering_endpoint(
     const rmw_topic_endpoint_info_t & endpoint_info,
     const std::vector<rmw_topic_endpoint_info_t> & existing_endpoints,
     const std::unordered_map<std::string, std::string> & endpoint_supported_backends) override;
 
-  std::string get_backend_metadata() const override
-  {
-    return "";
-  }
+  std::string get_backend_metadata() const override;
 
 private:
-  std::shared_ptr<host_endpoint_manager::HostEndpointManager> get_endpoint_manager() const;
+  const detail::IpcMetadata & initialize_local_ipc_metadata() const;
+  mutable std::once_flag metadata_once_;
+  mutable detail::IpcMetadata local_metadata_;
+  mutable std::string local_ipc_metadata_;
 
-  mutable std::shared_ptr<host_endpoint_manager::HostEndpointManager> endpoint_manager_;
-  mutable std::mutex manager_mutex_;
-
-  mutable std::unordered_map<
-    host_endpoint_manager::GidKey, bool,
-    host_endpoint_manager::GidKeyHash> ipc_decision_cache_;
+  using EndpointKey = std::array<uint8_t, RMW_GID_STORAGE_SIZE>;
+  mutable std::map<EndpointKey, detail::IpcDecision> ipc_decision_cache_;
   mutable std::mutex ipc_cache_mutex_;
 };
 

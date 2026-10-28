@@ -37,7 +37,7 @@ colcon test-result --verbose
 
 | Package | Description |
 |---|---|
-| `cuda_buffer` | Core CUDA buffer implementation: memory pool, IPC manager, host endpoint manager, and user-facing `allocate_buffer` / `from_input_buffer` / `from_output_buffer` / `to_buffer` APIs |
+| `cuda_buffer` | Core CUDA buffer implementation: memory pool, IPC manager, and user-facing `allocate_buffer` / `from_input_buffer` / `from_output_buffer` / `to_buffer` APIs |
 | `cuda_buffer_py` | Python allocation, scoped read/write handles, and copying into open write handles for rclpy or standalone use |
 | `cuda_buffer_backend` | Plugin registration via `pluginlib`, endpoint discovery, and descriptor serialization |
 | `cuda_buffer_backend_msgs` | ROS 2 message definition for `CudaBufferDescriptor` |
@@ -324,14 +324,93 @@ def callback(msg):
 
 ## IPC Behavior
 
-The RMW layer calls `on_discovering_endpoint()` for each subscriber to decide between zero-copy IPC and CPU fallback:
+CUDA compatibility is advertised in endpoint backend metadata before discovery.
+`get_backend_metadata()` initializes and snapshots the process-wide pool's
+capabilities; both Fast DDS and Zenoh already copy this string into the endpoint
+advertisement. `on_discovering_endpoint()` parses the peer's CUDA record, compares
+it with the local snapshot, and caches approval and same-process locality by GID.
+No host-registry registration, refresh, listener, or pending resolution is needed.
 
-| Condition | Path |
+Descriptor creation requires a cached positive decision. Unknown peers, missing
+CUDA advertisements, unavailable devices, malformed records, and unsupported
+metadata versions return a null descriptor for host serialization. Export/import
+checks, per-block descriptors, synchronization events, and refcount protection
+still apply. Same-process event synchronization uses the cached locality rather
+than querying a registry on the publish path.
+
+### Metadata protocol
+
+The compact v1 format is a fixed positional record with `|` separators:
+
+```text
+cuda-ipc-v1|1|boot|shm|netns|pidns|userns|ipcns|process|gpu|device|uid
+```
+
+`cuda-ipc-v1|0` advertises unavailable IPC. Parsing is bounded to 1024 bytes,
+requires all fields, validates numeric ranges and identity tokens, and rejects
+unknown versions and additional fields. The encoding avoids commas, colons,
+semicolons, equals signs, and slashes reserved by the RMW discovery formats.
+
+| Field | Source and purpose |
 |---|---|
-| Same host, same GPU, same user | Zero-copy via CUDA VMM IPC |
-| Different GPU, different user, different host, or VMM unavailable | CPU fallback via `to_cpu()` |
+| `boot` | Linux boot UUID, preventing approval across different running hosts |
+| `shm` | Device and inode of `/dev/shm`, identifying the POSIX shared-memory filesystem |
+| `netns` | Network namespace device/inode, matching the abstract Unix socket namespace |
+| `pidns` | PID namespace device/inode, keeping PID-based resource names comparable |
+| `userns` | User namespace device/inode, making numeric user IDs comparable |
+| `ipcns` | IPC namespace device/inode; v1 conservatively requires the same namespace |
+| `process` | Random UUID shared by backend instances in the process; avoids PID-reuse ambiguity in locality detection |
+| `gpu` | CUDA device UUID obtained from the actual pool's device, including MIG-aware driver identity |
+| `device` | Pool's device ordinal; also required to match by the current descriptor/import protocol |
+| `uid` | Effective user ID |
 
-The publisher's pool checks a shared-memory refcount before recycling a block, ensuring all IPC subscribers have released their handles.
+IPC requires both peers to advertise capability and to match all environment,
+GPU, device-ordinal, and user fields. A matching process UUID additionally marks
+the peer as same-process. Different physical GPUs with the same ordinal are
+rejected. The same GPU with different visible ordinals also falls back, because
+supporting ordinal remapping requires a descriptor/import protocol change.
+
+These checks deliberately favor host fallback when container environments differ
+or cannot be identified. Hostnames and numeric PIDs alone are not locality proof.
+Metadata is a compatibility advertisement, not an authorization mechanism; actual
+resource access and CUDA operations must still succeed. The existing
+`CUDA_BUFFER_DEVICE_ID_OVERRIDE` and `CUDA_BUFFER_UID_OVERRIDE` test-only overrides
+are honored when producing advertisements.
+
+### Ownership and lifetime
+
+`CudaMemoryPool` and `CudaVmmIPCManager` retain allocation, export/import, event,
+and refcount ownership. `HostEndpointManager` is no longer used by the CUDA
+backend; its existing public implementation remains available for other callers.
+This change introduces no shared-memory registry protocol or background thread.
+
+Capabilities are immutable for a backend instance. Probing completes before the
+first advertisement and failures advertise unavailable IPC without throwing a
+`CudaError`. Retrying after device configuration changes requires a new backend
+instance. Forking after CUDA initialization remains unsupported; launch new
+processes with exec instead. The current pool is process-wide, so the existing
+argument-free metadata API is sufficient. Per-endpoint device/pool selection
+would require extending that API and the RMW callers.
+
+The backend API has no endpoint-removal notification. Cached decisions therefore
+live until backend destruction, and GIDs must not be reused during that lifetime.
+Legacy empty metadata and future unknown versions select host serialization in
+this implementation; behavior of legacy publishers is unchanged.
+
+### Tests
+
+`test_ipc_metadata` covers version/length/field validation, unavailable capability,
+process locality, namespace boundaries, GPU identity, ordinal remapping, and UID
+mismatch without requiring a usable GPU. Backend tests verify immutable metadata,
+concurrent access, no-device probing, unknown-peer fallback, and descriptor
+approval from discovery alone without endpoint registration.
+
+`test_metadata_pubsub` uses the currently selected RMW implementation to verify
+correct CUDA and host data delivery in one process, separate-process CUDA
+delivery, and separate-process UID-mismatch fallback. It uses the RMW
+test-isolation fixture (including an isolated router when using Zenoh) and skips
+GPU cases when IPC-capable CUDA is unavailable. Discovery and message reception
+determine progress; sleeps are not used as ordering barriers.
 
 ## License
 
