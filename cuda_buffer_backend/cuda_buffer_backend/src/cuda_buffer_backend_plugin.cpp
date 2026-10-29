@@ -63,6 +63,22 @@ CudaBufferBackend::get_endpoint_manager() const
   return endpoint_manager_;
 }
 
+bool CudaBufferBackend::can_import_descriptor(
+  const host_endpoint_manager::LocalityInfo & peer,
+  const host_endpoint_manager::HostEndpointManager & manager)
+{
+  if (!peer.found || !peer.ipc_capable) {
+    return false;
+  }
+  if (peer.locality == host_endpoint_manager::EndpointLocality::INTRA_PROCESS) {
+    return true;
+  }
+  if (peer.locality == host_endpoint_manager::EndpointLocality::INTER_PROCESS_SAME_HOST) {
+    return peer.device_id == manager.get_device_id() && peer.uid == manager.get_uid();
+  }
+  return false;
+}
+
 void CudaBufferBackend::on_creating_endpoint(
   const rmw_topic_endpoint_info_t & endpoint_info) const
 {
@@ -106,18 +122,7 @@ CudaBufferBackend::on_discovering_endpoint(
 
   auto locality_info = manager->query_endpoint_locality(gid);
 
-  bool is_ipc_capable = false;
-
-  if (locality_info.found && locality_info.ipc_capable) {
-    auto loc = locality_info.locality;
-    if (loc == host_endpoint_manager::EndpointLocality::INTRA_PROCESS) {
-      is_ipc_capable = true;
-    } else if (loc == host_endpoint_manager::EndpointLocality::INTER_PROCESS_SAME_HOST) {
-      is_ipc_capable =
-        (locality_info.device_id == manager->get_device_id()) &&
-        (locality_info.uid == manager->get_uid());
-    }
-  }
+  bool is_ipc_capable = can_import_descriptor(locality_info, *manager);
 
   if (locality_info.found) {
     std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
@@ -134,10 +139,37 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
 {
   host_endpoint_manager::GidKey key(endpoint_info.endpoint_gid);
 
+  bool decided = false;
   {
     std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
     auto it = ipc_decision_cache_.find(key);
     if (it != ipc_decision_cache_.end() && !it->second) {
+      return nullptr;
+    }
+    decided = it != ipc_decision_cache_.end();
+  }
+
+  if (!decided) {
+    // The subscriber was never classified, so classify it the way
+    // on_discovering_endpoint does. If it is missing from the local endpoint
+    // registry it is on another host or has not registered yet; if it is
+    // present it may have no usable device, or use another device or uid.
+    // None of these can import a CUDA descriptor, so use the host path.
+    // A peer found in the registry is cached, as in on_discovering_endpoint.
+    // A miss is not cached, so a same-host peer gets a CUDA descriptor once
+    // it registers.
+    rmw_gid_t peer;
+    peer.implementation_identifier = "";
+    std::memcpy(peer.data, endpoint_info.endpoint_gid, RMW_GID_STORAGE_SIZE);
+    auto peer_manager = get_endpoint_manager();
+    peer_manager->refresh_from_remote();
+    auto peer_locality = peer_manager->query_endpoint_locality(peer);
+    bool can_import = can_import_descriptor(peer_locality, *peer_manager);
+    if (peer_locality.found) {
+      std::lock_guard<std::mutex> lock(ipc_cache_mutex_);
+      ipc_decision_cache_[key] = can_import;
+    }
+    if (!can_import) {
       return nullptr;
     }
   }
