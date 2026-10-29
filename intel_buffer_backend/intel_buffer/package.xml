@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>intel_buffer</name>
+  <version>0.1.0</version>
+  <description>Intel USM-backed rosidl::Buffer storage, memory pooling, and IPC utilities
+  for zero-copy sharing across CPU, iGPU, IPU, and NPU on Panther Lake
+  (Intel Core Ultra 3) via Level Zero USM and DMA-BUF.</description>
+
+  <maintainer email="ramkumar.k@intel.com">Ramkumar K</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rosidl_buffer</depend>
+  <!-- Generic ROS-free core (plain CMake package); found via CMAKE_PREFIX_PATH. -->
+  <depend>intel_memory_core</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
