@@ -44,7 +44,8 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   pybind11_add_module(_cuda_buffer_test_utils test/buffer_test_utils.cpp)
-  target_link_libraries(_cuda_buffer_test_utils PRIVATE rosidl_buffer::rosidl_buffer)
+  target_link_libraries(_cuda_buffer_test_utils PRIVATE
+    rosidl_buffer::rosidl_buffer CUDA::cudart)
 
   ament_add_pytest_test(test_cuda_buffer_py
     test/test_cuda_buffer_py.py

@@ -56,8 +56,11 @@ class CudaBuffer:
 
         ``stream`` is an integer CUDA stream pointer. Omit it to use the
         handle's stream; an explicit stream must match the handle's stream.
-        Host copies synchronize that stream before returning, so the source
-        can immediately be changed or released. Device copies are asynchronous:
+        Host copies release the GIL while copying and synchronizing that stream,
+        and complete before returning, so the source can be changed or released.
+        Closing, copying through, or retrieving a pointer or promoted buffer
+        from the same write handle during a host copy raises RuntimeError.
+        Device copies are asynchronous:
         make the source ready on this stream and retain its storage until the
         copy completes (e.g. use a read handle on the same stream).
 
@@ -99,7 +102,8 @@ class CudaBuffer:
 
         The bindings promote non-CUDA input to a Python-owned CUDA buffer,
         copying its contents through an internal producer write scope. The copy
-        completes before returning, so the host source may be changed or released.
+        releases the GIL during the native transfer and completes before returning,
+        so the host source may be changed or released.
         ``handle.get_promoted_buffer()`` returns the replacement, or None for
         an existing CUDA buffer. Retrieve it before closing the handle to retain
         it independently. ``stream`` is an integer CUDA stream pointer; None

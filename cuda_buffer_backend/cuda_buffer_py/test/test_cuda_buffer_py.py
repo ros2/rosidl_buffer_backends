@@ -19,6 +19,8 @@ import gc
 import subprocess
 import sys
 import textwrap
+import threading
+import time
 
 import _cuda_buffer_test_utils as buffer_test_utils
 from cuda_buffer import CudaBuffer
@@ -446,3 +448,76 @@ def test_empty_native_cpu_buffer_raises(output):
     acquire = CudaBuffer.from_output_buffer if output else CudaBuffer.from_input_buffer
     with pytest.raises(RuntimeError, match='empty buffer'):
         acquire(source)
+
+
+@pytest.mark.parametrize('operation', ['copy', 'input', 'native_input'])
+def test_host_copy_releases_gil_and_preserves_lifetime(operation, stream):
+    expected = b'abcd'
+    source = bytearray(expected)
+    # Warm up allocation before gating the stream.
+    buffer = CudaBuffer.allocate_buffer(4)
+    handle = CudaBuffer.from_output_buffer(buffer, stream)
+    if operation == 'native_input':
+        source = buffer_test_utils.make_cpu_buffer(expected)
+    gate = buffer_test_utils.StreamGate(stream)
+    assert gate.wait_started()
+    started = threading.Event()
+    finished = threading.Event()
+    results = []
+    errors = []
+
+    def copy():
+        try:
+            started.set()
+            if operation == 'copy':
+                CudaBuffer.to_buffer(source, 4, handle, stream)
+            else:
+                with CudaBuffer.from_input_buffer(source, stream) as reader:
+                    results.append(reader.get_promoted_buffer())
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=copy, daemon=True)
+    worker.start()
+    try:
+        assert started.wait(2)
+        if operation == 'copy':
+            # Observe the binding's in-flight state before testing concurrent use.
+            deadline = time.monotonic() + 2
+            while True:
+                try:
+                    handle.get_ptr()
+                except RuntimeError as error:
+                    assert 'copy in progress' in str(error)
+                    break
+                assert not finished.is_set()
+                assert time.monotonic() < deadline
+                finished.wait(0.005)
+            with pytest.raises(RuntimeError, match='copy in progress'):
+                handle.get_promoted_buffer()
+            with pytest.raises(RuntimeError, match='copy in progress'):
+                handle.close()
+            with pytest.raises(RuntimeError, match='copy in progress'):
+                CudaBuffer.to_buffer(b'xxxx', 4, handle)
+            with pytest.raises(RuntimeError, match='copy in progress'):
+                CudaBuffer.to_buffer(0, 0, handle)
+            assert not handle.closed
+        # This Python thread must run while the binding is blocked on CUDA.
+        assert not finished.wait(0.05)
+        assert not gate.timed_out
+    finally:
+        gate.release()
+        worker.join(timeout=3)
+    assert not worker.is_alive()
+    assert not errors
+    assert not gate.timed_out
+    if operation == 'copy':
+        CudaBuffer.to_buffer(b'z', 1, handle)  # The same producer remains usable.
+        expected = b'zbcd'
+        result = buffer
+    else:
+        result = results[0]
+    handle.close()
+    assert result.to_bytes() == expected

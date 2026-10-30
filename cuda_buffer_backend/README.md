@@ -260,6 +260,13 @@ that stream before returning, keeping temporary host storage alive until the
 copy completes; the caller may then change or release the source. For zero
 initialization, copy `bytes(size)` through the same allocation/write/copy path.
 
+Host-to-device copies and CPU-input promotion release the GIL during the native
+copy and stream synchronization so other Python threads can run. Source storage
+stays alive throughout the transfer. While a host copy is in progress, closing
+the same write handle, submitting another copy through it, or retrieving its
+device pointer or promoted buffer raises `RuntimeError`. After the call returns,
+further GPU writes in the same producer scope remain supported.
+
 Device-to-device copies are asynchronous. Make the source ready on the copy
 stream and keep its storage alive until the copy completes. A CUDA read handle
 on the same stream provides both ordering and allocation lifetime:

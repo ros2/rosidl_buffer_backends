@@ -49,6 +49,18 @@ rosidl::Buffer<uint8_t> * buffer_from_python(const py::object & buffer)
   return reinterpret_cast<rosidl::Buffer<uint8_t> *>(ptr);
 }
 
+// Accessed only with the GIL held, including exception unwinding.
+class CopyScope
+{
+public:
+  explicit CopyScope(bool & active)
+  : active_(active) {active_ = true;}
+  ~CopyScope() {active_ = false;}
+
+private:
+  bool & active_;
+};
+
 class CudaReadHandleWrapper
 {
 public:
@@ -124,6 +136,7 @@ public:
     if (!handle_) {
       throw std::runtime_error("CudaWriteHandle is closed");
     }
+    check_copy_idle();
     return reinterpret_cast<uintptr_t>(handle_->get_ptr());
   }
 
@@ -158,12 +171,14 @@ public:
       if (size > bytes.size()) {
         throw py::value_error("byte_count exceeds host source size");
       }
-      cuda_buffer_backend::to_buffer(
-        bytes.data(), size, *handle_, stream_, cudaMemcpyHostToDevice);
-      if (size > 0) {
-        // cudaMemcpyAsync may still reference bytes after enqueueing. Keep
-        // this storage alive until the host-to-device transfer completes.
-        CUDA_CHECK(cudaStreamSynchronize(stream_));
+      CopyScope copying(copy_in_progress_);
+      {
+        py::gil_scoped_release unlock;
+        cuda_buffer_backend::to_buffer(
+          bytes.data(), size, *handle_, stream_, cudaMemcpyHostToDevice);
+        if (size > 0) {
+          CUDA_CHECK(cudaStreamSynchronize(stream_));
+        }
       }
     } else if (py::isinstance<py::int_>(source)) {
       const auto ptr = source.cast<uintptr_t>();
@@ -179,11 +194,20 @@ public:
 
   void close()
   {
+    check_copy_idle();
     handle_.reset();
     owner_ = py::none();
   }
 
 private:
+  void check_copy_idle() const
+  {
+    if (copy_in_progress_) {
+      throw std::runtime_error("CudaWriteHandle has a host copy in progress");
+    }
+  }
+
+  bool copy_in_progress_{false};
   // Declared before handle_ so the WriteHandle is destroyed first and can
   // record its event while the underlying CUDA allocation is still alive.
   py::object owner_;
@@ -219,13 +243,17 @@ CudaReadHandleWrapper promote_input(const void * data, size_t size, cudaStream_t
   // handles see CUDA storage; the wrapper records that the binding promoted it.
   py::object buffer = allocate_python_buffer(size);
   auto * cpp_buffer = buffer_from_python(buffer);
+  cuda_buffer_backend::ReadHandle reader;
   {
-    auto writer = cuda_buffer_backend::from_output_buffer(*cpp_buffer, stream);
-    cuda_buffer_backend::to_buffer(data, size, writer, stream, cudaMemcpyHostToDevice);
+    py::gil_scoped_release unlock;
+    {
+      auto writer = cuda_buffer_backend::from_output_buffer(*cpp_buffer, stream);
+      cuda_buffer_backend::to_buffer(data, size, writer, stream, cudaMemcpyHostToDevice);
+    }
+    reader = cuda_buffer_backend::from_input_buffer(*cpp_buffer, stream);
+    // Keep the caller's CPU storage alive until the transfer completes.
+    CUDA_CHECK(cudaStreamSynchronize(stream));
   }
-  auto reader = cuda_buffer_backend::from_input_buffer(*cpp_buffer, stream);
-  // The caller's CPU storage must remain alive until the transfer completes.
-  CUDA_CHECK(cudaStreamSynchronize(stream));
   return CudaReadHandleWrapper(std::move(reader), std::move(buffer), true);
 }
 
