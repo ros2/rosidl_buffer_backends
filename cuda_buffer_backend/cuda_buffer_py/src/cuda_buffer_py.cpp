@@ -18,7 +18,6 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
 #include "cuda_buffer/cuda_buffer_api.hpp"
@@ -47,6 +46,17 @@ rosidl::Buffer<uint8_t> * buffer_from_python(const py::object & buffer)
   py::module_ module = py::module_::import("rosidl_buffer._rosidl_buffer_py");
   uintptr_t ptr = module.attr("_get_buffer_ptr")(buffer).cast<uintptr_t>();
   return reinterpret_cast<rosidl::Buffer<uint8_t> *>(ptr);
+}
+
+// The export pins the source storage until after synchronization. Acquiring and
+// releasing the export requires the GIL.
+py::buffer_info contiguous_view(const py::buffer & source)
+{
+  auto view = source.request();
+  if (!PyBuffer_IsContiguous(view.view(), 'C')) {
+    throw py::value_error("host source must be C-contiguous");
+  }
+  return view;
 }
 
 class CudaReadHandleWrapper
@@ -153,16 +163,17 @@ public:
       throw py::value_error("stream must match the write handle's stream");
     }
 
-    if (py::isinstance<py::bytes>(source)) {
-      std::string bytes = source.cast<std::string>();
-      if (size > bytes.size()) {
+    if (py::isinstance<py::buffer>(source)) {
+      auto view = contiguous_view(py::reinterpret_borrow<py::buffer>(source));
+      if (size > static_cast<size_t>(view.view()->len)) {
         throw py::value_error("byte_count exceeds host source size");
       }
+      // Buffer acquisition can execute Python code; revalidate after it returns.
+      (void)get_ptr();
       cuda_buffer_backend::to_buffer(
-        bytes.data(), size, *handle_, stream_, cudaMemcpyHostToDevice);
+        view.ptr, size, *handle_, stream_, cudaMemcpyHostToDevice);
       if (size > 0) {
-        // cudaMemcpyAsync may still reference bytes after enqueueing. Keep
-        // this storage alive until the host-to-device transfer completes.
+        // Keep the export alive until the host-to-device transfer completes.
         CUDA_CHECK(cudaStreamSynchronize(stream_));
       }
     } else if (py::isinstance<py::int_>(source)) {
@@ -173,7 +184,7 @@ public:
       cuda_buffer_backend::to_buffer(
         reinterpret_cast<const void *>(ptr), size, *handle_, stream_, cudaMemcpyDeviceToDevice);
     } else {
-      throw py::type_error("source must be bytes or an integer device pointer");
+      throw py::type_error("source must be a contiguous host buffer or an integer device pointer");
     }
   }
 
@@ -325,18 +336,19 @@ PYBIND11_MODULE(_cuda_buffer_py, module)
 
   module.def(
     "_from_output_cpu_data",
-    [](py::bytes data, py::object stream) {
-      return promote_output(static_cast<size_t>(py::len(data)), stream_from_python(stream));
+    [](const py::buffer & data, py::object stream) {
+      auto view = data.request();
+      return promote_output(static_cast<size_t>(view.view()->len), stream_from_python(stream));
     },
     py::arg("data"),
     py::arg("stream") = py::none());
 
   module.def(
     "_from_input_cpu_data",
-    [](py::bytes data, py::object stream) {
+    [](const py::buffer & data, py::object stream) {
+      auto view = contiguous_view(data);
       return promote_input(
-        PyBytes_AS_STRING(data.ptr()), static_cast<size_t>(py::len(data)),
-        stream_from_python(stream));
+        view.ptr, static_cast<size_t>(view.view()->len), stream_from_python(stream));
     },
     py::arg("data"),
     py::arg("stream") = py::none());

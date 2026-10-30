@@ -14,6 +14,7 @@
 
 """Allocate and access CUDA-backed ROS 2 buffers with scoped handles."""
 
+from typing import Any
 from typing import Iterable
 from typing import Optional
 from typing import Union
@@ -27,6 +28,21 @@ from cuda_buffer._cuda_buffer_py import _to_buffer
 from cuda_buffer._cuda_buffer_py import CudaReadHandle
 from cuda_buffer._cuda_buffer_py import CudaWriteHandle
 from rosidl_buffer import Buffer
+
+
+def _host_buffer(
+    source: Any, *, size_only: bool = False,
+) -> Union[bytes, memoryview]:
+    """Borrow buffer storage; pack noncontiguous input only when copying data."""
+    if isinstance(source, bytes):
+        return source
+    try:
+        view = memoryview(source)
+    except TypeError:
+        return bytes(source)
+    if size_only or view.c_contiguous:
+        return view
+    return view.tobytes()
 
 
 class CudaBuffer:
@@ -56,16 +72,18 @@ class CudaBuffer:
 
         ``stream`` is an integer CUDA stream pointer. Omit it to use the
         handle's stream; an explicit stream must match the handle's stream.
-        Host copies synchronize that stream before returning, so the source
-        can immediately be changed or released. Device copies are asynchronous:
+        Contiguous host buffers are borrowed without an intermediate copy;
+        strided inputs and iterables are packed. Host copies synchronize the
+        stream and complete before returning. Do not mutate the source through
+        any alias until the call returns. Device copies are asynchronous:
         make the source ready on this stream and retain its storage until the
         copy completes (e.g. use a read handle on the same stream).
 
         Further GPU writes may be queued on this stream in the same handle
         scope. Only closing the handle finalizes the producer payload.
         """
-        if not isinstance(source, (bytes, int)):
-            source = bytes(source)
+        if not isinstance(source, int):
+            source = _host_buffer(source)
         _to_buffer(source, byte_count, handle, stream)
 
     @staticmethod
@@ -80,14 +98,13 @@ class CudaBuffer:
         copying their contents. Retrieve the Python-owned replacement with
         ``handle.get_promoted_buffer()`` before closing the handle; it returns
         None for an existing CUDA buffer. The original argument is unchanged.
-        Containers use the byte sequence produced by bytes(buffer).
+        Buffer exporters supply their byte size without copying their contents;
+        other containers use the byte sequence produced by bytes(buffer).
         ``stream`` is an integer CUDA stream pointer; None uses the internal stream.
         """
         if isinstance(buffer, Buffer):
             return _from_output_buffer(buffer, stream)
-        if not isinstance(buffer, bytes):
-            buffer = bytes(buffer)
-        return _from_output_cpu_data(buffer, stream)
+        return _from_output_cpu_data(_host_buffer(buffer, size_only=True), stream)
 
     @staticmethod
     def from_input_buffer(
@@ -99,7 +116,9 @@ class CudaBuffer:
 
         The bindings promote non-CUDA input to a Python-owned CUDA buffer,
         copying its contents through an internal producer write scope. The copy
-        completes before returning, so the host source may be changed or released.
+        completes before returning, so the source can then be changed or released.
+        Contiguous buffers are borrowed; strided inputs and iterables are packed.
+        Do not mutate the source through any alias until the call returns.
         ``handle.get_promoted_buffer()`` returns the replacement, or None for
         an existing CUDA buffer. Retrieve it before closing the handle to retain
         it independently. ``stream`` is an integer CUDA stream pointer; None
@@ -107,9 +126,7 @@ class CudaBuffer:
         """
         if isinstance(buffer, Buffer):
             return _from_input_buffer(buffer, stream)
-        if not isinstance(buffer, bytes):
-            buffer = bytes(buffer)
-        return _from_input_cpu_data(buffer, stream)
+        return _from_input_cpu_data(_host_buffer(buffer), stream)
 
 
 __all__ = ['CudaBuffer', 'CudaReadHandle', 'CudaWriteHandle']

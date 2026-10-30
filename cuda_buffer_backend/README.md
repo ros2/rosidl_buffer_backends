@@ -256,9 +256,18 @@ For device pointers, the caller must supply a valid allocation of at least
 stream must match the stream used to acquire the handle, so its completion
 event covers the copy and subsequent writes. It does not allocate a destination,
 acquire another handle, or close the supplied handle. Host copies synchronize
-that stream before returning, keeping temporary host storage alive until the
-copy completes; the caller may then change or release the source. For zero
-initialization, copy `bytes(size)` through the same allocation/write/copy path.
+that stream before returning, keeping host storage alive until the copy
+completes; the caller may then change or release the source. Contiguous buffer
+exporters (including `bytes`, `bytearray`, and typed or multidimensional
+`memoryview` objects) are borrowed without an intermediate host copy. Strided
+views are packed in logical C order, and ordinary iterables are converted to
+bytes. Output promotion uses an exporter's byte size without packing its data.
+
+The same borrowing and packing rules apply to CPU-input promotion. Callers must
+not mutate borrowed source storage through any alias until the call returns;
+a read-only view does not make its underlying storage immutable. Exported
+storage stays alive throughout the transfer. For zero initialization, copy
+`bytes(size)` through the same allocation/write/copy path.
 
 Device-to-device copies are asynchronous. Make the source ready on the copy
 stream and keep its storage alive until the copy completes. A CUDA read handle

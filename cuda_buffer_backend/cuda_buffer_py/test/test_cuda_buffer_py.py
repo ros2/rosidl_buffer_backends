@@ -133,8 +133,8 @@ def test_to_buffer_host_source_lifetime(cudart, stream):
     buffer = CudaBuffer.allocate_buffer(size)
     with CudaBuffer.from_output_buffer(buffer, stream) as handle:
         CudaBuffer.to_buffer(source, size, handle, stream)
-        # Completion is part of the host-copy contract, including the temporary
-        # bytes conversion above; enqueueing alone cannot protect that storage.
+        # Completion is part of the host-copy contract; the borrowed source
+        # may be mutated or released only after the copy returns.
         assert cudart.cudaStreamQuery(stream) == 0
         source[:] = bytes(size)
         del source
@@ -446,3 +446,42 @@ def test_empty_native_cpu_buffer_raises(output):
     acquire = CudaBuffer.from_output_buffer if output else CudaBuffer.from_input_buffer
     with pytest.raises(RuntimeError, match='empty buffer'):
         acquire(source)
+
+
+@pytest.mark.parametrize('source_factory', [
+    lambda: array('H', range(16)),
+    lambda: memoryview(array('I', range(16))),
+    lambda: memoryview(bytes(range(32)))[::2],
+    lambda: memoryview(bytes(range(32)))[::-1],
+    lambda: memoryview(bytes(range(32))).cast('B', shape=(4, 8)),
+    lambda: memoryview(b'x').cast('B', shape=()),
+])
+def test_to_buffer_buffer_layouts(source_factory):
+    source = source_factory()
+    expected = bytes(source)
+    buffer = CudaBuffer.allocate_buffer(max(2, len(expected)))
+    with CudaBuffer.from_output_buffer(buffer) as handle:
+        CudaBuffer.to_buffer(source, len(expected), handle)
+        with pytest.raises(ValueError, match='host source size'):
+            CudaBuffer.to_buffer(memoryview(b'x'), 2, handle)
+    assert buffer.to_bytes()[:len(expected)] == expected
+
+
+@pytest.mark.parametrize('operation', ['copy', 'input', 'output'])
+def test_contiguous_exporter_does_not_require_bytes_conversion(operation):
+    class HostData(bytearray):
+
+        def __bytes__(self):
+            raise AssertionError('unnecessary host copy')
+
+    source = HostData(b'abcd')
+    if operation == 'input':
+        with CudaBuffer.from_input_buffer(source) as handle:
+            result = handle.get_promoted_buffer()
+    else:
+        result = CudaBuffer.allocate_buffer(4) if operation == 'copy' else source
+        with CudaBuffer.from_output_buffer(result) as handle:
+            if operation == 'output':
+                result = handle.get_promoted_buffer()
+            CudaBuffer.to_buffer(source, 4, handle)
+    assert result.to_bytes() == b'abcd'

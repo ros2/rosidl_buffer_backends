@@ -60,7 +60,7 @@ class CudaWriteHandle:
 
 def _allocate_buffer(size: int) -> Buffer: ...
 def _to_buffer(
-    source: Union[bytes, int],
+    source: Union[bytes, memoryview, int],
     byte_count: int,
     handle: CudaWriteHandle,
     stream: Optional[int] = None,
@@ -74,12 +74,12 @@ def _from_input_buffer(
     stream: Optional[int] = None,
 ) -> CudaReadHandle: ...
 def _from_input_cpu_data(
-    data: bytes,
+    data: Union[bytes, memoryview],
     stream: Optional[int] = None,
 ) -> CudaReadHandle: ...
 
 
 def _from_output_cpu_data(
-    data: bytes,
+    data: Union[bytes, memoryview],
     stream: Optional[int] = None,
 ) -> CudaWriteHandle: ...
