@@ -142,7 +142,11 @@ private:
   bool probe_dmabuf();
   PoolBlock * create_block(size_t aligned_size);
   void destroy_block(PoolBlock * block);
-  bool is_block_ready(PoolBlock * block) const;
+  bool is_block_ready(PoolBlock * block, bool honor_grace_period = true) const;
+
+  // Claim a released block for the producer to write into again; false (block
+  // untouched) if a consumer still holds it.
+  bool claim_for_reuse(PoolBlock * block, bool honor_grace_period) const;
   size_t align_size(size_t size) const;
 
   PoolConfig config_;

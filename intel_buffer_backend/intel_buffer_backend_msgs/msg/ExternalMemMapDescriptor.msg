@@ -17,12 +17,12 @@
 # Generation counter of the ring slot backing this frame, captured at publish
 # time (ExternalMemMapRing::advance() bumps the counter in the slot itself —
 # the last 4 bytes of the region, see external_memmap_generation_ptr() in
-# l0_external_memmap.hpp — before handing the slot back out for writing). A
-# subscriber that re-reads the slot's counter after finishing its read and
-# finds it no longer matches this value knows the producer reclaimed the slot
-# mid-read: the frame it just read may be torn. See
-# ExternalMemMapImporter::generation_unchanged(). Always 0 for a region not
-# backed by ExternalMemMapRing.
+# l0_external_memmap.hpp — each time it reuses the slot). On import the backend
+# takes a reference on the slot (which keeps advance() from reusing it until the
+# buffer is released) and then checks the counter still matches this value; if
+# the producer already reused the slot, the import is rejected as stale instead
+# of delivering another frame's contents. ExternalMemMapImporter::
+# generation_unchanged() remains as an after-read check.
 uint32 slot_generation
 
 # Payload size in bytes — the number of valid bytes the producer wrote. Read on

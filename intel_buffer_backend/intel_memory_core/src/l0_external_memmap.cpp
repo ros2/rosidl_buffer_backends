@@ -341,6 +341,41 @@ void SharedSysmem::close()
   owner_ = false;
 }
 
+// --- ExternalMemMapLocalRegions --------------------------------------------
+
+namespace
+{
+struct LocalRegion
+{
+  const void * ptr;
+  size_t capacity;
+};
+
+std::mutex g_local_mutex;
+std::map<std::string, LocalRegion> g_local_regions;
+}  // namespace
+
+void ExternalMemMapLocalRegions::add(
+  const std::string & shm_name, const void * ptr, size_t capacity)
+{
+  std::lock_guard<std::mutex> lock(g_local_mutex);
+  g_local_regions[shm_name] = LocalRegion{ptr, capacity};
+}
+
+void ExternalMemMapLocalRegions::remove(const std::string & shm_name)
+{
+  std::lock_guard<std::mutex> lock(g_local_mutex);
+  g_local_regions.erase(shm_name);
+}
+
+bool ExternalMemMapLocalRegions::owns(
+  const std::string & shm_name, const void * ptr, size_t size)
+{
+  std::lock_guard<std::mutex> lock(g_local_mutex);
+  auto it = g_local_regions.find(shm_name);
+  return it != g_local_regions.end() && it->second.ptr == ptr && size <= it->second.capacity;
+}
+
 // --- ExternalMemMapImporter -------------------------------------------------
 
 namespace
@@ -354,6 +389,23 @@ struct ImportedRegion
 
 std::mutex g_import_mutex;
 std::map<std::string, std::unique_ptr<ImportedRegion>> g_imports;
+
+// True while buffers in this process still reference the region: their slot
+// references (holder pid entries) live in its trailer.
+bool held_by_this_process(const SharedSysmem & shm)
+{
+  const IPCMetadata * meta = external_memmap_slot_meta_ptr(shm.ptr(), shm.size());
+  if (meta == nullptr) {
+    return false;
+  }
+  const int32_t self = static_cast<int32_t>(getpid());
+  for (const auto & holder : meta->holder_pids) {
+    if (holder.load(std::memory_order_acquire) == self) {
+      return true;
+    }
+  }
+  return false;
+}
 
 }  // namespace
 
@@ -382,7 +434,9 @@ void * ExternalMemMapImporter::import(
   }
 
   for (auto e = g_imports.begin(); e != g_imports.end(); ) {
-    if (!producer_process_alive(e->second->pid)) {
+    // A dead producer's region stays mapped until this process releases the
+    // buffers it still holds in it; unmapping it would leave them dangling.
+    if (!producer_process_alive(e->second->pid) && !held_by_this_process(e->second->shm)) {
       e = g_imports.erase(e);
     } else {
       ++e;

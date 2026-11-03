@@ -270,6 +270,13 @@ IpcImportResult L0UsmIpc::import_handle(
   int recv_fd = -1;
   if (!l0_socket_path.empty()) {
     recv_fd = DmaBufIpc::receive_fd(l0_socket_path);
+    const int64_t buffer_bytes = DmaBufIpc::buffer_size(recv_fd);
+    if (size == 0 || buffer_bytes < 0 || size > static_cast<uint64_t>(buffer_bytes)) {
+      close(recv_fd);
+      throw std::runtime_error(
+        "descriptor size " + std::to_string(size) + " exceeds the exported DMA-BUF (" +
+        std::to_string(buffer_bytes) + " bytes)");
+    }
 
     int keep_fd = dup(recv_fd);
 

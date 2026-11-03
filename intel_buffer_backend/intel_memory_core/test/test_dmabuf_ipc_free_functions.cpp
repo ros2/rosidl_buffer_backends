@@ -12,17 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <cstring>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "intel_memory_core/dmabuf_ipc.hpp"
+#include "intel_memory_core/l0_usm_ipc.hpp"
 
 using intel_memory_core::DmaBufIpc;
 using intel_memory_core::import_cache_key;
@@ -117,6 +123,176 @@ TEST(DmaBufIpcRegisterFd, StillRegisteredAtProcessExitExitsCleanly)
   ASSERT_EQ(waitpid(child, &status, 0), child);
   ASSERT_TRUE(WIFEXITED(status)) << "child terminated by signal " << WTERMSIG(status);
   EXPECT_EQ(WEXITSTATUS(status), 0);
+}
+
+TEST(DmaBufIpcBufferSize, ReportsTheReceivedBuffersSize)
+{
+  int fd = memfd_create("test_dmabuf_ipc_size", 0);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(ftruncate(fd, 3 * 4096), 0);
+  EXPECT_EQ(DmaBufIpc::buffer_size(fd), 3 * 4096);
+  close(fd);
+  EXPECT_EQ(DmaBufIpc::buffer_size(-1), -1);
+}
+
+TEST(DmaBufIpcImportBlock, RequestLargerThanExportedBufferIsRejected)
+{
+  int fd = memfd_create("test_dmabuf_ipc_import_size", 0);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(ftruncate(fd, 4096), 0);
+  const std::string socket_path = DmaBufIpc::register_fd(777u, fd);
+  ASSERT_FALSE(socket_path.empty());
+  const int32_t self = static_cast<int32_t>(getpid());
+
+  // Mapping 16 KiB of a 4 KiB buffer would SIGBUS on access past 4 KiB.
+  EXPECT_EQ(DmaBufIpc::import_block(socket_path, self, 777u, 4 * 4096, 0x5e1fu).ptr, nullptr);
+  auto ok = DmaBufIpc::import_block(socket_path, self, 777u, 4096, 0x5e1fu);
+  EXPECT_NE(ok.ptr, nullptr);
+  // Served from the import cache: still bounded by what was mapped.
+  EXPECT_EQ(DmaBufIpc::import_block(socket_path, self, 777u, 2 * 4096, 0x5e1fu).ptr, nullptr);
+
+  DmaBufIpc::evict_pool(0x5e1fu);
+  DmaBufIpc::unregister_block(777u);
+  close(fd);
+}
+
+// --- receive_fd against a peer that sends arbitrary control messages --------
+// The socket path comes from an untrusted descriptor, so whoever serves it
+// decides what arrives: receive_fd must accept exactly one fd and never leave
+// other received descriptors open in this process.
+
+namespace
+{
+size_t open_fd_count()
+{
+  size_t n = 0;
+  if (DIR * dir = opendir("/proc/self/fd")) {
+    while (readdir(dir) != nullptr) {
+      ++n;
+    }
+    closedir(dir);
+  }
+  return n;
+}
+
+// Serves one connection on `path`, sending `fds` in a single SCM_RIGHTS
+// message (no control message at all if empty).
+class FakeFdServer
+{
+public:
+  FakeFdServer(const std::string & path, std::vector<int> fds)
+  : path_(path)
+  {
+    unlink(path_.c_str());
+    listen_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
+    sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, path_.c_str(), sizeof(addr.sun_path) - 1);
+    ok_ = listen_fd_ >= 0 &&
+      bind(listen_fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0 &&
+      listen(listen_fd_, 1) == 0;
+    thread_ = std::thread([this, fds]() {
+        int peer = accept(listen_fd_, nullptr, nullptr);
+        if (peer < 0) {
+          return;
+        }
+        char byte = 0;
+        iovec iov{&byte, 1};
+        msghdr msg{};
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        std::vector<char> control(CMSG_SPACE(sizeof(int) * fds.size()));
+        if (!fds.empty()) {
+          msg.msg_control = control.data();
+          msg.msg_controllen = control.size();
+          cmsghdr * cmsg = CMSG_FIRSTHDR(&msg);
+          cmsg->cmsg_level = SOL_SOCKET;
+          cmsg->cmsg_type = SCM_RIGHTS;
+          cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
+          std::memcpy(CMSG_DATA(cmsg), fds.data(), sizeof(int) * fds.size());
+        }
+        (void)sendmsg(peer, &msg, MSG_NOSIGNAL);
+        close(peer);
+      });
+  }
+  ~FakeFdServer()
+  {
+    if (thread_.joinable()) {
+      if (!ok_) {
+        shutdown(listen_fd_, SHUT_RDWR);
+      }
+      thread_.join();
+    }
+    close(listen_fd_);
+    unlink(path_.c_str());
+  }
+  void wait() {thread_.join();}
+  bool ok() const {return ok_;}
+
+private:
+  std::string path_;
+  int listen_fd_{-1};
+  bool ok_{false};
+  std::thread thread_;
+};
+
+std::string fake_socket_path(const char * tag)
+{
+  return "/tmp/ibb_test_recvfd_" + std::to_string(getpid()) + "_" + tag + ".sock";
+}
+}  // namespace
+
+TEST(DmaBufIpcReceiveFd, SingleFdIsReturnedCloseOnExec)
+{
+  int fd = memfd_create("test_recv_single", 0);
+  ASSERT_GE(fd, 0);
+  FakeFdServer server(fake_socket_path("single"), {fd});
+  ASSERT_TRUE(server.ok());
+
+  int received = DmaBufIpc::receive_fd(fake_socket_path("single"));
+  server.wait();
+  ASSERT_GE(received, 0);
+  EXPECT_TRUE(fcntl(received, F_GETFD) & FD_CLOEXEC)
+    << "received buffer fd would leak into exec'd child processes";
+  close(received);
+  close(fd);
+}
+
+TEST(DmaBufIpcReceiveFd, ExtraFdsAreRejectedWithoutLeaking)
+{
+  // Two fds fit the receive buffer and are both installed by the kernel;
+  // three or more truncate the control data. Either way: reject, leak nothing.
+  for (size_t count : {2u, 3u}) {
+    std::vector<int> fds;
+    for (size_t i = 0; i < count; ++i) {
+      fds.push_back(memfd_create("test_recv_extra", 0));
+      ASSERT_GE(fds.back(), 0);
+    }
+    const std::string path = fake_socket_path("extra");
+    const size_t before = open_fd_count();
+    {
+      FakeFdServer server(path, fds);
+      ASSERT_TRUE(server.ok());
+      int received = -1;
+      EXPECT_THROW(received = DmaBufIpc::receive_fd(path), std::runtime_error)
+        << count << " fds accepted";
+      server.wait();
+      if (received >= 0) {
+        close(received);
+      }
+    }
+    EXPECT_EQ(open_fd_count(), before) << count << " fds sent: descriptors leaked";
+    for (int fd : fds) {
+      close(fd);
+    }
+  }
+}
+
+TEST(DmaBufIpcReceiveFd, MessageWithoutFdThrows)
+{
+  FakeFdServer server(fake_socket_path("none"), {});
+  ASSERT_TRUE(server.ok());
+  EXPECT_THROW(DmaBufIpc::receive_fd(fake_socket_path("none")), std::runtime_error);
 }
 
 TEST(DmaBufIpcReceiveFd, BogusSocketPathThrows)

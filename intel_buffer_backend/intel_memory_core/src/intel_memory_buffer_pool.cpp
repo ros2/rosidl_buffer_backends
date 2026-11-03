@@ -140,7 +140,7 @@ PoolBlock * IntelMemoryBufferPool::allocate(size_t byte_size)
   if (it != free_blocks_.end() && !it->second.empty()) {
     auto & vec = it->second;
     for (size_t i = 0; i < vec.size(); ++i) {
-      if (is_block_ready(vec[i])) {
+      if (claim_for_reuse(vec[i], /*honor_grace_period=*/true)) {
         PoolBlock * block = vec[i];
         vec[i] = vec.back();
         vec.pop_back();
@@ -157,62 +157,31 @@ PoolBlock * IntelMemoryBufferPool::allocate(size_t byte_size)
   }
 
   if (all_blocks_.size() >= config_.max_blocks) {
-    auto has_live_holder = [](PoolBlock * b) {
-      if (!b->ipc_meta) {
-        return false;
-      }
-      for (int i = 0; i < kMaxImportHolders; ++i) {
-        int32_t pid = b->ipc_meta->holder_pids[i].load(std::memory_order_acquire);
-        // Live if the PID is set and kill(pid, 0) does not report ESRCH.
-        if (pid != 0 && !(kill(pid, 0) != 0 && errno == ESRCH)) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    auto pick = free_blocks_.end();
-    size_t pick_idx = 0;
+    // Pool exhausted: reclaim a released block before its grace period is
+    // over — claiming it invalidates descriptors still in flight for its old
+    // frame — but never one a live consumer still holds. If every candidate is
+    // being read, drop this frame rather than overwrite a subscriber's data.
     for (auto it = free_blocks_.lower_bound(aligned); it != free_blocks_.end(); ++it) {
-      for (size_t i = 0; i < it->second.size(); ++i) {
-        if (!has_live_holder(it->second[i])) {
-          pick = it;
-          pick_idx = i;
-          break;
+      auto & vec = it->second;
+      for (size_t i = 0; i < vec.size(); ++i) {
+        if (claim_for_reuse(vec[i], /*honor_grace_period=*/false)) {
+          PoolBlock * block = vec[i];
+          vec.erase(vec.begin() + static_cast<std::ptrdiff_t>(i));
+          if (vec.empty()) {
+            free_blocks_.erase(it);
+          }
+          block->current_uid = 0;
+          if (block->ipc_meta) {
+            block->ipc_meta->publish_timestamp_us.store(0, std::memory_order_release);
+          }
+          return block;
         }
       }
-      if (pick != free_blocks_.end()) {
-        break;
-      }
-    }
-    if (pick == free_blocks_.end()) {
-      auto it = free_blocks_.lower_bound(aligned);
-      if (it != free_blocks_.end() && !it->second.empty()) {
-        pick = it;
-        pick_idx = 0;
-      }
-    }
-
-    if (pick != free_blocks_.end()) {
-      PoolBlock * block = pick->second[pick_idx];
-      pick->second.erase(pick->second.begin() + pick_idx);
-      if (pick->second.empty()) {
-        free_blocks_.erase(pick);
-      }
-      block->current_uid = 0;
-      if (block->ipc_meta) {
-        for (int i = 0; i < kMaxImportHolders; ++i) {
-          block->ipc_meta->holder_pids[i].store(0, std::memory_order_release);
-        }
-        block->ipc_meta->refcount.store(0, std::memory_order_release);
-        block->ipc_meta->publish_timestamp_us.store(0, std::memory_order_release);
-      }
-      return block;
     }
 
     RCUTILS_LOG_WARN_NAMED("intel_memory_buffer_pool",
-      "Memory pool exhausted (%zu blocks, all in-flight); frame dropped",
-      config_.max_blocks);
+      "Memory pool exhausted (%zu blocks, all held by the producer or subscribers); "
+      "frame dropped", config_.max_blocks);
     return nullptr;
   }
 
@@ -585,7 +554,29 @@ void IntelMemoryBufferPool::destroy_block(PoolBlock * block)
   block->ptr = nullptr;
 }
 
-bool IntelMemoryBufferPool::is_block_ready(PoolBlock * block) const
+// Consumers take their reference before validating the block's published
+// uid; the producer clears that uid before re-reading the refcount (all
+// seq_cst). So either the producer sees the reference and backs off, or the
+// consumer sees the cleared uid and rejects its now-stale descriptor.
+bool IntelMemoryBufferPool::claim_for_reuse(PoolBlock * block, bool honor_grace_period) const
+{
+  if (!is_block_ready(block, honor_grace_period)) {
+    return false;
+  }
+  if (!block->ipc_meta) {
+    return true;
+  }
+  const uint64_t published = block->ipc_meta->uid.exchange(0, std::memory_order_seq_cst);
+  if (block->ipc_meta->refcount.load(std::memory_order_seq_cst) > 0) {
+    // A consumer took a reference before seeing the cleared uid and may have
+    // accepted the old frame: leave the block alone and restore its uid.
+    block->ipc_meta->uid.store(published, std::memory_order_seq_cst);
+    return false;
+  }
+  return true;
+}
+
+bool IntelMemoryBufferPool::is_block_ready(PoolBlock * block, bool honor_grace_period) const
 {
   if (!block->ipc_meta) {
     return true;
@@ -608,6 +599,9 @@ bool IntelMemoryBufferPool::is_block_ready(PoolBlock * block) const
   int32_t rc = block->ipc_meta->refcount.load(std::memory_order_acquire);
   if (rc > 0) {
     return false;
+  }
+  if (!honor_grace_period) {
+    return true;
   }
 
   uint64_t publish_us = block->ipc_meta->publish_timestamp_us.load(

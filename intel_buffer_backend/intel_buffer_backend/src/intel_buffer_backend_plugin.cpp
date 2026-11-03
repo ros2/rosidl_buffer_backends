@@ -38,6 +38,36 @@ using intel_memory_core::TransportMode;
 using intel_memory_core::IntelMemoryIPCManager;
 using intel_memory_core::L0UsmIpc;
 using intel_memory_core::ExternalMemMapImporter;
+using intel_memory_core::ExternalMemMapLocalRegions;
+using intel_memory_core::IPCMetadata;
+using intel_memory_core::kExternalMemMapTrailerBytes;
+
+namespace
+{
+// A descriptor's local_ptr / publisher_pid are untrusted wire data: any
+// publisher can name this process's pid and an arbitrary address. Only take
+// the intra-process shortcut for a block this process's own pool allocated and
+// published under this uid; otherwise the regular import path is used.
+PoolBlock * own_published_pool_block(
+  uint64_t local_ptr, uint64_t size, int32_t publisher_pid, uint32_t pool_id, uint64_t ipc_uid)
+{
+  if (local_ptr == 0 || publisher_pid != static_cast<int32_t>(getpid())) {
+    return nullptr;
+  }
+  auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
+  if (!pool || pool->pool_id() != pool_id) {
+    return nullptr;
+  }
+  void * ptr = reinterpret_cast<void *>(local_ptr);
+  PoolBlock * block = pool->find_block_for_ptr(ptr);
+  if (!block || block->ptr != ptr || size > block->size || !block->ipc_meta ||
+    block->ipc_meta->uid.load(std::memory_order_acquire) != ipc_uid)
+  {
+    return nullptr;
+  }
+  return block;
+}
+}  // namespace
 
 IntelBufferBackend::IntelBufferBackend()
 {
@@ -255,17 +285,35 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
       if (d.size == 0) {
         throw std::runtime_error("external-memmap descriptor has zero size");
       }
-      void * ptr = nullptr;
+      // Map the slot's region — also intra-process, to reach the trailer that
+      // holds the slot's consumer refcount and generation.
       size_t region_size = 0;
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
-        // Intra-process: the producer's mapping is already valid here.
+      void * region = ExternalMemMapImporter::import(
+        d.shm_name, d.size, d.publisher_pid, &region_size);
+      if (!region) {
+        throw std::runtime_error("external-memmap import failed for " + d.shm_name);
+      }
+      if (region_size < kExternalMemMapTrailerBytes ||
+        d.size > region_size - kExternalMemMapTrailerBytes)
+      {
+        throw std::runtime_error("external-memmap payload overlaps slot trailer: " + d.shm_name);
+      }
+      // Hold the slot so the producer can't reuse it while this buffer lives;
+      // ~IntelBufferImpl releases the reference.
+      IPCMetadata * meta = IntelMemoryIPCManager::acquire_external_memmap_slot(
+        region, region_size, d.slot_generation);
+      if (!meta) {
+        throw std::runtime_error(
+          "external-memmap slot " + d.shm_name + " was reused before import (stale frame)");
+      }
+      void * ptr = region;
+      if (d.publisher_pid == static_cast<int32_t>(getpid()) &&
+        ExternalMemMapLocalRegions::owns(
+          d.shm_name, reinterpret_cast<void *>(d.local_ptr), d.size))
+      {
+        // Intra-process, and this process does produce that slot at local_ptr:
+        // read through the producer's own (device-mapped) view.
         ptr = reinterpret_cast<void *>(d.local_ptr);
-      } else {
-        ptr = ExternalMemMapImporter::import(
-          d.shm_name, d.size, d.publisher_pid, &region_size);
-        if (!ptr) {
-          throw std::runtime_error("external-memmap import failed for " + d.shm_name);
-        }
       }
       auto imported_block = std::make_unique<PoolBlock>();
       imported_block->ptr = ptr;
@@ -273,6 +321,7 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
       imported_block->transport = TransportMode::EXTERNAL_MEMMAP;
       imported_block->extmap_shm_name = d.shm_name;
       imported_block->extmap_generation = d.slot_generation;
+      imported_block->ipc_meta = meta;
 
       auto result = std::make_unique<IntelBufferImpl<uint8_t>>(
         imported_block.release(), d.size, false, /*standalone=*/true);
@@ -283,8 +332,8 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
 
     if (frame->transport_mode == IntelBufferDescriptor::TRANSPORT_LEVEL_ZERO_USM) {
       const auto & d = frame->l0_desc;
-      // Intra-process shortcut
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
+      // Intra-process shortcut, only for a verified block of our own pool
+      if (own_published_pool_block(d.local_ptr, d.size, d.publisher_pid, d.pool_id, d.ipc_uid)) {
         auto imported_block = std::make_unique<PoolBlock>();
         imported_block->ptr = reinterpret_cast<void *>(d.local_ptr);
         imported_block->size = d.size;
@@ -302,8 +351,8 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
         d.publisher_pid, d.block_id, d.ipc_uid, d.l0_socket_path, d.pool_id);
     } else {
       const auto & d = frame->dmabuf_desc;
-      // Intra-process shortcut
-      if (d.local_ptr != 0 && d.publisher_pid == static_cast<int32_t>(getpid())) {
+      // Intra-process shortcut, only for a verified block of our own pool
+      if (own_published_pool_block(d.local_ptr, d.size, d.publisher_pid, d.pool_id, d.ipc_uid)) {
         auto imported_block = std::make_unique<PoolBlock>();
         imported_block->ptr = reinterpret_cast<void *>(d.local_ptr);
         imported_block->size = d.size;
@@ -314,6 +363,13 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
         return {result.release(), [](void * p) {
             delete static_cast<IntelBufferImpl<uint8_t> *>(p);
           }};
+      }
+      // The buffer handed to the subscriber spans d.size bytes of a mapping of
+      // d.dmabuf_block_size bytes (itself checked against the exported buffer).
+      if (d.size > d.dmabuf_block_size) {
+        throw std::runtime_error(
+          "DMA-BUF descriptor size " + std::to_string(d.size) + " exceeds its block size " +
+          std::to_string(d.dmabuf_block_size));
       }
       import_result = IntelMemoryIPCManager::import_dmabuf_block(
         d.dmabuf_socket_path, d.dmabuf_pid,

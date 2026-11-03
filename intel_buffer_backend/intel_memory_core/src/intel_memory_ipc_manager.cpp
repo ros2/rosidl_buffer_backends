@@ -22,12 +22,14 @@
 
 #include "intel_memory_core/logging.hpp"
 
+#include <cerrno>
 #include <cstring>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 
 #include "intel_memory_core/dmabuf_ipc.hpp"
+#include "intel_memory_core/l0_external_memmap.hpp"
 #include "intel_memory_core/l0_usm_ipc.hpp"
 #include "intel_memory_core/intel_memory_buffer_pool.hpp"
 
@@ -46,16 +48,18 @@ std::string IntelMemoryIPCManager::register_fd(uint32_t block_id, int fd)
 
 namespace
 {
-void register_holder_pid(IPCMetadata * meta)
+// False if all holder slots are taken (the reference then can't be tracked).
+bool register_holder_pid(IPCMetadata * meta)
 {
   int32_t self = static_cast<int32_t>(getpid());
   for (int i = 0; i < kMaxImportHolders; ++i) {
     int32_t expected = 0;
     if (meta->holder_pids[i].compare_exchange_strong(
         expected, self, std::memory_order_acq_rel)) {
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 bool clear_holder_pid(IPCMetadata * meta)
@@ -193,6 +197,63 @@ void IntelMemoryIPCManager::release_block(IPCMetadata * meta)
   if (clear_holder_pid(meta)) {
     meta->refcount.fetch_sub(1, std::memory_order_release);
   }
+}
+
+// External-memmap slots: the consumer takes its reference before reading the
+// generation, the producer bumps the generation before re-reading the refcount
+// (all seq_cst). So either the producer sees the reference and backs off, or
+// the consumer sees the new generation and rejects — never both proceed.
+
+IPCMetadata * IntelMemoryIPCManager::acquire_external_memmap_slot(
+  void * region, size_t region_size, uint32_t published_generation)
+{
+  IPCMetadata * meta = external_memmap_slot_meta_ptr(region, region_size);
+  auto * generation = external_memmap_generation_ptr(region, region_size);
+  if (!meta || !generation) {
+    return nullptr;
+  }
+  meta->refcount.fetch_add(1, std::memory_order_seq_cst);
+  if (!register_holder_pid(meta)) {
+    meta->refcount.fetch_sub(1, std::memory_order_release);
+    RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
+      "external-memmap slot has %d holders already; import rejected", kMaxImportHolders);
+    return nullptr;
+  }
+  if (generation->load(std::memory_order_seq_cst) != published_generation) {
+    release_block(meta);
+    return nullptr;
+  }
+  return meta;
+}
+
+bool IntelMemoryIPCManager::claim_external_memmap_slot(void * region, size_t region_size)
+{
+  IPCMetadata * meta = external_memmap_slot_meta_ptr(region, region_size);
+  auto * generation = external_memmap_generation_ptr(region, region_size);
+  if (!meta || !generation) {
+    return false;
+  }
+  for (int i = 0; i < kMaxImportHolders; ++i) {
+    int32_t holder = meta->holder_pids[i].load(std::memory_order_acquire);
+    if (holder != 0 && kill(holder, 0) != 0 && errno == ESRCH &&
+      meta->holder_pids[i].compare_exchange_strong(holder, 0, std::memory_order_acq_rel))
+    {
+      meta->refcount.fetch_sub(1, std::memory_order_release);
+      RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
+        "reclaimed external-memmap slot reference from dead consumer pid=%d", holder);
+    }
+  }
+  if (meta->refcount.load(std::memory_order_seq_cst) > 0) {
+    return false;
+  }
+  generation->fetch_add(1, std::memory_order_seq_cst);
+  if (meta->refcount.load(std::memory_order_seq_cst) > 0) {
+    // A consumer took a reference before seeing the bump and may have accepted
+    // the old frame: leave the slot alone and restore its generation.
+    generation->fetch_sub(1, std::memory_order_seq_cst);
+    return false;
+  }
+  return true;
 }
 
 IntelMemoryIPCManager::ImportResult IntelMemoryIPCManager::import_level_zero_block(

@@ -22,10 +22,20 @@
 #include <cstdint>
 #include <string>
 
+#include "intel_memory_core/intel_memory_buffer_pool.hpp"
+
 namespace intel_memory_core
 {
 
+// An external-memmap ring slot region (page-aligned, shared by producer and
+// consumers) ends in a trailer:
+//   [payload ...][pad][IPCMetadata: consumer refcount + holders][uint32 generation]
+// The generation word is the region's last 4 bytes; the producer bumps it each
+// time it reuses the slot. The refcount keeps the producer off slots consumers
+// still read.
 constexpr size_t kExternalMemMapGenerationBytes = sizeof(uint32_t);
+constexpr size_t kExternalMemMapTrailerBytes =
+  sizeof(IPCMetadata) + alignof(IPCMetadata) + kExternalMemMapGenerationBytes;
 
 inline std::atomic<uint32_t> * external_memmap_generation_ptr(
   void * region, size_t region_size)
@@ -35,6 +45,17 @@ inline std::atomic<uint32_t> * external_memmap_generation_ptr(
   }
   return reinterpret_cast<std::atomic<uint32_t> *>(
     static_cast<uint8_t *>(region) + region_size - kExternalMemMapGenerationBytes);
+}
+
+inline IPCMetadata * external_memmap_slot_meta_ptr(void * region, size_t region_size)
+{
+  if (region == nullptr || region_size < kExternalMemMapTrailerBytes) {
+    return nullptr;
+  }
+  uintptr_t addr = reinterpret_cast<uintptr_t>(region) + region_size -
+    kExternalMemMapGenerationBytes - sizeof(IPCMetadata);
+  addr &= ~(static_cast<uintptr_t>(alignof(IPCMetadata)) - 1);
+  return reinterpret_cast<IPCMetadata *>(addr);
 }
 
 class L0ExternalMemMap
@@ -73,6 +94,20 @@ private:
   size_t size_{0};
   std::string name_;
   bool owner_{false};
+};
+
+/// Regions this process produces (ExternalMemMapRing slots): shm name -> the
+/// pointer published for it as a descriptor's local_ptr. Lets an intra-process
+/// import verify local_ptr instead of trusting wire data.
+class ExternalMemMapLocalRegions
+{
+public:
+  static void add(const std::string & shm_name, const void * ptr, size_t capacity);
+
+  static void remove(const std::string & shm_name);
+
+  /// True if this process produces `shm_name` at `ptr`, with room for `size` bytes.
+  static bool owns(const std::string & shm_name, const void * ptr, size_t size);
 };
 
 class ExternalMemMapImporter

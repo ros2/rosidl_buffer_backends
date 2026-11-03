@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -55,8 +56,11 @@ using intel_memory_core::release_all_cl_mem;
 using intel_memory_core::cl_dmabuf_import_available;
 using intel_memory_core::L0ExternalMemMap;
 using intel_memory_core::ExternalMemMapImporter;
+using intel_memory_core::ExternalMemMapLocalRegions;
 using intel_memory_core::kExternalMemMapGenerationBytes;
+using intel_memory_core::kExternalMemMapTrailerBytes;
 using intel_memory_core::external_memmap_generation_ptr;
+using intel_memory_core::external_memmap_slot_meta_ptr;
 
 // ============================================================================
 // Buffer creation — choose the path that matches your data source
@@ -131,6 +135,9 @@ class ExternalMemMapRing
 public:
   static bool available() {return true;}
 
+  /// Returned by advance() when every slot is still held by a consumer.
+  static constexpr size_t kNoFreeSlot = static_cast<size_t>(-1);
+
   ExternalMemMapRing() = default;
   ~ExternalMemMapRing() {close();}
 
@@ -155,7 +162,7 @@ public:
       const std::string name = name_prefix + "_" + std::to_string(getpid()) +
         "_" + std::to_string(ring_id) + "_" + std::to_string(i);
 
-      if (!shm_[i].create(name, bytes + kExternalMemMapGenerationBytes)) {
+      if (!shm_[i].create(name, bytes + kExternalMemMapTrailerBytes)) {
         close();
         return false;
       }
@@ -173,22 +180,31 @@ public:
       if (generation_[i]) {
         generation_[i]->store(0, std::memory_order_relaxed);
       }
+      new (external_memmap_slot_meta_ptr(shm_[i].ptr(), shm_[i].size()))
+      intel_memory_core::IPCMetadata();
+      // Lets an intra-process import verify the local_ptr its descriptor carries.
+      ExternalMemMapLocalRegions::add(
+        shm_[i].name(), usm_[i], shm_[i].size() - kExternalMemMapTrailerBytes);
     }
     next_ = slots - 1;
     return true;
   }
 
 
+  /// Pick the slot for the next frame: the next one (round-robin) that no
+  /// subscriber still holds, its generation bumped so stale descriptors of its
+  /// previous frame are rejected on import. Returns kNoFreeSlot if every slot
+  /// is in use — drop or retry the frame; never write into a held slot.
   size_t advance()
   {
-    if (usm_.empty()) {
-      return 0;
+    for (size_t i = 1; i <= usm_.size(); ++i) {
+      const size_t slot = (next_ + i) % usm_.size();
+      if (IntelMemoryIPCManager::claim_external_memmap_slot(shm_[slot].ptr(), shm_[slot].size())) {
+        next_ = slot;
+        return slot;
+      }
     }
-    next_ = (next_ + 1) % usm_.size();
-    if (next_ < generation_.size() && generation_[next_]) {
-      generation_[next_]->fetch_add(1, std::memory_order_release);
-    }
-    return next_;
+    return kNoFreeSlot;
   }
 
 
@@ -216,6 +232,9 @@ public:
 
   void close()
   {
+    for (const auto & shm : shm_) {
+      ExternalMemMapLocalRegions::remove(shm.name());
+    }
     for (size_t i = 0; i < usm_.size(); ++i) {
       if (i < mapped_.size() && mapped_[i]) {
         L0ExternalMemMap::unmap(usm_[i]);
