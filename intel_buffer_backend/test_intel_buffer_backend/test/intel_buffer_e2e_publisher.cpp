@@ -21,6 +21,7 @@
 ///
 /// usage: intel_buffer_e2e_publisher <L0_USM|DMA_BUF|EXTERNAL_MEMMAP|WRAP_DMABUF>
 ///                                   <topic> <num_frames> <num_subscribers>
+///                                   [frame_period_ms]
 ///
 /// Exit codes: 0 = published all frames, kE2eSkipExitCode = transport not
 /// available on this machine, anything else = failure. On success prints
@@ -89,16 +90,18 @@ std::vector<int> alloc_dma_heap_buffers(size_t count, size_t bytes)
 
 int main(int argc, char ** argv)
 {
-  if (argc != 5) {
+  if (argc != 5 && argc != 6) {
     std::fprintf(stderr,
       "usage: %s <L0_USM|DMA_BUF|EXTERNAL_MEMMAP|WRAP_DMABUF> <topic> "
-      "<num_frames> <num_subscribers>\n", argv[0]);
+      "<num_frames> <num_subscribers> [frame_period_ms]\n", argv[0]);
     return 2;
   }
   const std::string transport = argv[1];
   const std::string topic = argv[2];
   const uint32_t num_frames = static_cast<uint32_t>(std::stoul(argv[3]));
   const size_t num_subscribers = std::stoul(argv[4]);
+  const auto frame_period = argc == 6 ?
+    std::chrono::milliseconds(std::stol(argv[5])) : e2e::kFramePeriod;
   const size_t frame_bytes = e2e::kStep * e2e::kHeight;
 
   // The pool reads its transport once, when the backend first creates it.
@@ -129,7 +132,15 @@ int main(int argc, char ** argv)
   // One frame's Image with data backed by an IntelBuffer for `transport`.
   auto make_buffer = [&](uint32_t frame) -> rosidl::Buffer<uint8_t> {
       if (transport == "EXTERNAL_MEMMAP") {
-        const size_t slot = ring.advance();
+        // Wait (bounded) for a slot no subscriber is still reading.
+        size_t slot = ring.advance();
+        for (int i = 0; slot == ring.kNoFreeSlot && i < 100; ++i) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+          slot = ring.advance();
+        }
+        if (slot == ring.kNoFreeSlot) {
+          return rosidl::Buffer<uint8_t>();  // reported as an allocation failure
+        }
         e2e::fill_pattern(ring.data(slot), frame_bytes, frame);
         return ring.wrap(slot, frame_bytes);
       }
@@ -191,7 +202,7 @@ int main(int argc, char ** argv)
         break;
       }
       pub->publish(msg);
-      std::this_thread::sleep_for(e2e::kFramePeriod);
+      std::this_thread::sleep_for(frame_period);
     }
 
     if (rc == 0) {

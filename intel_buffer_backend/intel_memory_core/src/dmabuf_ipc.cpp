@@ -30,6 +30,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "intel_memory_core/intel_memory_buffer_pool.hpp"
 
@@ -168,6 +169,11 @@ std::string DmaBufIpc::register_block(PoolBlock * block)
   return register_fd(block->block_id, block->dmabuf_fd);
 }
 
+int64_t DmaBufIpc::buffer_size(int fd)
+{
+  return static_cast<int64_t>(lseek(fd, 0, SEEK_END));
+}
+
 int DmaBufIpc::receive_fd(const std::string & socket_path)
 {
   int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -201,25 +207,43 @@ int DmaBufIpc::receive_fd(const std::string & socket_path)
   msg.msg_control = cmsg_buf.control;
   msg.msg_controllen = sizeof(cmsg_buf.control);
 
-  ssize_t n = recvmsg(sock_fd, &msg, 0);
+  // The peer is whoever serves the descriptor's socket path, so its control
+  // data is untrusted. Every fd the kernel installed is collected from every
+  // header; anything but exactly one, untruncated, is rejected with all of
+  // them closed, so a peer can't leak descriptors into this process.
+  ssize_t n = recvmsg(sock_fd, &msg, MSG_CMSG_CLOEXEC);
   close(sock_fd);
 
-  if (n <= 0) {
-    throw std::runtime_error("recvmsg() failed for SCM_RIGHTS import");
+  std::vector<int> fds;
+  if (n > 0) {
+    for (struct cmsghdr * cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+      if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS ||
+        cmsg->cmsg_len < CMSG_LEN(0))
+      {
+        continue;
+      }
+      const size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+      for (size_t i = 0; i < count; ++i) {
+        int fd = -1;
+        // Copy each received fd out of the control message
+        std::memcpy(&fd, CMSG_DATA(cmsg) + i * sizeof(int), sizeof(int));
+        fds.push_back(fd);
+      }
+    }
   }
 
-  struct cmsghdr * cmsg = CMSG_FIRSTHDR(&msg);
-  if (!cmsg || cmsg->cmsg_type != SCM_RIGHTS) {
-    throw std::runtime_error("No SCM_RIGHTS in import message");
+  if (n <= 0 || (msg.msg_flags & MSG_CTRUNC) || fds.size() != 1 || fds[0] < 0) {
+    for (int fd : fds) {
+      if (fd >= 0) {
+        close(fd);
+      }
+    }
+    throw std::runtime_error(
+      n <= 0 ? "recvmsg() failed for SCM_RIGHTS import" :
+      "SCM_RIGHTS import expected exactly one fd, got " + std::to_string(fds.size()) +
+      ((msg.msg_flags & MSG_CTRUNC) ? " (control data truncated)" : ""));
   }
-
-  int recv_fd = -1;
-  // Copy the received fd from the control message into an integer variable
-  std::memcpy(&recv_fd, CMSG_DATA(cmsg), sizeof(int));
-  if (recv_fd < 0) {
-    throw std::runtime_error("Invalid fd received via SCM_RIGHTS");
-  }
-  return recv_fd;
+  return fds[0];
 }
 
 namespace
@@ -272,6 +296,13 @@ IpcImportResult DmaBufIpc::import_block(
   const uint64_t key = import_cache_key(pool_id, block_id);
   auto it = cache.find(key);
   if (it != cache.end()) {
+    if (size > it->second.size) {
+      RCUTILS_LOG_WARN_NAMED("dmabuf_ipc",
+        "dmabuf import rejected: %lu bytes requested, block %u is mapped with %lu",
+        static_cast<unsigned long>(size), block_id,
+        static_cast<unsigned long>(it->second.size));
+      return IpcImportResult{};
+    }
     return it->second.result;
   }
 
@@ -288,6 +319,14 @@ IpcImportResult DmaBufIpc::import_block(
   void * ptr = nullptr;
   try {
     dmabuf_fd = receive_fd(socket_path);
+    // Mapping past the end of the buffer would fault on access (SIGBUS).
+    const int64_t buffer_bytes = buffer_size(dmabuf_fd);
+    if (size == 0 || buffer_bytes < 0 || size > static_cast<uint64_t>(buffer_bytes)) {
+      close(dmabuf_fd);
+      throw std::runtime_error(
+        "descriptor size " + std::to_string(size) + " exceeds the exported DMA-BUF (" +
+        std::to_string(buffer_bytes) + " bytes)");
+    }
     ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, dmabuf_fd, 0);
     if (ptr == MAP_FAILED) {
       close(dmabuf_fd);

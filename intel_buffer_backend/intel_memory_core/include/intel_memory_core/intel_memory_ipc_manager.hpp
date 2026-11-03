@@ -51,6 +51,20 @@ public:
 
   static void release_block(IPCMetadata * meta);
 
+  /// Consumer side of an external-memmap ring slot (region = the whole mapped
+  /// slot, see l0_external_memmap.hpp): take a reference on the slot, then check
+  /// the producer has not reused it since publishing `published_generation`.
+  /// Returns the slot's metadata — release it with release_block() — or nullptr,
+  /// holding no reference, if the slot is stale or the reference can't be taken.
+  static IPCMetadata * acquire_external_memmap_slot(
+    void * region, size_t region_size, uint32_t published_generation);
+
+  /// Producer side: claim a ring slot for a new frame if no live consumer holds
+  /// it (references of dead consumers are reclaimed first), bumping its
+  /// generation so descriptors of the frame it held before go stale. Returns
+  /// false, leaving the slot untouched, if it is still in use.
+  static bool claim_external_memmap_slot(void * region, size_t region_size);
+
   static ImportResult import_level_zero_block(
     const uint8_t * ipc_handle_data,
     size_t ipc_handle_size,

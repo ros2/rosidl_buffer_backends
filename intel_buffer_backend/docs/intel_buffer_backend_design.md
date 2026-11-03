@@ -395,14 +395,15 @@ sequenceDiagram
     BK->>BK: ExternalMemMapImporter::import(shm_name, size)
     BK->>SHM: SharedSysmem::open(shm_name) → mmap producer's region
     BK->>SHM: L0ExternalMemMap::map(ptr, size) → USM host ptr (== ptr)
-    Note over BK: cached by shm_name for process lifetime;<br/>no IPCMetadata refcount segment (block never came from POOL)
+    Note over BK: cached by shm_name for process lifetime
+    BK->>SHM: acquire_external_memmap_slot(): refcount++ in the slot trailer,<br/>then check generation == slot_generation (else reject as stale)
   end
 
   BK-->>DES: IntelMemoryBufferImpl (~IntelBufferImpl → refcount-- on destroy, if pool-managed)
   DES-->>SUB: msg with Buffer bound to shared pages
   SUB->>SHM: get_usm_ptr(buffer) — read same pages (zero copy)
   SUB->>SUB: wrap as ov::Tensor (NV12/BGR) → GPU preprocess + SSD infer
-  Note over SUB,SHM: on buffer destruction ~IntelBufferImpl does refcount--,<br/>freeing the block for pool reuse (n/a for EXTERNAL_MEMMAP — no pool block)
+  Note over SUB,SHM: on buffer destruction ~IntelBufferImpl does refcount--,<br/>freeing the block for pool reuse (EXTERNAL_MEMMAP: the ring slot for advance())
 ```
 
 **Who triggers what:** as on the publish side, DDS/RMW only delivers the
@@ -416,11 +417,19 @@ the shared-memory `refcount`, and returns an `IntelMemoryBufferImpl` whose
 destructor decrements that `refcount` (see §4.2) so the pool can recycle the
 block. (The release lives in the destructor, not the deleter returned by
 `from_descriptor_with_endpoint()`: the type support re-wraps the raw impl in a
-`Buffer` and drops that deleter.) For `EXTERNAL_MEMMAP` there is no pool block or refcount to
-manage: `ExternalMemMapImporter::import()` opens the producer's `SharedSysmem`
-region by name and maps it via `L0ExternalMemMap::map()`, caching the result by
-`shm_name` for the process lifetime (mapping the same physical pages twice into
-one Level Zero context is prohibited by the extension).
+`Buffer` and drops that deleter.) For `EXTERNAL_MEMMAP` there is no pool:
+`ExternalMemMapImporter::import()` opens the producer's `SharedSysmem` region by
+name and maps it via `L0ExternalMemMap::map()`, caching the result by `shm_name`
+for the process lifetime (mapping the same physical pages twice into one Level
+Zero context is prohibited by the extension). Each ring slot region ends in a
+trailer holding an `IPCMetadata` (consumer refcount + holder pids) and the slot's
+generation word. The import — intra-process too — takes a reference there and
+then checks the generation still matches the descriptor's `slot_generation`,
+rejecting the frame as stale if the producer already reused the slot. The
+destructor releases the reference. `ExternalMemMapRing::advance()` only hands out
+slots no live consumer holds (reclaiming references of dead consumers), bumping
+the generation as it claims one; if every slot is held it returns `kNoFreeSlot`
+and the producer drops the frame instead of overwriting one being read.
 
 ## How to test the intel Buffer backend
 

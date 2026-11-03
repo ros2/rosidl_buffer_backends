@@ -387,6 +387,14 @@ private:
 
     if (extmap_mode_) {
       const size_t slot = extmap_ring_.advance();
+      if (slot == intel_buffer_backend::ExternalMemMapRing::kNoFreeSlot) {
+        // Every slot is still being read by a subscriber; overwriting one would
+        // corrupt that frame, so skip this one instead.
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+          "EXTERNAL_MEMMAP: all %zu ring slots held by subscribers; dropping frame",
+          extmap_ring_.slots());
+        return;
+      }
       std::memcpy(extmap_ring_.data(slot), bgr.data, frame_bytes_);
       auto buffer = extmap_ring_.wrap(slot, frame_bytes_);
       publish_frame(buffer);
@@ -395,7 +403,13 @@ private:
 
     // Allocate from the pool (recycles released blocks) and write BGR
     auto buffer = intel_buffer_backend::allocate_buffer(frame_bytes_);
-    intel_buffer_backend::write_to_buffer(buffer, bgr.data, frame_bytes_);
+    if (!intel_buffer_backend::write_to_buffer(buffer, bgr.data, frame_bytes_)) {
+      // Pool exhausted: every block is still held by subscribers (or by us).
+      // Publishing the unbacked buffer would send a blank frame; drop instead.
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "buffer pool exhausted (blocks still held by subscribers); dropping frame");
+      return;
+    }
 
     publish_frame(buffer);
   }

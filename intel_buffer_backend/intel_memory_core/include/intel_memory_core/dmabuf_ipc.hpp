@@ -59,6 +59,11 @@ public:
   static std::string register_fd(uint32_t block_id, int fd);
   static int receive_fd(const std::string & socket_path);
 
+  /// Size in bytes of the buffer behind a received DMA-BUF fd, queried with
+  /// lseek(SEEK_END) (how a dma-buf reports its size), or -1 if unknown. Sizes
+  /// in a descriptor are untrusted: never map or import more than this.
+  static int64_t buffer_size(int fd);
+
   static void unregister_block(uint32_t block_id);
 };
 

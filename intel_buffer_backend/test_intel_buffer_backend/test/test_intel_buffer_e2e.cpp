@@ -25,6 +25,9 @@
 ///  - a plain subscriber (CPU only, the default) on the same topic receives the
 ///    same bytes, converted to CPU automatically;
 ///  - consumer references are released (the publisher's pool does not grow).
+///
+/// A separate case holds each EXTERNAL_MEMMAP frame longer than a full ring
+/// cycle, to check the producer never overwrites a slot a consumer still uses.
 
 #include <signal.h>
 #include <sys/wait.h>
@@ -35,6 +38,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -125,11 +129,14 @@ std::string describe(const std::vector<std::string> & errors)
 class PublisherProcess
 {
 public:
-  bool start(const std::string & transport, const std::string & topic)
+  bool start(
+    const std::string & transport, const std::string & topic, size_t num_subscribers = 2,
+    std::chrono::milliseconds frame_period = e2e::kFramePeriod)
   {
     // Build argv before fork(): only exec-safe calls in the child.
     std::vector<std::string> args = {
-      INTEL_BUFFER_E2E_PUBLISHER, transport, topic, std::to_string(e2e::kNumFrames), "2"};
+      INTEL_BUFFER_E2E_PUBLISHER, transport, topic, std::to_string(e2e::kNumFrames),
+      std::to_string(num_subscribers), std::to_string(frame_period.count())};
     std::vector<char *> argv;
     for (auto & a : args) {
       argv.push_back(a.data());
@@ -314,3 +321,78 @@ INSTANTIATE_TEST_SUITE_P(
   Transports, IntelBufferE2E,
   ::testing::Values("L0_USM", "DMA_BUF", "EXTERNAL_MEMMAP", "WRAP_DMABUF"),
   [](const ::testing::TestParamInfo<std::string> & info) {return info.param;});
+
+class IntelBufferE2ESlowConsumer : public ::testing::Test
+{
+protected:
+  void SetUp() override {rclcpp::init(0, nullptr);}
+  void TearDown() override {rclcpp::shutdown();}
+};
+
+// The EXTERNAL_MEMMAP ring has 4 slots; at a 10 ms frame period each slot comes
+// round again every 40 ms. This subscriber holds every frame for 100 ms (like
+// a slow inference node) and re-checks its content before releasing it. The
+// producer must not reuse a slot a consumer holds. Frames that went stale while
+// queued may be rejected (delivered empty), but a delivered frame must never
+// change under its reader.
+TEST_F(IntelBufferE2ESlowConsumer, ExternalMemMapSlotNotOverwrittenWhileHeld)
+{
+  const std::string topic = "/intel_buffer_e2e/slow_consumer";
+  const size_t frame_bytes = static_cast<size_t>(e2e::kStep) * e2e::kHeight;
+  constexpr auto kHold = std::chrono::milliseconds(100);
+
+  auto node = std::make_shared<rclcpp::Node>("intel_buffer_e2e_slow_subscriber");
+  Received rx;
+  size_t intact = 0;
+  size_t stale = 0;
+
+  rclcpp::SubscriptionOptions opts;
+  opts.acceptable_buffer_backends = "intel_buffer";
+  auto sub = node->create_subscription<Image>(
+    topic, e2e::qos(),
+    [&](const Image::SharedPtr msg) {
+      if (msg->data.size() == 0) {
+        ++stale;  // slot reused before this queued frame was taken; rejected
+        return;
+      }
+      const size_t errors_before = rx.errors.size();
+      uint32_t frame = check_image(*msg, rx);
+      const auto * impl =
+      dynamic_cast<const IntelBufferImpl<uint8_t> *>(msg->data.get_impl());
+      if (!impl || !impl->get_block() ||
+        impl->get_block()->transport != TransportMode::EXTERNAL_MEMMAP)
+      {
+        rx.error(frame, "not imported via the EXTERNAL_MEMMAP transport");
+        return;
+      }
+      const uint8_t * data = intel_buffer_backend::get_usm_ptr(msg->data);
+      check_content(data, frame_bytes, frame, rx);
+      std::this_thread::sleep_for(kHold);
+      const size_t bad = data ? e2e::first_mismatch(data, frame_bytes, frame) : 0;
+      if (bad != frame_bytes) {
+        rx.error(frame, "overwritten while held (byte " + std::to_string(bad) + ")");
+      }
+      if (rx.errors.size() == errors_before) {
+        ++intact;
+      }
+    }, opts);
+
+  PublisherProcess publisher;
+  ASSERT_TRUE(publisher.start("EXTERNAL_MEMMAP", topic, 1, std::chrono::milliseconds(10)));
+
+  rclcpp::executors::SingleThreadedExecutor exec;
+  exec.add_node(node);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (!publisher.exited() && std::chrono::steady_clock::now() < deadline) {
+    exec.spin_some(std::chrono::milliseconds(20));
+  }
+  publisher.kill_now();
+
+  const std::string out = publisher.output();
+  if (publisher.exit_code() == e2e::kE2eSkipExitCode) {
+    GTEST_SKIP() << "EXTERNAL_MEMMAP not available on this machine: " << out;
+  }
+  ASSERT_EQ(publisher.exit_code(), 0) << "publisher failed; stdout:\n" << out;
+  EXPECT_TRUE(rx.errors.empty()) << "slow subscriber:" << describe(rx.errors);
+  EXPECT_GE(intact, 2u) << "too few frames delivered (" << stale << " rejected as stale)";
+}
