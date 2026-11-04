@@ -172,9 +172,13 @@ The RMW layer calls `on_discovering_endpoint()` for each subscriber to decide be
 
 | Condition | Path |
 |---|---|
-| Both endpoints advertise `transport=extmemmap` and `extmemmap=1` | Zero-copy via the external-memmap transport (no pool required on either side) |
+| Same host, both endpoints advertise `transport=extmemmap` and `extmemmap=1` | Zero-copy via the external-memmap transport (no pool required on either side) |
 | Same host, matching pool transport (`l0usm` or `dmabuf`) | Zero-copy via Level Zero USM IPC or DMA-BUF fd export |
 | Different transport, different host, or pool unavailable | CPU fallback via `to_cpu()` |
+
+"Same host" means both endpoints advertise the same `host=` value, which is the
+kernel boot ID (`/proc/sys/kernel/random/boot_id`). A peer that sends no `host=`
+value is treated as being on a different host.
 
 ## DMA-BUF setup (required)
 

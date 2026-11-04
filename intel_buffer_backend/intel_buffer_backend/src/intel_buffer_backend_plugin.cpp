@@ -17,6 +17,8 @@
 #include <unistd.h>
 
 #include <cstring>
+#include <fstream>
+#include <string>
 #include <typeinfo>
 
 #include "intel_memory_core/dmabuf_ipc.hpp"
@@ -67,6 +69,39 @@ PoolBlock * own_published_pool_block(
   }
   return block;
 }
+
+// Identifies the running kernel, so only peers on this host are offered
+// zero-copy; every transport here relies on host-local shm, sockets or fds.
+// Empty if unavailable, in which case no peer is treated as same-host.
+const std::string & local_host_id()
+{
+  static const std::string id = [] {
+      std::ifstream f("/proc/sys/kernel/random/boot_id");
+      std::string s;
+      std::getline(f, s);
+      return s;
+    }();
+  return id;
+}
+
+// Metadata entries are '|'-separated: the RMW (rmw_fastrtps user_data) uses
+// ',' and ';' as its own delimiters and truncates the value at either.
+std::string meta_value(const std::string & meta, const std::string & key)
+{
+  const std::string prefix = key + "=";
+  size_t pos = 0;
+  while (pos <= meta.size()) {
+    size_t end = meta.find('|', pos);
+    if (end == std::string::npos) {
+      end = meta.size();
+    }
+    if (meta.compare(pos, prefix.size(), prefix) == 0) {
+      return meta.substr(pos + prefix.size(), end - pos - prefix.size());
+    }
+    pos = end + 1;
+  }
+  return "";
+}
 }  // namespace
 
 IntelBufferBackend::IntelBufferBackend()
@@ -77,7 +112,7 @@ std::string IntelBufferBackend::get_backend_metadata() const
 {
   auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
   if (!pool) {
-    return "transport=extmemmap;extmemmap=1";
+    return "transport=extmemmap|extmemmap=1|host=" + local_host_id();
   }
   std::string meta = "transport=";
   if (pool->is_level_zero_capable()) {
@@ -87,8 +122,9 @@ std::string IntelBufferBackend::get_backend_metadata() const
   } else {
     meta += "none";
   }
-  meta += ";device=" + std::to_string(pool->ze_device_ordinal());
-  meta += ";extmemmap=1";
+  meta += "|device=" + std::to_string(pool->ze_device_ordinal());
+  meta += "|extmemmap=1";
+  meta += "|host=" + local_host_id();
   return meta;
 }
 
@@ -126,10 +162,16 @@ IntelBufferBackend::on_discovering_endpoint(
 
   const std::string & remote_meta = it->second;
 
-  bool compatible = remote_meta.find("transport=extmemmap") != std::string::npos &&
+  // Inter-host (or unidentified) peers are incompatible: they get the
+  // CPU-based message instead.
+  const bool same_host = !local_host_id().empty() &&
+    meta_value(remote_meta, "host") == local_host_id();
+
+  bool compatible = same_host &&
+    remote_meta.find("transport=extmemmap") != std::string::npos &&
     remote_meta.find("extmemmap=1") != std::string::npos;
 
-  if (!compatible) {
+  if (same_host && !compatible) {
     if (!IntelBufferImpl<uint8_t>::is_ipc_capable()) {
       return {false, {}};
     }

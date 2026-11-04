@@ -44,6 +44,13 @@ rmw_topic_endpoint_info_t make_endpoint(uint32_t gid_seed)
   info.endpoint_gid[3] = static_cast<uint8_t>(gid_seed & 0xFF);
   return info;
 }
+
+// The "|host=..." entry this backend advertises (it is the last key).
+std::string local_host_entry(const IntelBufferBackend & backend)
+{
+  std::string meta = backend.get_backend_metadata();
+  return meta.substr(meta.find("|host="));
+}
 }  // namespace
 
 TEST(IntelBufferBackend, BasicIdentityAccessors)
@@ -64,12 +71,16 @@ TEST(IntelBufferBackend, BackendMetadataAlwaysAdvertisesExtmemmap)
   auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
 
   if (!pool) {
-    EXPECT_EQ(meta, "transport=extmemmap;extmemmap=1");
+    EXPECT_EQ(meta.rfind("transport=extmemmap|extmemmap=1|host=", 0), 0u);
   } else {
     EXPECT_NE(meta.find("transport="), std::string::npos);
     EXPECT_NE(meta.find("device="), std::string::npos);
     EXPECT_NE(meta.find("extmemmap=1"), std::string::npos);
   }
+  // Non-empty host identity
+  EXPECT_GT(local_host_entry(backend).size(), std::string("|host=").size());
+  // ',' and ';' are RMW user_data delimiters; the value is truncated at either
+  EXPECT_EQ(meta.find_first_of(",;"), std::string::npos);
 }
 
 TEST(IntelBufferBackendDiscovery, MissingBackendKeyIsIncompatible)
@@ -87,10 +98,53 @@ TEST(IntelBufferBackendDiscovery, ExtmemmapAdvertisedRemoteIsCompatible)
   IntelBufferBackend backend;
   auto endpoint = make_endpoint(2);
   std::unordered_map<std::string, std::string> supported;
-  supported["intel_buffer"] = "transport=extmemmap;extmemmap=1";
+  supported["intel_buffer"] = "transport=extmemmap|extmemmap=1" + local_host_entry(backend);
 
   auto result = backend.on_discovering_endpoint(endpoint, {}, supported);
   EXPECT_TRUE(result.first);
+}
+
+TEST(IntelBufferBackendDiscovery, PeerOnAnotherHostIsIncompatible)
+{
+  IntelBufferBackend backend;
+  auto endpoint = make_endpoint(13);
+  std::unordered_map<std::string, std::string> supported;
+  supported["intel_buffer"] =
+    "transport=extmemmap|extmemmap=1|host=00000000-0000-0000-0000-000000000000";
+
+  auto result = backend.on_discovering_endpoint(endpoint, {}, supported);
+  EXPECT_FALSE(result.first);
+}
+
+TEST(IntelBufferBackendDiscovery, PeerWithoutHostIsIncompatible)
+{
+  IntelBufferBackend backend;
+  auto endpoint = make_endpoint(14);
+  std::unordered_map<std::string, std::string> supported;
+  supported["intel_buffer"] = "transport=extmemmap|extmemmap=1";
+
+  auto result = backend.on_discovering_endpoint(endpoint, {}, supported);
+  EXPECT_FALSE(result.first);
+}
+
+TEST(IntelBufferBackendDescriptor, PeerOnAnotherHostGetsNoDescriptor)
+{
+  IntelBufferBackend backend;
+  auto endpoint = make_endpoint(15);
+  std::unordered_map<std::string, std::string> supported;
+  supported["intel_buffer"] =
+    "transport=extmemmap|extmemmap=1|host=00000000-0000-0000-0000-000000000000";
+  ASSERT_FALSE(backend.on_discovering_endpoint(endpoint, {}, supported).first);
+
+  auto block = std::make_unique<intel_buffer_backend::PoolBlock>();
+  uint8_t byte = 0;
+  block->ptr = &byte;
+  block->size = 1;
+  block->transport = intel_buffer_backend::TransportMode::EXTERNAL_MEMMAP;
+  block->extmap_shm_name = "/not_used";
+
+  IntelBufferImpl<uint8_t> impl(block.release(), 1, false);
+  EXPECT_EQ(backend.create_descriptor_with_endpoint(&impl, endpoint), nullptr);
 }
 
 TEST(IntelBufferBackendDiscovery, MatchingPoolTransportIsCompatible)
@@ -105,7 +159,7 @@ TEST(IntelBufferBackendDiscovery, MatchingPoolTransportIsCompatible)
   std::unordered_map<std::string, std::string> supported;
   std::string remote_transport =
     pool->is_level_zero_capable() ? "transport=l0usm" : "transport=dmabuf";
-  supported["intel_buffer"] = remote_transport;
+  supported["intel_buffer"] = remote_transport + local_host_entry(backend);
 
   auto result = backend.on_discovering_endpoint(endpoint, {}, supported);
   EXPECT_TRUE(result.first);
@@ -127,7 +181,7 @@ TEST(IntelBufferBackendDiscovery, ExtmemmapCapabilityDoesNotOverridePoolTranspor
   IntelBufferBackend backend;
   auto endpoint = make_endpoint(12);
   std::unordered_map<std::string, std::string> supported;
-  supported["intel_buffer"] = "transport=bogus;extmemmap=1";
+  supported["intel_buffer"] = "transport=bogus|extmemmap=1";
 
   auto result = backend.on_discovering_endpoint(endpoint, {}, supported);
   EXPECT_FALSE(result.first);
