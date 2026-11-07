@@ -1,0 +1,18 @@
+# Copyright 2026 Meta Platforms, Inc. and affiliates.
+# Licensed under the Apache License, Version 2.0
+
+include("${executorch_vendor_DIR}/executorch_vendor_helpers.cmake")
+set(EXECUTORCH_VENDOR_VERSION "@EXECUTORCH_VENDOR_VERSION@")
+set(EXECUTORCH_VENDOR_VERSION_RANGE "@EXECUTORCH_VENDOR_VERSION_RANGE@")
+set(EXECUTORCH_VENDOR_SELECTED_VERSION "@EXECUTORCH_VENDOR_SELECTED_VERSION@")
+# Once a package finds executorch_cuda_vendor, its later find_package(executorch) uses
+# that copy. Both copies come from one release, which the CUDA vendor checks. Finding
+# executorch_cuda_vendor after ExecuTorch targets exist is refused rather than mixing the two.
+if(NOT EXECUTORCH_CUDA_VENDOR_ACTIVE)
+  if(NOT "@EXECUTORCH_VENDOR_DIR@" STREQUAL "")
+    set(executorch_DIR "@EXECUTORCH_VENDOR_DIR@")
+  else()
+    set(executorch_DIR "${executorch_vendor_DIR}/../../../opt/executorch_vendor/share/cmake")
+  endif()
+  executorch_vendor_check_existing_targets()
+endif()

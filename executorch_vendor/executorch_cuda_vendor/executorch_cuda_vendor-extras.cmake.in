@@ -1,0 +1,15 @@
+# Copyright 2026 Meta Platforms, Inc. and affiliates.
+# Licensed under the Apache License, Version 2.0
+
+# Says why no CUDA ExecuTorch is available, or is empty when one is.
+set(EXECUTORCH_CUDA_VENDOR_SKIPPED "@EXECUTORCH_CUDA_VENDOR_SKIPPED@")
+if(NOT EXECUTORCH_CUDA_VENDOR_SKIPPED)
+  set(EXECUTORCH_CUDA_VENDOR_ACTIVE TRUE)
+  find_package(executorch_vendor REQUIRED)
+  if(NOT "@EXECUTORCH_CUDA_VENDOR_DIR@" STREQUAL "")
+    set(executorch_DIR "@EXECUTORCH_CUDA_VENDOR_DIR@")
+  else()
+    set(executorch_DIR "${executorch_cuda_vendor_DIR}/../../../opt/executorch_cuda_vendor/share/cmake")
+  endif()
+  executorch_vendor_check_existing_targets()
+endif()

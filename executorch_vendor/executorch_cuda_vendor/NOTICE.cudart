@@ -1,0 +1,4 @@
+opt/executorch_cuda_vendor/backends/cuda/libcudart.so.* is the NVIDIA CUDA runtime library,
+copied from the CUDA toolkit used for the build. It is distributed under the
+NVIDIA CUDA Toolkit End User License Agreement:
+https://docs.nvidia.com/cuda/eula/index.html
