@@ -23,6 +23,8 @@ PyTorch conversion libraries use the same buffer infrastructure.
 - **torch_conversions_py** -- Python `torch.Tensor` API and plugin registry.
 - **torch_conversions_py_cpu** -- Python host-memory implementation.
 - **torch_conversions_py_cuda** -- Python CUDA implementation.
+- **executorch_vendor** -- CPU ExecuTorch C++ runtime provider.
+- **executorch_cuda_vendor** -- CUDA ExecuTorch C++ runtime provider.
 
 ## Deb build status
 
