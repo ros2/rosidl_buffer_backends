@@ -25,6 +25,9 @@ PyTorch conversion libraries use the same buffer infrastructure.
 - **torch_conversions_py_cuda** -- Python CUDA implementation.
 - **executorch_vendor** -- CPU ExecuTorch C++ runtime provider.
 - **executorch_cuda_vendor** -- CUDA ExecuTorch C++ runtime provider.
+- **executorch_conversions** -- C++ ExecuTorch tensor API and runtime plugin registry.
+- **executorch_conversions_cpu** -- C++ host-memory implementation.
+- **executorch_conversions_cuda** -- C++ CUDA implementation backed by `cuda_buffer`.
 
 ## Deb build status
 
@@ -61,6 +64,7 @@ PyTorch conversion libraries use the same buffer infrastructure.
 - [`cuda_buffer_backend/README.md`](cuda_buffer_backend/README.md)
 - [`qc_buffer_backend/README.md`](qc_buffer_backend/README.md)
 - [`torch_conversions/README.md`](torch_conversions/README.md)
+- [`executorch_conversions/README.md`](executorch_conversions/README.md)
 
 ## License
 
