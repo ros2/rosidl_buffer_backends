@@ -236,12 +236,9 @@ std::shared_ptr<void> HipBufferBackend::create_descriptor_with_endpoint(
   }
 
   if (write_event) {
-    hipIpcEventHandle_t event_handle;
-    HIP_CHECK(hipIpcGetEventHandle(&event_handle, write_event));
+    hip_impl->get_hip_buffer().copy_ipc_event_handle(descriptor->ipc_event_handle.data());
     pool->retain_exported_event(block, write_event, uid);
     hip_impl->get_hip_buffer().release_write_event_ownership();
-    std::memcpy(
-      descriptor->ipc_event_handle.data(), &event_handle, sizeof(hipIpcEventHandle_t));
   } else {
     std::memset(descriptor->ipc_event_handle.data(), 0, sizeof(hipIpcEventHandle_t));
   }

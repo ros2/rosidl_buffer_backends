@@ -19,6 +19,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <deque>
 #include <thread>
 
@@ -243,7 +244,7 @@ WriteHandle HipBuffer::get_write_handle(hipStream_t stream)
   if (!handle_state_) {handle_state_ = std::make_shared<HandleState>();}
   handle_state_->state = HandleState::State::InUse;
   handle_state_->write_stream = stream;
-  return WriteHandle(device_ptr_.get(), &write_event_, stream, handle_state_);
+  return WriteHandle(device_ptr_.get(), &write_event_, handle_state_);
 }
 
 void HipBuffer::reap_completed_read_events() const
@@ -275,14 +276,30 @@ void HipBuffer::finalize_write_handle() const
 
 void HipBuffer::finalize_write_handle_locked() const
 {
-  if (handle_state_->state != HandleState::State::InUse) {return;}
-  if (hip_is_stream_usable(handle_state_->write_stream) && write_event_) {
-    if (hipEventRecord(write_event_, handle_state_->write_stream) != hipSuccess) {
-      (void)hipGetLastError();
+  handle_state_->finalize(write_event_);
+}
+
+void HipBuffer::copy_ipc_event_handle(uint8_t * destination) const
+{
+  if (handle_state_) {
+    std::lock_guard<std::mutex> lock(handle_state_->mtx);
+    if (handle_state_->record_status != hipSuccess) {
+      throw HipError(__FILE__, __LINE__, "hipEventRecord", handle_state_->record_status);
+    }
+    if (handle_state_->ipc_export_attempted) {
+      if (handle_state_->ipc_export_status != hipSuccess) {
+        throw HipError(__FILE__, __LINE__, "hipIpcGetEventHandle",
+            handle_state_->ipc_export_status);
+      }
+      std::memcpy(destination, &handle_state_->ipc_event_handle, sizeof(hipIpcEventHandle_t));
+      return;
     }
   }
-  handle_state_->state = HandleState::State::Finalized;
-  handle_state_->write_stream = nullptr;
+
+  // Events supplied without a writer still use the on-demand export path.
+  hipIpcEventHandle_t event_handle;
+  HIP_CHECK(hipIpcGetEventHandle(&event_handle, write_event_));
+  std::memcpy(destination, &event_handle, sizeof(event_handle));
 }
 
 void HipBuffer::default_hip_free(uint8_t * p)

@@ -13,6 +13,8 @@
 #define HIP_LIFECYCLE_PROCESS_HPP_
 
 #include <hip/hip_runtime_api.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <algorithm>
 #include <array>
@@ -21,9 +23,11 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <typeinfo>
 #include <poll.h>
 #include <signal.h>
@@ -43,6 +47,8 @@ namespace hip_lifecycle_test
 using Descriptor = hip_buffer_backend_msgs::msg::HipBufferDescriptor;
 using Impl = hip_buffer_backend::HipBufferImpl<uint8_t>;
 constexpr size_t kPayloadSize = 4096;
+using ScopedStream =
+  std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>;
 // Each IPC phase has its own deadline, including HIP initialization/import.
 // This is a watchdog, NOT the pool's publish grace interval.
 constexpr auto kPhaseTimeout = std::chrono::seconds(15);
@@ -57,9 +63,34 @@ inline void check_hip(hipError_t status, const char * operation)
   require(status == hipSuccess, std::string(operation) + ": " + hipGetErrorName(status));
 }
 
+inline void check_hsa(hsa_status_t status, const char * operation)
+{
+  require(status == HSA_STATUS_SUCCESS,
+    std::string(operation) + ": HSA status " + std::to_string(status));
+}
+
+struct ScopedSignal
+{
+  ScopedSignal() {check_hsa(hsa_init(), "hsa_init");}
+  ScopedSignal(const ScopedSignal &) = delete;
+  ScopedSignal & operator=(const ScopedSignal &) = delete;
+  ~ScopedSignal()
+  {
+    if (signal.handle) {hsa_signal_destroy(signal);}
+    hsa_shut_down();
+  }
+
+  void destroy()
+  {
+    const auto previous = signal;
+    signal = {};
+    check_hsa(hsa_signal_destroy(previous), "hsa_signal_destroy(A)");
+  }
+
+  hsa_signal_t signal{};
+};
+
 // A fixed-size packet avoids ABI-dependent serialization of ROS strings/vectors.
-// These buffers deliberately have no write event: every HIP copy is explicitly
-// completed before the peer is allowed to import or the pool is allowed to reuse.
 struct WireDescriptor
 {
   uint64_t size{};
@@ -69,6 +100,7 @@ struct WireDescriptor
   int32_t pid{};
   uint32_t block{};
   char socket[108]{};
+  std::array<uint8_t, sizeof(hipIpcEventHandle_t)> event{};
 };
 
 inline WireDescriptor to_wire(const Descriptor & descriptor)
@@ -82,9 +114,7 @@ inline WireDescriptor to_wire(const Descriptor & descriptor)
   wire.block = descriptor.vmm_block_id;
   require(descriptor.use_ipc, "descriptor did not select IPC");
   require(descriptor.vmm_socket_path.size() < sizeof(wire.socket), "socket path too long");
-  require(std::all_of(
-      descriptor.ipc_event_handle.begin(), descriptor.ipc_event_handle.end(),
-      [](uint8_t byte) {return byte == 0;}), "unexpected event on synchronized test buffer");
+  wire.event = descriptor.ipc_event_handle;
   std::memcpy(wire.socket, descriptor.vmm_socket_path.c_str(),
     descriptor.vmm_socket_path.size() + 1);
   return wire;
@@ -102,15 +132,17 @@ inline Descriptor from_wire(const WireDescriptor & wire)
   descriptor.vmm_block_size = wire.block_size;
   descriptor.ipc_uid = wire.uid;
   descriptor.vmm_socket_path = wire.socket;
+  descriptor.ipc_event_handle = wire.event;
   return descriptor;
 }
 
-enum class Command {Import, ReadHeld, Release, Quit};
+enum class Command {Import, ReadHeld, Release, HoldSignal, Quit};
 struct Request
 {
   Command command{};
   WireDescriptor descriptor{};
   uint8_t expected_byte{};
+  hsa_amd_ipc_signal_t signal{};
 };
 struct Reply
 {
@@ -146,11 +178,17 @@ inline int importer_main(int socket)
     hip_buffer_backend::HipBufferBackend backend;
     rmw_topic_endpoint_info_t endpoint{};
     std::unique_ptr<void, void (*)(void *)> imported(nullptr, [](void *) {});
+    std::optional<ScopedSignal> held_signal;
     for (;;) {
       Request request;
       transfer(socket, &request, sizeof(request), false);
       Reply reply;
       try {
+        if (request.command == Command::HoldSignal) {
+          held_signal.emplace();
+          check_hsa(hsa_amd_ipc_signal_attach(&request.signal, &held_signal->signal),
+            "hsa_amd_ipc_signal_attach(A)");
+        }
         if (request.command == Command::Import) {
           require(!imported, "release the previous import before importing again");
           auto descriptor = from_wire(request.descriptor);
@@ -165,9 +203,21 @@ inline int importer_main(int socket)
             auto * hip_impl = dynamic_cast<Impl *>(impl);
             require(hip_impl && reply.size == kPayloadSize, "unexpected imported buffer");
             std::array<uint8_t, kPayloadSize> bytes{};
-            check_hip(hipMemcpy(bytes.data(), hip_impl->get_hip_buffer().get_device_ptr(),
-              bytes.size(), hipMemcpyDeviceToHost), "hipMemcpy(import readback)");
-            check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize(import readback)");
+            if (hip_impl->get_hip_buffer().get_write_event()) {
+              hipStream_t stream = nullptr;
+              check_hip(hipStreamCreate(&stream), "hipStreamCreate(import readback)");
+              ScopedStream owner(stream, hipStreamDestroy);
+              {
+                auto reader = hip_impl->get_hip_buffer().get_read_handle(stream);
+                check_hip(hipMemcpyAsync(bytes.data(), reader.get_ptr(), bytes.size(),
+                  hipMemcpyDeviceToHost, stream), "hipMemcpyAsync(import readback)");
+              }
+              check_hip(hipStreamSynchronize(stream), "hipStreamSynchronize(import readback)");
+            } else {
+              check_hip(hipMemcpy(bytes.data(), hip_impl->get_hip_buffer().get_device_ptr(),
+                bytes.size(), hipMemcpyDeviceToHost), "hipMemcpy(import readback)");
+              check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize(import readback)");
+            }
             reply.first_byte = bytes.front();
             reply.payload_matches = std::all_of(bytes.begin(), bytes.end(),
               [&request](uint8_t byte) {return byte == request.expected_byte;});
@@ -236,9 +286,11 @@ public:
     if (socket_ >= 0) {close(socket_);}
   }
 
-  Reply request(Command command, WireDescriptor descriptor = {}, uint8_t byte = 0)
+  Reply request(
+    Command command, WireDescriptor descriptor = {}, uint8_t byte = 0,
+    hsa_amd_ipc_signal_t signal = {})
   {
-    Request request{command, descriptor, byte};
+    Request request{command, descriptor, byte, signal};
     transfer(socket_, &request, sizeof(request), true);
     Reply reply;
     transfer(socket_, &reply, sizeof(reply), false);

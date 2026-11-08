@@ -88,6 +88,12 @@ public:
 
   void set_write_event(hipEvent_t event, bool owns_event = false)
   {
+    std::unique_lock<std::mutex> lock;
+    if (handle_state_) {
+      lock = std::unique_lock<std::mutex>(handle_state_->mtx);
+      handle_state_->record_status = hipSuccess;
+      handle_state_->ipc_export_attempted = false;
+    }
     write_event_ = event;
     owns_write_event_ = owns_event;
   }
@@ -101,6 +107,9 @@ public:
   }
 
   void finalize_write_handle() const;
+
+  // Copies sizeof(hipIpcEventHandle_t) bytes; throws if recording or export failed.
+  void copy_ipc_event_handle(uint8_t * destination) const;
 
   size_t size() const {return size_;}
   int get_device_id() const {return device_id_;}

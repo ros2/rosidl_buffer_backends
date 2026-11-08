@@ -53,9 +53,33 @@ struct HandleState
     Finalized
   };
 
+  // Caller holds mtx. Keep failures for publication; handle destruction cannot throw.
+  void finalize(hipEvent_t event) noexcept
+  {
+    if (state != State::InUse) {return;}
+    if (hip_is_stream_usable(write_stream) && event) {
+      HIP_CHECK_NOTHROW(record_status = hipEventRecord(event, write_stream), (void)0);
+      if (record_status == hipSuccess) {
+        // Export at the first record, before an older IPC signal can be destroyed.
+        // See https://github.com/ROCm/rocm-systems/issues/14548.
+        ipc_export_attempted = true;
+        ipc_export_status = hipIpcGetEventHandle(&ipc_event_handle, event);
+        if (ipc_export_status != hipSuccess) {
+          (void)hipGetLastError();
+        }
+      }
+    }
+    state = State::Finalized;
+    write_stream = nullptr;
+  }
+
   std::mutex mtx;
   State state{State::Unset};
   hipStream_t write_stream{nullptr};
+  hipError_t record_status{hipSuccess};
+  hipIpcEventHandle_t ipc_event_handle{};
+  hipError_t ipc_export_status{hipSuccess};
+  bool ipc_export_attempted{false};
 };
 
 /// \brief Scoped read access to a HipBuffer.
@@ -173,12 +197,11 @@ public:
 
   WriteHandle(WriteHandle && other) noexcept
   : data_ptr_(other.data_ptr_), write_event_ptr_(other.write_event_ptr_),
-    stream_(other.stream_), state_(std::move(other.state_)),
+    state_(std::move(other.state_)),
     promoted_buffer_(std::move(other.promoted_buffer_))
   {
     other.data_ptr_ = nullptr;
     other.write_event_ptr_ = nullptr;
-    other.stream_ = nullptr;
   }
 
   WriteHandle & operator=(WriteHandle && other) noexcept
@@ -187,12 +210,10 @@ public:
       release();
       data_ptr_ = other.data_ptr_;
       write_event_ptr_ = other.write_event_ptr_;
-      stream_ = other.stream_;
       state_ = std::move(other.state_);
       promoted_buffer_ = std::move(other.promoted_buffer_);
       other.data_ptr_ = nullptr;
       other.write_event_ptr_ = nullptr;
-      other.stream_ = nullptr;
     }
     return *this;
   }
@@ -222,13 +243,7 @@ private:
   {
     if (!state_) {return;}
     std::lock_guard<std::mutex> lock(state_->mtx);
-    if (state_->state == HandleState::State::Finalized) {return;}
-    hipStream_t ws = state_->write_stream ? state_->write_stream : stream_;
-    if (hip_is_stream_usable(ws) && write_event_ptr_ && *write_event_ptr_) {
-      HIP_CHECK_NOTHROW(hipEventRecord(*write_event_ptr_, ws), (void)0);
-    }
-    state_->state = HandleState::State::Finalized;
-    state_->write_stream = nullptr;
+    state_->finalize(write_event_ptr_ ? *write_event_ptr_ : nullptr);
   }
 
   friend class HipBuffer;
@@ -236,16 +251,13 @@ private:
   explicit WriteHandle(
     uint8_t * data_ptr,
     hipEvent_t * write_event_ptr,
-    hipStream_t stream,
     std::shared_ptr<HandleState> state)
-  : data_ptr_(data_ptr), write_event_ptr_(write_event_ptr), stream_(stream),
-    state_(state)
+  : data_ptr_(data_ptr), write_event_ptr_(write_event_ptr), state_(std::move(state))
   {
   }
 
   uint8_t * data_ptr_{nullptr};
   hipEvent_t * write_event_ptr_{nullptr};
-  hipStream_t stream_{nullptr};
   std::shared_ptr<HandleState> state_{nullptr};
   std::shared_ptr<rosidl::Buffer<uint8_t>> promoted_buffer_{};
 };

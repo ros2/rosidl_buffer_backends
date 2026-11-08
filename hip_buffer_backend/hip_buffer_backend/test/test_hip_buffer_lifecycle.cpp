@@ -264,6 +264,64 @@ TEST_F(HipBufferLifecycle, OldDescriptorRejectedAfterReuseBeforeNewUid)
   uncached.finish();
   cached.finish();
 }
+
+class HipBufferEventLifecycle
+  : public HipBufferLifecycle, public ::testing::WithParamInterface<bool>
+{};
+
+// Regression for https://github.com/ROCm/rocm-systems/issues/14548.
+// Destroying an older IPC signal A while another process holds it can make a
+// still-valid signal B's first export fail. In the backend this surfaces as
+// hipErrorInvalidValue from hipIpcGetEventHandle during descriptor creation.
+//
+// Order: import A -> record B's writer event -> destroy A -> publish B.
+// Exporting B when its writer is finalized, before A is destroyed, avoids this
+// failure in the reproducer. Both handle release and explicit finalization must
+// preserve successful publication and correct payload delivery.
+//
+// Use HSA for A because hipEventDestroy can defer the actual signal destruction.
+// B uses the normal backend writer, descriptor and reader paths.
+TEST_P(HipBufferEventLifecycle, PublishAfterOlderSignalDestroyed)
+{
+  Importer importer;
+  hipStream_t stream = nullptr;
+  check_hip(hipStreamCreate(&stream), "hipStreamCreate(producer)");
+  ScopedStream stream_owner(stream, hipStreamDestroy);
+  // Allocate the payload and submit its write before the signal-lifetime sequence.
+  Impl buffer(kPayloadSize);
+  ScopedSignal old_signal;
+  {
+    auto writer = buffer.get_hip_buffer().get_write_handle(stream);
+    check_hip(hipMemsetAsync(writer.get_ptr(), 0xa5, kPayloadSize, stream), "hipMemsetAsync(B)");
+    check_hip(hipStreamSynchronize(stream), "hipStreamSynchronize(payload setup)");
+    check_hsa(hsa_amd_signal_create(0, 0, nullptr, HSA_AMD_SIGNAL_IPC, &old_signal.signal),
+      "hsa_amd_signal_create(A)");
+    hsa_amd_ipc_signal_t handle{};
+    check_hsa(hsa_amd_ipc_signal_create(old_signal.signal, &handle),
+        "hsa_amd_ipc_signal_create(A)");
+    importer.request(Command::HoldSignal, {}, 0, handle);
+
+    if (GetParam()) {
+      buffer.get_hip_buffer().finalize_write_handle();
+    }
+  }
+  old_signal.destroy();
+
+  const auto descriptor = publish(buffer);
+  ASSERT_TRUE(std::any_of(descriptor.event.begin(), descriptor.event.end(),
+    [](uint8_t byte) {return byte != 0;})) << "B must carry its writer event";
+  const auto reply = importer.request(Command::Import, descriptor, 0xa5);
+  EXPECT_EQ(reply.size, kPayloadSize);
+  EXPECT_TRUE(reply.payload_matches);
+  importer.request(Command::Release);
+  importer.finish();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  WriterCompletion, HipBufferEventLifecycle, ::testing::Bool(),
+  [](const ::testing::TestParamInfo<bool> & info) {
+    return info.param ? "ExplicitFinalize" : "HandleRelease";
+  });
 }  // namespace hip_lifecycle_test
 
 int main(int argc, char ** argv)

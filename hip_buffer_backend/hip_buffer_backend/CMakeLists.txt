@@ -66,7 +66,8 @@ if(BUILD_TESTING)
   endif()
 
   # Uses exec'd importer processes and real HIP VMM allocations. Unsupported
-  # HIP/VMM capabilities skip; stale descriptor acceptance is a real failure.
+  # HIP/VMM capabilities skip; IPC export and stale descriptor errors fail.
+  find_package(hsa-runtime64 REQUIRED CONFIG)
   ament_add_gtest(test_hip_buffer_lifecycle
     test/test_hip_buffer_lifecycle.cpp
     TIMEOUT 180
@@ -75,6 +76,7 @@ if(BUILD_TESTING)
     target_link_libraries(test_hip_buffer_lifecycle
       ${PROJECT_NAME}
       hip_buffer::hip_buffer
+      hsa-runtime64::hsa-runtime64
       rosidl_buffer_backend::rosidl_buffer_backend
       rosidl_runtime_cpp::rosidl_runtime_cpp
       ${hip_buffer_backend_msgs_TARGETS}
