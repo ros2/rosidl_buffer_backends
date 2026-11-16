@@ -28,11 +28,11 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
-#include <sstream>
 #include <thread>
 
 #include "cuda_buffer/cuda_error.hpp"
 #include "cuda_buffer/cuda_memory_pool.hpp"
+#include "cuda_buffer/host_endpoint_manager.hpp"
 
 namespace cuda_buffer_backend
 {
@@ -78,26 +78,6 @@ UnixAddress make_abstract_unix_addr(const std::string & name)
 
 }  // namespace
 
-struct ImportCacheKey
-{
-  int32_t pid;
-  uint32_t block_id;
-
-  bool operator==(const ImportCacheKey & other) const
-  {
-    return pid == other.pid && block_id == other.block_id;
-  }
-};
-
-struct ImportCacheKeyHash
-{
-  size_t operator()(const ImportCacheKey & key) const
-  {
-    return std::hash<int64_t>()(
-      (static_cast<int64_t>(key.pid) << 32) | key.block_id);
-  }
-};
-
 struct CachedImport
 {
   CUmemGenericAllocationHandle handle{0};
@@ -112,11 +92,10 @@ struct CachedImport
   CachedImport & operator=(CachedImport && other) noexcept;
 };
 
-static std::unordered_map<ImportCacheKey, CachedImport, ImportCacheKeyHash> &
-get_import_cache()
+// Keyed by the block's socket name, which is unique on the host.
+static std::unordered_map<std::string, CachedImport> & get_import_cache()
 {
-  static auto * cache =
-    new std::unordered_map<ImportCacheKey, CachedImport, ImportCacheKeyHash>();
+  static auto * cache = new std::unordered_map<std::string, CachedImport>();
   return *cache;
 }
 
@@ -416,6 +395,12 @@ CudaVmmIPCManager::~CudaVmmIPCManager()
   registered_blocks_.clear();
 }
 
+std::string CudaVmmIPCManager::block_name(uint32_t block_id)
+{
+  return "cuda_vmm_" + std::to_string(host_endpoint_manager::pid_namespace()) + "_" +
+         std::to_string(getpid()) + "_" + std::to_string(block_id);
+}
+
 std::string CudaVmmIPCManager::register_block(VmmBlock * block)
 {
   std::lock_guard<std::mutex> lock(blocks_mutex_);
@@ -425,9 +410,7 @@ std::string CudaVmmIPCManager::register_block(VmmBlock * block)
     return it->second.socket_path;
   }
 
-  std::stringstream ss;
-  ss << "cuda_vmm_" << getpid() << "_" << block->block_id;
-  std::string socket_path = ss.str();
+  std::string socket_path = block_name(block->block_id);
 
   int server_socket = create_fd_server_socket(socket_path);
   if (server_socket < 0) {
@@ -451,12 +434,10 @@ CudaVmmIPCManager::ImportResult CudaVmmIPCManager::import_block(
   uint64_t size,
   uint64_t expected_uid)
 {
-  ImportCacheKey cache_key{pid, block_id};
-
   auto & cache = get_import_cache();
   std::lock_guard<std::mutex> lock(get_import_cache_mutex());
 
-  auto it = cache.find(cache_key);
+  auto it = cache.find(socket_path);
   if (it != cache.end()) {
     IPCMetadata * meta = it->second.ipc_meta;
     if (meta) {
@@ -472,8 +453,7 @@ CudaVmmIPCManager::ImportResult CudaVmmIPCManager::import_block(
   }
 
   IPCMetadata * ipc_meta = nullptr;
-  std::string shm_name = "/cuda_vmm_" + std::to_string(pid) +
-    "_" + std::to_string(block_id);
+  std::string shm_name = "/" + socket_path;
   int shm_fd = shm_open(shm_name.c_str(), O_RDWR, 0666);
   if (shm_fd >= 0) {
     void * ptr = mmap(nullptr, sizeof(IPCMetadata),
@@ -566,7 +546,7 @@ CudaVmmIPCManager::ImportResult CudaVmmIPCManager::import_block(
     throw CudaError(__FILE__, __LINE__, "cuMemSetAccess", r);
   }
 
-  auto & cached = cache[cache_key];
+  auto & cached = cache[socket_path];
   cached.handle = handle;
   cached.va = va;
   cached.size = size;

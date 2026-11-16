@@ -44,8 +44,15 @@ enum class EndpointLocality : uint8_t
   UNDEFINED = 0,
   INTRA_PROCESS = 1,
   INTER_PROCESS_SAME_HOST = 2,
-  INTER_HOST = 3
+  INTER_HOST = 3,
+  // Same host, but another PID namespace, such as another container. CUDA's interprocess events
+  // open only within one PID namespace, so a peer here cannot wait for a block's writes.
+  INTER_PROCESS_OTHER_PID_NAMESPACE = 4
 };
+
+/// Inode of this process's PID namespace, or 0 without /proc. Process IDs repeat across PID
+/// namespaces, so names and identities shared on the host carry it beside the process ID.
+CUDA_BUFFER_PUBLIC uint64_t pid_namespace();
 
 struct LocalityInfo
 {
@@ -126,6 +133,7 @@ private:
 
   const size_t domain_id_;
   uint64_t instance_id_;
+  uint64_t pid_namespace_;
   std::string hostname_;
 
   int shm_fd_;

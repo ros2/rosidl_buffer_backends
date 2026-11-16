@@ -254,8 +254,7 @@ VmmBlock * CudaMemoryPool::create_block(size_t aligned_size)
       block->exported_fd = fd;
     }
 
-    std::string shm_name = "/cuda_vmm_" + std::to_string(getpid()) +
-      "_" + std::to_string(block->block_id);
+    std::string shm_name = "/" + CudaVmmIPCManager::block_name(block->block_id);
     shm_unlink(shm_name.c_str());
     int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0666);
     if (shm_fd >= 0) {
