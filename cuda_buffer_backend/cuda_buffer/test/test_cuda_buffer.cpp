@@ -34,6 +34,7 @@
 
 #include "cuda_buffer/cuda_buffer.hpp"
 #include "cuda_buffer/cuda_buffer_api.hpp"
+#include "cuda_buffer/vmm_buffer.hpp"
 #include "rosidl_buffer/buffer.hpp"
 
 extern char ** environ;
@@ -403,7 +404,7 @@ int run_shm_child(const std::string & mode)
   void * ptr = nullptr;
   if (cudaMalloc(&ptr, N) != cudaSuccess) {return 1;}
   {
-    cuda_buffer_backend::CudaBuffer buf(
+    cuda_buffer_backend::VmmBuffer buf(
       ptr, N, 0, [](uint8_t * p) {
         cudaFree(p);
         freed = true;

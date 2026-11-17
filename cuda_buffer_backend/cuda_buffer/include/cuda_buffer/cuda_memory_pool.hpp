@@ -32,6 +32,7 @@
 
 #include "cuda_buffer/cuda_buffer_ipc_manager.hpp"
 #include "cuda_buffer/cuda_error.hpp"
+#include "cuda_buffer/visibility_control.h"
 
 namespace cuda_buffer_backend
 {
@@ -58,9 +59,9 @@ struct VmmBlock
   uint64_t current_uid{0};
 };
 
-/// \brief Publisher-side VMM allocation pool used by CudaBufferImpl.
+/// \brief Publisher-side VMM allocation pool used by VmmBuffer.
 ///
-/// CudaMemoryPool owns the real CUDA VMM allocations. CudaBuffer instances
+/// CudaMemoryPool owns the real CUDA VMM allocations. VmmBuffer instances
 /// represent temporary uses of blocks from this pool and return blocks via the
 /// deleter produced by CudaMemoryPool::deleter(). The pool decides whether a
 /// returned block is ready for reuse by checking per-block IPC metadata
@@ -153,6 +154,10 @@ private:
   std::unique_ptr<CudaVmmIPCManager> ipc_manager_;
   mutable std::mutex mutex_;
 };
+
+/// Process-wide VMM allocation pool. Defined out-of-line so backend plugins
+/// and application DSOs resolve allocations through the same pool instance.
+CUDA_BUFFER_PUBLIC std::shared_ptr<CudaMemoryPool> get_or_create_global_pool();
 
 }  // namespace cuda_buffer_backend
 

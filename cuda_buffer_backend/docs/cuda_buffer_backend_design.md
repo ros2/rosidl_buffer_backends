@@ -39,6 +39,30 @@ Three runtime singletons make this work:
   endpoints (pid, gid, device, uid, intra-process flag). Used by the
   backend to decide IPC capability for any discovered remote endpoint.
 
+## Storage backends
+
+`CudaBufferImpl<T>` is the only `rosidl::BufferImplBase<T>` this package
+provides, and its backend type is always `"cuda"`. The device memory behind it
+is owned by a `CudaBuffer`, an abstract class with one implementation per
+storage backend:
+
+```mermaid
+flowchart LR
+  Impl["CudaBufferImpl&lt;T&gt;"] -->|owns| Base["CudaBuffer (abstract)"]
+  Base --> Vmm["VmmBuffer (CUDA VMM)"]
+```
+
+`CudaBuffer` holds what every backend shares: the size, the device id, and the
+write-handle state machine behind `ReadHandle` and `WriteHandle` (one writer,
+no write after a read, finalize on publish). A storage backend supplies the
+device pointer and the stream ordering between producer and consumer.
+`CudaBuffer::allocate()` chooses the backend for new allocations. Buffers
+received from another process are constructed by the `cuda` plugin, which also
+owns how each backend's storage is exported and imported.
+
+`VmmBuffer` is the CUDA VMM backend and the only one today. The rest of this
+document describes how it is allocated, shared, and recycled.
+
 ## Publish / subscribe flow
 
 ```mermaid
@@ -104,7 +128,7 @@ queries it for the remote gid.
 
 ```mermaid
 flowchart TD
-  A["VMM block in pool"] --> B["Publisher CudaBuffer"]
+  A["VMM block in pool"] --> B["Publisher VmmBuffer"]
   B --> C["WriteHandle records write event"]
   C --> D["Descriptor published"]
 
@@ -112,7 +136,7 @@ flowchart TD
   E --> F{"Descriptor UID matches shared-memory UID?"}
   F -->|"yes"| G["IPC refcount increments"]
   F -->|"no"| S["stale buffer, discard"]
-  G --> H["Local CudaBuffer and ReadHandle"]
+  G --> H["Local VmmBuffer and ReadHandle"]
   H --> I["Local recycler waits read events"]
   I --> J["IPC refcount decrements"]
 
@@ -121,9 +145,9 @@ flowchart TD
   K -->|"otherwise"| K
 ```
 
-A CUDA buffer is a pooled VMM block wrapped in `CudaBuffer`. When the block is
+A CUDA buffer is a pooled VMM block wrapped in `VmmBuffer`. When the block is
 imported in another process, the import increments the shared-memory IPC
-refcount, while local `shared_ptr` ownership keeps the imported `CudaBuffer`
+refcount, while local `shared_ptr` ownership keeps the imported `VmmBuffer`
 alive inside that process. When the last local owner is released, the recycler
 waits for recorded CUDA read events before decrementing the IPC refcount.
 The publisher may recycle the block only after the IPC refcount returns to
