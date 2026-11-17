@@ -310,12 +310,7 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
     return nullptr;
   }
 
-  // The storage backend of the buffer decides how it is shared. CUDA VMM is
-  // the only one with a transport; anything else falls back to the CPU path.
-  auto * vmm_buffer = dynamic_cast<VmmBuffer *>(&cuda_impl->get_cuda_buffer());
-  if (!vmm_buffer) {
-    return nullptr;
-  }
+  CudaBuffer & storage = cuda_impl->get_cuda_buffer();
 
   auto descriptor = std::make_shared<CudaBufferDescriptor>();
 
@@ -333,7 +328,17 @@ std::shared_ptr<void> CudaBufferBackend::create_descriptor_with_endpoint(
              locality.locality == host_endpoint_manager::EndpointLocality::INTRA_PROCESS;
     };
 
-  if (!export_vmm_buffer(*vmm_buffer, peer_is_same_process, *descriptor)) {
+  // The storage backend of the buffer decides how it is shared. A backend
+  // whose storage cannot be exported falls back to the CPU path. There is no
+  // default case, so -Wswitch points here when a backend is added.
+  bool exported = false;
+  switch (storage.storage_kind()) {
+    case StorageKind::Vmm:
+      exported = export_vmm_buffer(
+        static_cast<VmmBuffer &>(storage), peer_is_same_process, *descriptor);
+      break;
+  }
+  if (!exported) {
     return nullptr;
   }
 

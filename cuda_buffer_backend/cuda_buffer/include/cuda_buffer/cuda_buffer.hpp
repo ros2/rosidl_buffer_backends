@@ -32,6 +32,16 @@
 namespace cuda_buffer_backend
 {
 
+/// \brief The storage backend behind a CudaBuffer.
+/// \details Code that treats one backend specially, such as the plugin's
+/// transport, switches on CudaBuffer::storage_kind() and then static_casts to
+/// the class the enumerator names. Each new backend adds an enumerator here.
+enum class StorageKind
+{
+  /// VmmBuffer: CUDA Virtual Memory Management.
+  Vmm,
+};
+
 /// \brief Abstract CUDA storage object owned by CudaBufferImpl.
 ///
 /// The public rosidl buffer hierarchy is:
@@ -61,6 +71,11 @@ public:
   /// Buffers received from another process are constructed by the plugin. A
   /// \p byte_size of zero returns an empty buffer without touching the device.
   static std::unique_ptr<CudaBuffer> allocate(size_t byte_size);
+
+  /// \brief The storage backend this buffer belongs to.
+  /// \details Every subclass returns its own enumerator, so a static_cast to
+  /// the class that enumerator names is valid.
+  virtual StorageKind storage_kind() const noexcept = 0;
 
   ReadHandle get_read_handle(cudaStream_t stream) const;
   WriteHandle get_write_handle(cudaStream_t stream);

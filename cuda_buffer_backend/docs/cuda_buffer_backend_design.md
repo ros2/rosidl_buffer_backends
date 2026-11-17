@@ -58,7 +58,10 @@ no write after a read, finalize on publish). A storage backend supplies the
 device pointer and the stream ordering between producer and consumer.
 `CudaBuffer::allocate()` chooses the backend for new allocations. Buffers
 received from another process are constructed by the `cuda` plugin, which also
-owns how each backend's storage is exported and imported.
+owns how each backend's storage is exported and imported. The plugin finds a
+buffer's backend with `CudaBuffer::storage_kind()` rather than RTTI: a new
+backend adds a `StorageKind` enumerator and a `case` to the plugin's export
+`switch`.
 
 `VmmBuffer` is the CUDA VMM backend and the only one today. The rest of this
 document describes how it is allocated, shared, and recycled.

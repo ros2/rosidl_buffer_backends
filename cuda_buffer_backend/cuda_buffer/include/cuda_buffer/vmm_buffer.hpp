@@ -60,6 +60,8 @@ public:
   /// the pool.
   static std::unique_ptr<VmmBuffer> allocate(size_t byte_size);
 
+  StorageKind storage_kind() const noexcept override {return StorageKind::Vmm;}
+
   void set_write_event(cudaEvent_t event, bool owns_event = false)
   {
     write_event_ = event;
