@@ -51,6 +51,10 @@ IntelMemoryBufferPool::IntelMemoryBufferPool() = default;
 
 IntelMemoryBufferPool::~IntelMemoryBufferPool()
 {
+  // Give consumers a bounded time to drop their references. Remote processes
+  // control the refcounts, so an unbounded wait could hang this process at exit.
+  const auto deadline = std::chrono::steady_clock::now() +
+    std::chrono::microseconds(config_.shutdown_timeout_us);
   for (;;) {
     bool all_ready = true;
     {
@@ -63,6 +67,12 @@ IntelMemoryBufferPool::~IntelMemoryBufferPool()
       }
     }
     if (all_ready) {
+      break;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      RCUTILS_LOG_WARN_NAMED("intel_memory_buffer_pool",
+        "destroying pool with blocks still referenced by consumers after %lu us",
+        static_cast<unsigned long>(config_.shutdown_timeout_us));
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -258,11 +268,17 @@ PoolBlock * IntelMemoryBufferPool::find_block_for_ptr(void * ptr) const
 std::string IntelMemoryBufferPool::register_block_for_ipc(PoolBlock * block)
 {
   if (transport_mode_ == TransportMode::LEVEL_ZERO_USM) {
+    // Each export_fd() call creates a new fd: only export for a block that
+    // isn't served yet, and hand the fd to the server, which closes it.
+    std::string path = DmaBufIpc::registered_socket_path(block->block_id);
+    if (!path.empty()) {
+      return path;
+    }
     int fd = -1;
     if (!L0UsmIpc::export_fd(block, fd)) {
       return "";
     }
-    return IntelMemoryIPCManager::register_fd(block->block_id, fd);
+    return IntelMemoryIPCManager::register_fd(block->block_id, fd, /*take_ownership=*/true);
   }
 
   if (!dmabuf_capable_ || block->dmabuf_fd < 0) {

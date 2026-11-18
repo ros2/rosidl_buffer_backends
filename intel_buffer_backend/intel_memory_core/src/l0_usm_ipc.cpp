@@ -188,7 +188,10 @@ void L0UsmIpc::evict_pool(uint32_t pool_id)
 {
   auto & cache = l0_import_cache();
   for (auto it = cache.begin(); it != cache.end(); ) {
-    if (static_cast<uint32_t>(it->first >> 32) == pool_id) {
+    // A mapping a live buffer of this process still reads is kept.
+    if (static_cast<uint32_t>(it->first >> 32) == pool_id &&
+      !import_held_by_this_process(it->first))
+    {
       drop_l0_import(it->second);
       it = cache.erase(it);
     } else {
@@ -223,7 +226,7 @@ IpcImportResult L0UsmIpc::import_handle(
   }
 
   for (auto e = cache.begin(); e != cache.end(); ) {
-    if (!producer_process_alive(e->second.pid)) {
+    if (!producer_process_alive(e->second.pid) && !import_held_by_this_process(e->first)) {
       drop_l0_import(e->second);
       e = cache.erase(e);
     } else {

@@ -42,6 +42,12 @@ inline bool producer_process_alive(int32_t pid)
   return kill(static_cast<pid_t>(pid), 0) == 0 || errno == EPERM;
 }
 
+/// True if a buffer of this process imported from block `key`
+/// (import_cache_key) is still alive, i.e. this pid is a holder in the block's
+/// shared refcount. Import caches must not unmap such an entry, even when its
+/// producer is gone. Implemented by the IPC manager, which owns the refcounts.
+bool import_held_by_this_process(uint64_t key);
+
 class DmaBufIpc
 {
 public:
@@ -56,7 +62,13 @@ public:
 
   static void evict_pool(uint32_t pool_id);
 
-  static std::string register_fd(uint32_t block_id, int fd);
+  /// Serve `fd` for `block_id` over an AF_UNIX socket and return its path.
+  /// With take_ownership, the fd is closed when the block is unregistered, or
+  /// right away if the block is already registered or registration fails.
+  static std::string register_fd(uint32_t block_id, int fd, bool take_ownership = false);
+
+  /// Socket path of an already registered block, or empty.
+  static std::string registered_socket_path(uint32_t block_id);
   static int receive_fd(const std::string & socket_path);
 
   /// Size in bytes of the buffer behind a received DMA-BUF fd, queried with

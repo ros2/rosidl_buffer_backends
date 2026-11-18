@@ -375,11 +375,21 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
     if (frame->transport_mode == IntelBufferDescriptor::TRANSPORT_LEVEL_ZERO_USM) {
       const auto & d = frame->l0_desc;
       // Intra-process shortcut, only for a verified block of our own pool
-      if (own_published_pool_block(d.local_ptr, d.size, d.publisher_pid, d.pool_id, d.ipc_uid)) {
+      if (PoolBlock * own = own_published_pool_block(
+          d.local_ptr, d.size, d.publisher_pid, d.pool_id, d.ipc_uid))
+      {
+        // Hold the block like a remote consumer would, so the pool can't hand
+        // it to a new frame while this buffer lives; ~IntelBufferImpl releases it.
+        IPCMetadata * meta =
+          IntelMemoryIPCManager::acquire_local_block(d.pool_id, own->block_id, d.ipc_uid);
+        if (!meta) {
+          throw std::runtime_error("intra-process block was reused before import (stale frame)");
+        }
         auto imported_block = std::make_unique<PoolBlock>();
         imported_block->ptr = reinterpret_cast<void *>(d.local_ptr);
         imported_block->size = d.size;
         imported_block->transport = TransportMode::LEVEL_ZERO_USM;
+        imported_block->ipc_meta = meta;
 
         auto result = std::make_unique<IntelBufferImpl<uint8_t>>(
           imported_block.release(), d.size, false, /*standalone=*/true);
@@ -394,11 +404,21 @@ std::unique_ptr<void, void (*)(void *)> IntelBufferBackend::from_descriptor_with
     } else {
       const auto & d = frame->dmabuf_desc;
       // Intra-process shortcut, only for a verified block of our own pool
-      if (own_published_pool_block(d.local_ptr, d.size, d.publisher_pid, d.pool_id, d.ipc_uid)) {
+      if (PoolBlock * own = own_published_pool_block(
+          d.local_ptr, d.size, d.publisher_pid, d.pool_id, d.ipc_uid))
+      {
+        // Hold the block like a remote consumer would, so the pool can't hand
+        // it to a new frame while this buffer lives; ~IntelBufferImpl releases it.
+        IPCMetadata * meta =
+          IntelMemoryIPCManager::acquire_local_block(d.pool_id, own->block_id, d.ipc_uid);
+        if (!meta) {
+          throw std::runtime_error("intra-process block was reused before import (stale frame)");
+        }
         auto imported_block = std::make_unique<PoolBlock>();
         imported_block->ptr = reinterpret_cast<void *>(d.local_ptr);
         imported_block->size = d.size;
         imported_block->transport = TransportMode::DMA_BUF;
+        imported_block->ipc_meta = meta;
 
         auto result = std::make_unique<IntelBufferImpl<uint8_t>>(
           imported_block.release(), d.size, false, /*standalone=*/true);

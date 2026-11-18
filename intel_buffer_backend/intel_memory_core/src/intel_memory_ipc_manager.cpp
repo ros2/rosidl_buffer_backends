@@ -41,9 +41,9 @@ std::string IntelMemoryIPCManager::register_block(PoolBlock * block)
   return DmaBufIpc::register_block(block);
 }
 
-std::string IntelMemoryIPCManager::register_fd(uint32_t block_id, int fd)
+std::string IntelMemoryIPCManager::register_fd(uint32_t block_id, int fd, bool take_ownership)
 {
-  return DmaBufIpc::register_fd(block_id, fd);
+  return DmaBufIpc::register_fd(block_id, fd, take_ownership);
 }
 
 namespace
@@ -56,6 +56,17 @@ bool register_holder_pid(IPCMetadata * meta)
     int32_t expected = 0;
     if (meta->holder_pids[i].compare_exchange_strong(
         expected, self, std::memory_order_acq_rel)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool holder_is_self(const IPCMetadata * meta)
+{
+  const int32_t self = static_cast<int32_t>(getpid());
+  for (const auto & holder : meta->holder_pids) {
+    if (holder.load(std::memory_order_acquire) == self) {
       return true;
     }
   }
@@ -98,7 +109,9 @@ IPCMetadata * open_shared_meta(int32_t pid, uint32_t block_id, uint32_t pool_id)
   }
 
   for (auto e = cache.begin(); e != cache.end(); ) {
-    if (!producer_process_alive(e->second.pid)) {
+    // A live buffer of this process releases its reference through this
+    // mapping, so keep it until that happens.
+    if (!producer_process_alive(e->second.pid) && !holder_is_self(e->second.meta)) {
       munmap(e->second.meta, sizeof(IPCMetadata));
       e = cache.erase(e);
     } else {
@@ -128,7 +141,7 @@ void evict_meta_pool(uint32_t pool_id)
 {
   auto & cache = meta_cache();
   for (auto it = cache.begin(); it != cache.end(); ) {
-    if (static_cast<uint32_t>(it->first >> 32) == pool_id) {
+    if (static_cast<uint32_t>(it->first >> 32) == pool_id && !holder_is_self(it->second.meta)) {
       munmap(it->second.meta, sizeof(IPCMetadata));
       it = cache.erase(it);
     } else {
@@ -139,8 +152,14 @@ void evict_meta_pool(uint32_t pool_id)
 
 bool acquire_and_validate(IPCMetadata * meta, uint64_t expected_uid, uint32_t block_id)
 {
-  meta->refcount.fetch_add(1, std::memory_order_acquire);
-  register_holder_pid(meta);
+  meta->refcount.fetch_add(1, std::memory_order_seq_cst);
+  if (!register_holder_pid(meta)) {
+    // release_block() only undoes references it can match to a holder slot.
+    meta->refcount.fetch_sub(1, std::memory_order_release);
+    RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
+      "block %u has %d holders already; import rejected", block_id, kMaxImportHolders);
+    return false;
+  }
 
   if (expected_uid != 0) {
     uint64_t live_uid = meta->uid.load(std::memory_order_acquire);
@@ -157,6 +176,23 @@ bool acquire_and_validate(IPCMetadata * meta, uint64_t expected_uid, uint32_t bl
   return true;
 }
 }  // namespace
+
+bool import_held_by_this_process(uint64_t key)
+{
+  auto & cache = meta_cache();
+  auto it = cache.find(key);
+  return it != cache.end() && holder_is_self(it->second.meta);
+}
+
+IPCMetadata * IntelMemoryIPCManager::acquire_local_block(
+  uint32_t pool_id, uint32_t block_id, uint64_t expected_uid)
+{
+  IPCMetadata * meta = open_shared_meta(static_cast<int32_t>(getpid()), block_id, pool_id);
+  if (!meta || !acquire_and_validate(meta, expected_uid, block_id)) {
+    return nullptr;
+  }
+  return meta;
+}
 
 IntelMemoryIPCManager::ImportResult IntelMemoryIPCManager::import_dmabuf_block(
   const std::string & socket_path,
@@ -176,6 +212,11 @@ IntelMemoryIPCManager::ImportResult IntelMemoryIPCManager::import_dmabuf_block(
     evict_meta_pool(pool_id);
     return ImportResult{nullptr, nullptr};
   }
+  if (!ipc_result.ptr) {
+    // import_block() logged the reason; take no reference on a failed import,
+    // since no buffer would exist to release it.
+    return ImportResult{nullptr, nullptr};
+  }
 
   IPCMetadata * meta = open_shared_meta(pid, block_id, pool_id);
   if (!meta) {
@@ -183,7 +224,7 @@ IntelMemoryIPCManager::ImportResult IntelMemoryIPCManager::import_dmabuf_block(
   }
 
   if (!acquire_and_validate(meta, expected_uid, block_id)) {
-    return ImportResult{nullptr, meta};   // stale; reference already undone
+    return ImportResult{nullptr, nullptr};   // stale; reference already undone
   }
   return ImportResult{ipc_result.ptr, meta, ipc_result.dmabuf_fd};
 }
@@ -280,6 +321,10 @@ IntelMemoryIPCManager::ImportResult IntelMemoryIPCManager::import_level_zero_blo
     evict_meta_pool(pool_id);
     return ImportResult{nullptr, nullptr};
   }
+  if (!ipc_result.ptr) {
+    // import_handle() logged the reason; take no reference on a failed import.
+    return ImportResult{nullptr, nullptr};
+  }
 
   IPCMetadata * meta = open_shared_meta(pid, block_id, pool_id);
   if (!meta) {
@@ -287,7 +332,7 @@ IntelMemoryIPCManager::ImportResult IntelMemoryIPCManager::import_level_zero_blo
     return ImportResult{ipc_result.ptr, nullptr, ipc_result.dmabuf_fd};
   }
   if (!acquire_and_validate(meta, expected_uid, block_id)) {
-    return ImportResult{nullptr, meta};
+    return ImportResult{nullptr, nullptr};
   }
   return ImportResult{ipc_result.ptr, meta, ipc_result.dmabuf_fd};
 }
