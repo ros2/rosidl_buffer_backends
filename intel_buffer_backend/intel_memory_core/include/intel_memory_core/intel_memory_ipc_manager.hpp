@@ -31,7 +31,7 @@ public:
 
   static std::string register_block(PoolBlock * block);
 
-  static std::string register_fd(uint32_t block_id, int fd);
+  static std::string register_fd(uint32_t block_id, int fd, bool take_ownership = false);
 
   struct ImportResult
   {
@@ -50,6 +50,15 @@ public:
     uint32_t pool_id);
 
   static void release_block(IPCMetadata * meta);
+
+  /// Intra-process consumer of a block of this process's own pool: take a
+  /// reference on it (through a separate mapping of its metadata, so it stays
+  /// valid even if the pool goes away first) and check it still holds the
+  /// frame published as `expected_uid`. Returns the metadata to release with
+  /// release_block(), or nullptr, holding no reference, if the block is stale
+  /// or the reference can't be taken.
+  static IPCMetadata * acquire_local_block(
+    uint32_t pool_id, uint32_t block_id, uint64_t expected_uid);
 
   /// Consumer side of an external-memmap ring slot (region = the whole mapped
   /// slot, see l0_external_memmap.hpp): take a reference on the slot, then check

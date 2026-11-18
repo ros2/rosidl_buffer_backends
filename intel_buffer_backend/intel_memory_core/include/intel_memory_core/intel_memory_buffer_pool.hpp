@@ -85,6 +85,8 @@ struct PoolConfig
 {
   size_t max_blocks{64};
   uint64_t grace_period_us{250000};    // 250 ms
+  // Longest the pool destructor waits for consumers to release their blocks.
+  uint64_t shutdown_timeout_us{2000000};  // 2 s
 
 };
 
