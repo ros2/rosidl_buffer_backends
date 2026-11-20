@@ -41,6 +41,7 @@ namespace
 constexpr const char * kPeerEnv = "CUDA_BUFFER_BACKEND_TEST_PEER";
 constexpr uint8_t kPeerGidByte = 0x6b;
 constexpr uint8_t kLatePeerGidByte = 0x6c;
+constexpr uint8_t kOtherNamespacePeerGidByte = 0x6d;
 
 // Register a subscription as a separate process on this host, tell the
 // parent, and stay registered until the parent closes done_fd. It is IPC
@@ -85,9 +86,11 @@ int run_peer(const char * args)
   return 0;
 }
 
-// Start this binary as a peer process whose uid is this one's plus uid_offset.
+// Start this binary as a peer process whose uid is this one's plus uid_offset, and that
+// registers in another PID namespace if other_pid_namespace is set.
 pid_t start_peer(
-  uint8_t gid_byte, bool late_ipc, uint32_t uid_offset, int ready[2], int done[2])
+  uint8_t gid_byte, bool late_ipc, uint32_t uid_offset, bool other_pid_namespace,
+  int ready[2], int done[2])
 {
   if (pipe(ready) != 0 || pipe(done) != 0) {
     return -1;
@@ -101,6 +104,11 @@ pid_t start_peer(
     "," + std::to_string(gid_byte) + "," + std::to_string(late_ipc ? 1 : 0),
     "CUDA_BUFFER_UID_OVERRIDE=" + std::to_string(manager->get_uid() + uid_offset),
   };
+  if (other_pid_namespace) {
+    extra_env.push_back(
+      "CUDA_BUFFER_PID_NAMESPACE_OVERRIDE=" +
+      std::to_string(host_endpoint_manager::pid_namespace() + 1));
+  }
   std::vector<char *> envp;
   for (auto & e : extra_env) {
     envp.push_back(e.data());
@@ -224,7 +232,7 @@ TEST_F(CudaBufferBackendTest, NoDescriptorForSameHostPeerUnderAnotherUid)
 
   int ready[2];
   int done[2];
-  pid_t pid = start_peer(kPeerGidByte, false, 1, ready, done);
+  pid_t pid = start_peer(kPeerGidByte, false, 1, false, ready, done);
   ASSERT_GE(pid, 0);
 
   char c = 0;
@@ -262,6 +270,57 @@ TEST_F(CudaBufferBackendTest, NoDescriptorForSameHostPeerUnderAnotherUid)
   EXPECT_EQ(nullptr, descriptor);
 }
 
+// Needs a CUDA device. A subscriber in another PID namespace on this host,
+// such as in another container, cannot open the CUDA events that order its
+// reads after the publisher's writes. It registers in its namespace's own
+// endpoint registry, so this process does not find it and gives it the host
+// path, although it has this process's uid and device.
+TEST_F(CudaBufferBackendTest, NoDescriptorForPeerInAnotherPidNamespace)
+{
+  if (!CudaBufferImpl<uint8_t>::is_pool_ipc_capable()) {
+    GTEST_SKIP() << "needs an IPC-capable CUDA device";
+  }
+
+  auto manager = HostEndpointManager::get_instance(0);
+
+  int ready[2];
+  int done[2];
+  pid_t pid = start_peer(kOtherNamespacePeerGidByte, false, 0, true, ready, done);
+  ASSERT_GE(pid, 0);
+
+  char c = 0;
+  const bool registered = read(ready[0], &c, 1) == 1;
+
+  host_endpoint_manager::LocalityInfo peer{};
+  std::shared_ptr<void> descriptor;
+  if (registered) {
+    rmw_gid_t gid;
+    gid.implementation_identifier = "";
+    std::memset(gid.data, kOtherNamespacePeerGidByte, RMW_GID_STORAGE_SIZE);
+    manager->refresh_from_remote();
+    peer = manager->query_endpoint_locality(gid);
+
+    rmw_topic_endpoint_info_t endpoint_info;
+    std::memset(&endpoint_info, 0, sizeof(endpoint_info));
+    endpoint_info.topic_type = "test_type";
+    endpoint_info.endpoint_type = RMW_ENDPOINT_SUBSCRIPTION;
+    std::memset(
+      endpoint_info.endpoint_gid, kOtherNamespacePeerGidByte, sizeof(endpoint_info.endpoint_gid));
+
+    CudaBufferImpl<uint8_t> impl(1024);
+    descriptor = backend_->create_descriptor_with_endpoint(&impl, endpoint_info);
+  }
+
+  close(ready[0]);
+  close(done[1]);
+  int status = 0;
+  waitpid(pid, &status, 0);
+
+  ASSERT_TRUE(registered);
+  EXPECT_FALSE(peer.found);
+  EXPECT_EQ(nullptr, descriptor);
+}
+
 // Needs a CUDA device. A subscriber found in the local endpoint registry
 // but not importable yet (it registered as not IPC capable) is cached by
 // create_descriptor_with_endpoint, like on_discovering_endpoint does. The
@@ -277,7 +336,7 @@ TEST_F(CudaBufferBackendTest, UncachedDecisionIsCached)
 
   int ready[2];
   int done[2];
-  pid_t pid = start_peer(kLatePeerGidByte, true, 0, ready, done);
+  pid_t pid = start_peer(kLatePeerGidByte, true, 0, false, ready, done);
   ASSERT_GE(pid, 0);
 
   rmw_topic_endpoint_info_t endpoint_info;

@@ -47,6 +47,10 @@ enum class EndpointLocality : uint8_t
   INTER_HOST = 3
 };
 
+/// Inode of this process's PID namespace, or 0 without /proc. Process IDs repeat across PID
+/// namespaces, so names and identities shared on the host carry it beside the process ID.
+CUDA_BUFFER_PUBLIC uint64_t pid_namespace();
+
 struct LocalityInfo
 {
   EndpointLocality locality;
