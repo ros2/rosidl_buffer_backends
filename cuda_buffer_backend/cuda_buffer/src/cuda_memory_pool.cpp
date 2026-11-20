@@ -152,6 +152,8 @@ VmmBlock * CudaMemoryPool::allocate(size_t byte_size)
         block->current_uid = 0;
         if (block->ipc_meta) {
           block->ipc_meta->publish_timestamp_us.store(0, std::memory_order_release);
+          // Invalidate the published UID so late takes of this block are dropped as stale.
+          block->ipc_meta->uid.store(0, std::memory_order_release);
         }
         return block;
       }
