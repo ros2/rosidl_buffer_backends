@@ -75,13 +75,9 @@ static bool sem_wait_timed(sem_t * sem, int timeout_sec = 2)
 
 constexpr size_t MAX_ENDPOINTS = 512;
 
-// Part of the registry's shared memory name, so that processes with another layout use their own.
-constexpr uint32_t REGISTRY_VERSION = 2;
-
 struct EndpointEntry
 {
   uint64_t instance_id;
-  uint64_t pid_namespace;
   uint8_t gid[RMW_GID_STORAGE_SIZE];
   EntityType entity_type;
   int32_t device_id;
@@ -108,12 +104,11 @@ static_assert(
   alignof(EndpointEntry) >= 8,
   "EndpointEntry must have at least 8-byte alignment");
 
-// Purges the entries of exited processes in this PID namespace: kill() sees no other.
-static size_t purge_dead_entries(EndpointRegistry * registry, uint64_t pid_namespace)
+static size_t purge_dead_entries(EndpointRegistry * registry)
 {
   size_t purged = 0;
   for (size_t i = 0; i < registry->num_entries; ++i) {
-    if (!registry->entries[i].active || registry->entries[i].pid_namespace != pid_namespace) {
+    if (!registry->entries[i].active) {
       continue;
     }
     pid_t pid = static_cast<pid_t>(registry->entries[i].instance_id >> 32);
@@ -174,7 +169,6 @@ uint64_t pid_namespace()
 HostEndpointManager::HostEndpointManager(size_t domain_id)
 : domain_id_(domain_id),
   instance_id_(0),
-  pid_namespace_(pid_namespace()),
   shm_fd_(-1),
   shm_ptr_(nullptr),
   shm_size_(0),
@@ -220,8 +214,14 @@ HostEndpointManager::HostEndpointManager(size_t domain_id)
   hostname_ = hostname_buf;
 
   uint32_t host_hash = hash_string(hostname_);
-  shm_name_ = "/ros2_hem_v" + std::to_string(REGISTRY_VERSION) + "_d" + std::to_string(domain_id) +
-    "_h" + std::to_string(host_hash);
+  // One registry per PID namespace. Entries are identified, and purged once their process has
+  // exited, by process ID, which kill() resolves only in its caller's PID namespace. Peers in
+  // another PID namespace, such as another container, are therefore never found and get the
+  // host path, which they need anyway: CUDA's interprocess events do not open across PID
+  // namespaces. A namespace that ends without a clean exit, such as a killed container, leaves
+  // only its own registry behind.
+  shm_name_ = "/ros2_hem_d" + std::to_string(domain_id) +
+    "_h" + std::to_string(host_hash) + "_n" + std::to_string(pid_namespace());
 
   shm_size_ = sizeof(EndpointRegistry);
 
@@ -261,7 +261,7 @@ HostEndpointManager::HostEndpointManager(size_t domain_id)
   }
 
   if (registry->version == 0) {
-    registry->version = REGISTRY_VERSION;
+    registry->version = 1;
     strncpy(registry->hostname, hostname_.c_str(), 255);
     registry->hostname[255] = '\0';
     registry->max_entries = MAX_ENDPOINTS;
@@ -276,7 +276,7 @@ HostEndpointManager::HostEndpointManager(size_t domain_id)
       "Initialized shared memory registry for domain %zu on host %s",
       domain_id, hostname_.c_str());
   } else {
-    size_t purged = purge_dead_entries(registry, pid_namespace_);
+    size_t purged = purge_dead_entries(registry);
     if (purged > 0) {
       RCUTILS_LOG_INFO_NAMED(
         "host_endpoint_manager",
@@ -309,13 +309,12 @@ HostEndpointManager::~HostEndpointManager()
 
       for (size_t i = 0; i < registry->num_entries; ++i) {
         if (registry->entries[i].active &&
-          registry->entries[i].instance_id == instance_id_ &&
-          registry->entries[i].pid_namespace == pid_namespace_)
+          registry->entries[i].instance_id == instance_id_)
         {
           registry->entries[i].active = false;
         }
       }
-      purge_dead_entries(registry, pid_namespace_);
+      purge_dead_entries(registry);
       should_unlink = !has_active_entries(registry);
 
       sem_post(sem);
@@ -392,7 +391,6 @@ bool HostEndpointManager::register_endpoint(
   }
 
   slot->instance_id = instance_id_;
-  slot->pid_namespace = pid_namespace_;
   memcpy(slot->gid, gid.data, RMW_GID_STORAGE_SIZE);
   slot->entity_type = type;
   slot->device_id = local_device_id_;
@@ -470,8 +468,8 @@ void HostEndpointManager::refresh_from_remote()
     const auto & entry = registry->entries[i];
 
     EndpointLocality locality =
-      entry.pid_namespace != pid_namespace_ ? EndpointLocality::INTER_PROCESS_OTHER_PID_NAMESPACE :
-      entry.instance_id == instance_id_ ? EndpointLocality::INTRA_PROCESS :
+      (entry.instance_id == instance_id_) ?
+      EndpointLocality::INTRA_PROCESS :
       EndpointLocality::INTER_PROCESS_SAME_HOST;
 
     updates[GidKey(entry.gid)] = {

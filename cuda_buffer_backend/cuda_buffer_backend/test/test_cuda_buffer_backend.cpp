@@ -272,8 +272,9 @@ TEST_F(CudaBufferBackendTest, NoDescriptorForSameHostPeerUnderAnotherUid)
 
 // Needs a CUDA device. A subscriber in another PID namespace on this host,
 // such as in another container, cannot open the CUDA events that order its
-// reads after the publisher's writes. It must get the host path, although it
-// has this process's uid and device.
+// reads after the publisher's writes. It registers in its namespace's own
+// endpoint registry, so this process does not find it and gives it the host
+// path, although it has this process's uid and device.
 TEST_F(CudaBufferBackendTest, NoDescriptorForPeerInAnotherPidNamespace)
 {
   if (!CudaBufferImpl<uint8_t>::is_pool_ipc_capable()) {
@@ -316,11 +317,7 @@ TEST_F(CudaBufferBackendTest, NoDescriptorForPeerInAnotherPidNamespace)
   waitpid(pid, &status, 0);
 
   ASSERT_TRUE(registered);
-  ASSERT_TRUE(peer.found);
-  EXPECT_TRUE(peer.ipc_capable);
-  EXPECT_EQ(
-    host_endpoint_manager::EndpointLocality::INTER_PROCESS_OTHER_PID_NAMESPACE, peer.locality);
-  EXPECT_EQ(manager->get_uid(), peer.uid);
+  EXPECT_FALSE(peer.found);
   EXPECT_EQ(nullptr, descriptor);
 }
 
