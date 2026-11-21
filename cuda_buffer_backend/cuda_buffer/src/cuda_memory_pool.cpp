@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "cuda_buffer/cuda_memory_pool.hpp"
+#include "cuda_buffer/cuda_buffer_handle.hpp"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -50,6 +51,10 @@ CudaMemoryPool::~CudaMemoryPool()
 
   std::lock_guard<std::mutex> lock(mutex_);
   for (auto & block : all_blocks_) {
+    if (block->local_event) {
+      CUDA_CHECK_NOTHROW(cudaEventDestroy(block->local_event), (void)0);
+      block->local_event = nullptr;
+    }
     if (block->ipc_meta) {
       munmap(block->ipc_meta, sizeof(IPCMetadata));
       block->ipc_meta = nullptr;
@@ -247,6 +252,18 @@ VmmBlock * CudaMemoryPool::create_block(size_t aligned_size)
   }
 
   if (ipc_capable_) {
+    cudaError_t event_error = cudaEventCreateWithFlags(
+      &block->local_event, CUDA_BUFFER_MINIMUM_EVENT_FLAGS);
+    if (event_error != cudaSuccess) {
+      RCUTILS_LOG_WARN_ONCE_NAMED(
+        "cuda_memory_pool",
+        "Failed to create a same-process CUDA synchronization event: %s (%s); "
+        "same-process transport will synchronize the publish path",
+        cudaGetErrorName(event_error), cudaGetErrorString(event_error));
+      block->local_event = nullptr;
+      (void)cudaGetLastError();
+    }
+
     int fd = -1;
     r = cuMemExportToShareableHandle(
       &fd, block->handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0);

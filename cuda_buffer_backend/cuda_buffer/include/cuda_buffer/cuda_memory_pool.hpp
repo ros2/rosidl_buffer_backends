@@ -51,6 +51,7 @@ struct VmmBlock
   size_t size{0};
   int exported_fd{-1};
   uint32_t block_id{0};
+  cudaEvent_t local_event{nullptr};
 
   IPCMetadata * ipc_meta{nullptr};
   int shm_fd{-1};
