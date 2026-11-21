@@ -85,6 +85,23 @@ mod typed {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn buffer_outlives_the_stream_used_to_write_it() {
+        let context = CudaContext::new(0).unwrap();
+        let values = [1u8, 2, 3, 4];
+        let mut buffer = allocate_buffer(values.len()).unwrap();
+        {
+            let stream = context.new_stream().unwrap();
+            from_output_buffer::<u8>(&mut buffer, &stream)
+                .unwrap()
+                .copy_from_host(&values)
+                .unwrap();
+        }
+        // The stream is destroyed. Host copies and clones must not use it.
+        assert_eq!(buffer.to_vec().unwrap(), values);
+        assert_eq!(buffer.try_clone().unwrap().to_vec().unwrap(), values);
+    }
+
+    #[test]
     fn native_clone_and_equality_use_backend_storage() {
         let context = CudaContext::new(0).unwrap();
         for stream in [context.default_stream(), context.new_stream().unwrap()] {

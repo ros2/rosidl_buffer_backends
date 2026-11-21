@@ -82,8 +82,17 @@ std::unique_ptr<CxxWriteHandle> acquire_write(
 {
   return checked(error, [&]() {
              auto cuda_stream = reinterpret_cast<cudaStream_t>(stream);
-             return std::make_unique<CxxWriteHandle>(
-        cuda_buffer_backend::from_output_buffer(buffer, cuda_stream), buffer.size());
+             auto handle = cuda_buffer_backend::from_output_buffer(buffer, cuda_stream);
+             // from_output_buffer also stores the stream in the buffer for later host
+             // copies and clones. Rust callers own the stream and may destroy it once
+             // the handle is released, so the buffer must not keep it. Later operations
+             // use the backend's internal stream and still wait on the write event.
+             auto * impl = dynamic_cast<cuda_buffer_backend::CudaBufferImpl<uint8_t> *>(
+               buffer.get_impl());
+             if (impl) {
+               impl->set_stream(nullptr);
+             }
+             return std::make_unique<CxxWriteHandle>(std::move(handle), buffer.size());
     });
 }
 
