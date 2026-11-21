@@ -24,6 +24,7 @@ add_library(${PROJECT_NAME} SHARED
   src/cuda_buffer_ipc_manager.cpp
   src/cuda_memory_pool.cpp
   src/host_endpoint_manager.cpp
+  src/vmm_buffer.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
