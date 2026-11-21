@@ -36,6 +36,7 @@
 
 #include "cuda_buffer/cuda_buffer.hpp"
 #include "cuda_buffer/cuda_buffer_api.hpp"
+#include "cuda_buffer/cuda_memory_pool.hpp"
 #include "rosidl_buffer/buffer.hpp"
 
 extern char ** environ;
@@ -659,6 +660,34 @@ TEST(CudaBufferPoolTest, IsPoolIpcCapableDoesNotThrow)
   EXPECT_EQ(after_first, after_second);
   RecordProperty("ipc_capable", capable ? "true" : "false");
   RecordProperty("pool_warnings", after_second);
+}
+
+// A reused block must not keep the UID of its last publication.
+TEST(CudaMemoryPoolTest, ReusedBlockInvalidatesPublishedUid)
+{
+  auto pool = std::make_shared<cuda_buffer_backend::CudaMemoryPool>();
+  if (pool->create() != CUDA_SUCCESS) {
+    GTEST_SKIP() << "no CUDA device with VMM support: this test needs a GPU";
+  }
+  constexpr size_t kSize = 1 << 20;
+  cuda_buffer_backend::VmmBlock * block = pool->allocate(kSize);
+  ASSERT_NE(block, nullptr);
+  if (block->ipc_meta == nullptr) {
+    pool->free(block);
+    GTEST_SKIP() << "the pool is not IPC capable here: blocks have no shared UID";
+  }
+  const uint64_t uid = pool->assign_uid(block);  // published
+  ASSERT_NE(uid, 0u);
+  ASSERT_EQ(block->ipc_meta->uid.load(), uid);
+  pool->free(block);
+
+  // No subscriber has imported it: after the grace period the block is reused.
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  cuda_buffer_backend::VmmBlock * reused = pool->allocate(kSize);
+  ASSERT_EQ(reused, block);
+  EXPECT_NE(reused->ipc_meta->uid.load(), uid)
+    << "a late import of the old descriptor would pass the UID check";
+  pool->free(reused);
 }
 
 int main(int argc, char ** argv)
