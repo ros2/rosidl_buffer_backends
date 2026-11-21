@@ -137,6 +137,9 @@ private:
       for (auto & work : completed) {
         release(work);
       }
+      // Destroy the entries, and any pool reference their deleters hold,
+      // before taking the queue mutex again.
+      completed.clear();
       lock.lock();
 
       if (has_pending && !queue_.empty()) {

@@ -248,6 +248,12 @@ CudaMemoryPool::BlockReadiness CudaMemoryPool::get_block_readiness(VmmBlock * bl
     return BlockReadiness::Pending;
   }
 
+  // A held lease already keeps the block from being reused, so leave the
+  // generation open for other consumers of the same publication.
+  if (block->ipc_meta->refcount.load(std::memory_order_seq_cst) > 0) {
+    return BlockReadiness::Pending;
+  }
+
   // UID zero closes the generation. A consumer either holds a counted lease
   // before this store, or observes a closed/stale UID before opening its IPC
   // event. Using one atomic for identity and state also prevents a close/reopen
