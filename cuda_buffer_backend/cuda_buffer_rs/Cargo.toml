@@ -20,12 +20,12 @@ cuda-core = ["dep:cuda-core"]
 
 [dependencies]
 cuda-core = { version = "=0.3.1", optional = true }
-cxx = "=1.0.202"
+cxx = "=1.0.198"
 rosidl_buffer_rs = "0.1"
 rosidl_runtime_rs = { version = "0.7", features = ["rosidl-buffer"] }
 
 [build-dependencies]
-cxx-build = "=1.0.202"
+cxx-build = "=1.0.198"
 
 [dev-dependencies]
 rclrs = { version = "0.8", features = ["serde", "rosidl-buffer"] }
