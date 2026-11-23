@@ -18,6 +18,8 @@
   <depend>cuda-toolkit</depend>
   <depend>cuda_buffer</depend>
   <depend>rosidl_buffer</depend>
+  <!-- Requires _share_buffer_from_capsule. Add version_gte once its introducing
+       release is assigned; the existing 5.3.1 version does not guarantee it. -->
   <depend>rosidl_buffer_py</depend>
 
   <exec_depend>cuda_buffer_backend</exec_depend>

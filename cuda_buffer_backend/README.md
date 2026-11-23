@@ -333,6 +333,31 @@ The RMW layer calls `on_discovering_endpoint()` for each subscriber to decide be
 
 The publisher's pool checks a shared-memory refcount before recycling a block, ensuring all IPC subscribers have released their handles.
 
+## Python shared-ownership dependency
+
+`cuda_buffer_py` requires a build of `rosidl_buffer_py` that provides
+`_share_buffer_from_capsule`. Build/install the companion rosidl shared-ownership
+change before using this CUDA package. An introducing release version has not
+yet been assigned, so `package.xml` retains its unversioned dependency; add a
+minimum version when that release is known. Older builds fail with an explicit
+dependency error; there is no fallback to the raw-pointer transfer.
+
+The native handoff uses an owning capsule named exactly
+`rosidl_buffer.shared_buffer`, whose payload is a heap-allocated
+`std::shared_ptr<rosidl::Buffer<uint8_t>>` holder. The capsule deletes the holder,
+and the receiver copies its existing shared ownership. The holder remains
+guarded by RAII until capsule construction succeeds, making failures before or
+after receiver execution safe. The capsule name uses static storage.
+
+Both extensions require compatible C++ ABIs, including the buffer definition,
+standard library, and compiler ABI settings. Capsule name validation identifies
+the agreed contract; it cannot verify arbitrary pointers or compiler
+compatibility. Python's capsule API does not make `shared_ptr` ABI-independent.
+
+This changes only ownership transfer. Python-side promotion, the four factory
+and transfer methods, handle lifetimes, and the native single-write policy remain
+the same. The package and its ownership regression tests do not require Torch.
+
 ## License
 
 Apache-2.0

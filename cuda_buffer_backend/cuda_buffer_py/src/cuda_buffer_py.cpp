@@ -23,6 +23,7 @@
 
 #include "cuda_buffer/cuda_buffer_api.hpp"
 #include "rosidl_buffer/buffer.hpp"
+#include "share_buffer.hpp"
 
 namespace py = pybind11;
 
@@ -31,9 +32,7 @@ namespace
 
 py::object wrap_cuda_buffer(std::unique_ptr<rosidl::Buffer<uint8_t>> buffer)
 {
-  py::module_ rosidl_buffer_module = py::module_::import("rosidl_buffer._rosidl_buffer_py");
-  return rosidl_buffer_module.attr("_take_buffer_from_ptr")(
-    reinterpret_cast<uintptr_t>(buffer.release()));
+  return cuda_buffer_py::detail::share_buffer(std::move(buffer));
 }
 
 py::object allocate_python_buffer(size_t size)
