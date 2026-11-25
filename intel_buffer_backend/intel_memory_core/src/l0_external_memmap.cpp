@@ -39,6 +39,15 @@ namespace intel_memory_core
 namespace
 {
 
+// Required to map read-only host memory with the external-memmap extension.
+// Older Level Zero headers (e.g. Ubuntu 26.04's libze-dev 1.28) lack the
+// enumerator; the spec defines it as ZE_BIT(4), and the driver reads the bit.
+#ifdef INTEL_MEMORY_CORE_ZE_HAS_MEM_READ_ONLY
+constexpr ze_host_mem_alloc_flags_t kHostMemAllocReadOnly = ZE_HOST_MEM_ALLOC_FLAG_MEM_READ_ONLY;
+#else
+constexpr ze_host_mem_alloc_flags_t kHostMemAllocReadOnly = ZE_BIT(4);
+#endif
+
 struct MemMapL0State {
   ze_driver_handle_t driver{nullptr};
   ze_context_handle_t ctx{nullptr};
@@ -166,7 +175,7 @@ void * L0ExternalMemMap::map(void * ptr, size_t size, bool read_only)
   host_desc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
   host_desc.pNext = &memmap_desc;
   if (read_only) {
-    host_desc.flags = ZE_HOST_MEM_ALLOC_FLAG_MEM_READ_ONLY;
+    host_desc.flags = kHostMemAllocReadOnly;
   }
 
   void * usm_ptr = nullptr;

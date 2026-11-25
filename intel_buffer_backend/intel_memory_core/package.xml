@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>intel_memory_core</name>
+  <version>0.1.0</version>
+  <description>ROS-independent core of the Intel buffer backend: memory pool,
+  cross-process IPC (Level Zero USM, DMA-BUF, Level Zero external memmap) and
+  shared-memory refcounting. Plain CMake package; this manifest only lets
+  colcon, rosdep and bloom resolve its system dependencies.</description>
+
+  <maintainer email="ramkumar.k@intel.com">Ramkumar K</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+
+  <!-- Level Zero headers and loader (libze1). Required to build. -->
+  <depend>libze-dev</depend>
+  <!-- OpenCL, for importing DMA-BUFs into the GPU without a copy. -->
+  <build_depend>opencl-headers</build_depend>
+  <depend>ocl-icd-opencl-dev</depend>
+
+  <!-- Intel GPU user-space drivers (compute-runtime): Level Zero and OpenCL.
+       Without them the pool falls back to DMA-BUF and GPU import is disabled. -->
+  <exec_depend>libze-intel-gpu1</exec_depend>
+  <exec_depend>intel-opencl-icd</exec_depend>
+
+  <test_depend>gtest</test_depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

@@ -268,17 +268,15 @@ PoolBlock * IntelMemoryBufferPool::find_block_for_ptr(void * ptr) const
 std::string IntelMemoryBufferPool::register_block_for_ipc(PoolBlock * block)
 {
   if (transport_mode_ == TransportMode::LEVEL_ZERO_USM) {
-    // Each export_fd() call creates a new fd: only export for a block that
-    // isn't served yet, and hand the fd to the server, which closes it.
-    std::string path = DmaBufIpc::registered_socket_path(block->block_id);
-    if (!path.empty()) {
-      return path;
-    }
+    // export_fd() returns the dma-buf fd contained in the block's cached IPC
+    // handle: the same fd on every call, owned by the driver and closed by
+    // zeMemPutIpcHandle() in destroy_block(), after the server is stopped.
+    // So it must not be closed here or by the server.
     int fd = -1;
     if (!L0UsmIpc::export_fd(block, fd)) {
       return "";
     }
-    return IntelMemoryIPCManager::register_fd(block->block_id, fd, /*take_ownership=*/true);
+    return IntelMemoryIPCManager::register_fd(block->block_id, fd);
   }
 
   if (!dmabuf_capable_ || block->dmabuf_fd < 0) {

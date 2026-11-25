@@ -20,6 +20,9 @@
   <depend>rclcpp_components</depend>
   <depend>vision_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>libopencv-dev</depend>
+  <!-- OpenVINO (for openvino_pipeline_node) is optional and not declared: it
+       has no rosdep key. Install it as described in README.md. -->
 
   <exec_depend>rviz2</exec_depend>
   <exec_depend>ros2launch</exec_depend>

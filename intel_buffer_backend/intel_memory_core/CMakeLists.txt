@@ -41,31 +41,48 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
-# --- Intel Level Zero (optional; DMA-BUF path works without it) ---
-find_library(LEVEL_ZERO_LIB NAMES ze_loader
-  PATHS /usr/lib /usr/local/lib /usr/lib/x86_64-linux-gnu)
-find_path(LEVEL_ZERO_INCLUDE_DIR NAMES level_zero/ze_api.h
-  PATHS /usr/include /usr/local/include)
+# --- Intel Level Zero (required) ---
+# Headers + loader: `rosdep install` (key libze-dev) or `apt install libze-dev`.
+# A non-system install is found through CMAKE_PREFIX_PATH. Only the build needs
+# Level Zero; at runtime the pool falls back to DMA-BUF when no Level Zero
+# GPU driver is present.
+find_path(LEVEL_ZERO_INCLUDE_DIR NAMES level_zero/ze_api.h)
+find_library(LEVEL_ZERO_LIB NAMES ze_loader)
 if(NOT LEVEL_ZERO_LIB OR NOT LEVEL_ZERO_INCLUDE_DIR)
-  message(WARNING "Level Zero not found — intel_memory_core builds without L0 USM support")
-  set(LEVEL_ZERO_LIB "")
-  set(LEVEL_ZERO_INCLUDE_DIR "")
+  message(FATAL_ERROR
+    "Level Zero development files not found (level_zero/ze_api.h, libze_loader). "
+    "Install them with `rosdep install --from-paths <src> --ignore-src -y` or "
+    "`sudo apt install libze-dev`, or point CMAKE_PREFIX_PATH at a Level Zero install.")
+endif()
+# The external-memmap transport needs the ze_external_memmap_sysmem extension.
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES ${LEVEL_ZERO_INCLUDE_DIR})
+check_cxx_source_compiles("
+  #include <level_zero/ze_api.h>
+  int main() { return static_cast<int>(ZE_STRUCTURE_TYPE_EXTERNAL_MEMMAP_SYSMEM_EXT_DESC); }"
+  INTEL_MEMORY_CORE_LEVEL_ZERO_HAS_EXTERNAL_MEMMAP)
+# Newer than e.g. Ubuntu 26.04's libze-dev 1.28; l0_external_memmap.cpp falls
+# back to the flag's spec value when the headers lack it.
+check_cxx_source_compiles("
+  #include <level_zero/ze_api.h>
+  int main() { return static_cast<int>(ZE_HOST_MEM_ALLOC_FLAG_MEM_READ_ONLY); }"
+  INTEL_MEMORY_CORE_LEVEL_ZERO_HAS_MEM_READ_ONLY)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(NOT INTEL_MEMORY_CORE_LEVEL_ZERO_HAS_EXTERNAL_MEMMAP)
+  message(FATAL_ERROR
+    "The Level Zero headers in ${LEVEL_ZERO_INCLUDE_DIR} are too old: they lack "
+    "ZE_STRUCTURE_TYPE_EXTERNAL_MEMMAP_SYSMEM_EXT_DESC. Install a newer libze-dev.")
 endif()
 
 # --- OpenCL (optional; enables GPU zero-copy dma_buf import) ---
 # Used only by src/gpu_cl_dmabuf_import.cpp to wrap a dma_buf fd as a cl_mem via
 # cl_khr_external_memory_dma_buf. When absent, that source compiles a stub and
 # import_dmabuf_as_cl_mem() returns nullptr (the consumer then falls back to a
-# host-staged ov::Tensor). oneAPI ships CL headers + libOpenCL under its prefix.
-find_library(OPENCL_LIB NAMES OpenCL
-  PATHS /usr/lib /usr/local/lib /usr/lib/x86_64-linux-gnu
-        /opt/intel/oneapi/2026.1/lib)
-find_path(OPENCL_INCLUDE_DIR NAMES CL/cl.h
-  PATHS /usr/include /usr/local/include /opt/intel/oneapi/2026.1/include)
-if(NOT OPENCL_LIB OR NOT OPENCL_INCLUDE_DIR)
+# host-staged ov::Tensor). rosdep installs opencl-headers + ocl-icd-opencl-dev;
+# another OpenCL SDK (e.g. oneAPI) is found through CMAKE_PREFIX_PATH.
+find_package(OpenCL QUIET)
+if(NOT OpenCL_FOUND)
   message(WARNING "OpenCL not found — intel_memory_core builds without GPU dma_buf import")
-  set(OPENCL_LIB "")
-  set(OPENCL_INCLUDE_DIR "")
 endif()
 
 add_library(intel_memory_core SHARED
@@ -76,8 +93,14 @@ add_library(intel_memory_core SHARED
   src/dmabuf_ipc.cpp
   src/gpu_cl_dmabuf_import.cpp
 )
-if(OPENCL_LIB AND OPENCL_INCLUDE_DIR)
+if(OpenCL_FOUND)
   target_compile_definitions(intel_memory_core PRIVATE INTEL_MEMORY_CORE_HAVE_OPENCL)
+  # OpenCL headers are a private build detail (only gpu_cl_dmabuf_import.cpp
+  # uses them); the public header stays OpenCL-free via opaque void* handles.
+  target_link_libraries(intel_memory_core PRIVATE OpenCL::OpenCL)
+endif()
+if(INTEL_MEMORY_CORE_LEVEL_ZERO_HAS_MEM_READ_ONLY)
+  target_compile_definitions(intel_memory_core PRIVATE INTEL_MEMORY_CORE_ZE_HAS_MEM_READ_ONLY)
 endif()
 add_library(intel_memory_core::intel_memory_core ALIAS intel_memory_core)
 
@@ -86,9 +109,6 @@ target_include_directories(intel_memory_core PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   ${LEVEL_ZERO_INCLUDE_DIR}
 )
-# OpenCL headers are a private build detail (only gpu_cl_dmabuf_import.cpp uses
-# them); the public header stays OpenCL-free via opaque void* handles.
-target_include_directories(intel_memory_core PRIVATE ${OPENCL_INCLUDE_DIR})
 
 # rt: shm_open/shm_unlink. pthread: std::thread in the IPC accept loops.
 find_package(Threads REQUIRED)
@@ -97,7 +117,6 @@ target_link_libraries(intel_memory_core PUBLIC
   rt
   Threads::Threads
 )
-target_link_libraries(intel_memory_core PRIVATE ${OPENCL_LIB})
 
 # --- Standalone example (built with -DINTEL_MEMORY_CORE_BUILD_EXAMPLE=ON) ---
 option(INTEL_MEMORY_CORE_BUILD_EXAMPLE "Build the non-ROS usage example" OFF)
@@ -147,12 +166,13 @@ install(FILES
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/intel_memory_core
 )
 
-# --- Unit tests (built with -DBUILD_TESTING=ON, colcon's default) ---
-option(INTEL_MEMORY_CORE_BUILD_TESTS "Build unit tests" ${BUILD_TESTING})
-if(INTEL_MEMORY_CORE_BUILD_TESTS)
+# --- Unit tests ---
+# CTest's BUILD_TESTING switch (default ON, like ament packages) so
+# `colcon test` runs them; configure with -DBUILD_TESTING=OFF to skip GTest.
+include(CTest)
+if(BUILD_TESTING)
   find_package(GTest REQUIRED)
   include(GoogleTest)
-  enable_testing()
 
   add_executable(intel_memory_core_test
     test/test_dmabuf_ipc_free_functions.cpp

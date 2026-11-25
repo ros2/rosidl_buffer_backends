@@ -31,7 +31,7 @@ public:
 
   static std::string register_block(PoolBlock * block);
 
-  static std::string register_fd(uint32_t block_id, int fd, bool take_ownership = false);
+  static std::string register_fd(uint32_t block_id, int fd);
 
   struct ImportResult
   {

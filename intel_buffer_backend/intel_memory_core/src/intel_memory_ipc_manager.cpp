@@ -41,9 +41,9 @@ std::string IntelMemoryIPCManager::register_block(PoolBlock * block)
   return DmaBufIpc::register_block(block);
 }
 
-std::string IntelMemoryIPCManager::register_fd(uint32_t block_id, int fd, bool take_ownership)
+std::string IntelMemoryIPCManager::register_fd(uint32_t block_id, int fd)
 {
-  return DmaBufIpc::register_fd(block_id, fd, take_ownership);
+  return DmaBufIpc::register_fd(block_id, fd);
 }
 
 namespace

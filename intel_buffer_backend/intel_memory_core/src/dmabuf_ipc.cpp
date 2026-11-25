@@ -42,8 +42,6 @@ struct RegisteredBlockInfo {
   int server_socket{-1};
   std::string socket_path;
   std::thread server_thread;
-  int shared_fd{-1};
-  bool owns_fd{false};   // close shared_fd when the server stops
 };
 
 // Unblock the server thread's accept(), join it and remove the socket.
@@ -55,9 +53,6 @@ static void stop_server(RegisteredBlockInfo & info)
   }
   close(info.server_socket);
   unlink(info.socket_path.c_str());
-  if (info.owns_fd && info.shared_fd >= 0) {
-    close(info.shared_fd);
-  }
 }
 
 struct RegisteredBlocks : std::unordered_map<uint32_t, RegisteredBlockInfo>
@@ -71,28 +66,13 @@ struct RegisteredBlocks : std::unordered_map<uint32_t, RegisteredBlockInfo>
 };
 static RegisteredBlocks s_registered_blocks;
 
-std::string DmaBufIpc::registered_socket_path(uint32_t block_id)
+std::string DmaBufIpc::register_fd(uint32_t block_id, int fd)
 {
   std::lock_guard<std::mutex> lock(s_blocks_mutex);
-  auto it = s_registered_blocks.find(block_id);
-  return it != s_registered_blocks.end() ? it->second.socket_path : std::string();
-}
-
-std::string DmaBufIpc::register_fd(uint32_t block_id, int fd, bool take_ownership)
-{
-  std::lock_guard<std::mutex> lock(s_blocks_mutex);
-
-  // fd is closed on every path that doesn't hand it to a new server.
-  auto drop_fd = [&]() {
-      if (take_ownership && fd >= 0) {
-        close(fd);
-      }
-    };
 
   // Check if already registered
   auto it = s_registered_blocks.find(block_id);
   if (it != s_registered_blocks.end()) {
-    drop_fd();
     return it->second.socket_path;
   }
 
@@ -107,7 +87,6 @@ std::string DmaBufIpc::register_fd(uint32_t block_id, int fd, bool take_ownershi
   if (sock_fd < 0) {
     RCUTILS_LOG_ERROR_NAMED("dmabuf_ipc",
       "socket() failed (errno=%d)", errno);
-    drop_fd();
     return "";
   }
 
@@ -119,14 +98,12 @@ std::string DmaBufIpc::register_fd(uint32_t block_id, int fd, bool take_ownershi
     RCUTILS_LOG_ERROR_NAMED("dmabuf_ipc",
       "bind() failed for %s (errno=%d)", socket_path.c_str(), errno);
     close(sock_fd);
-    drop_fd();
     return "";
   }
 
   if (listen(sock_fd, 16) < 0) {
     close(sock_fd);
     unlink(socket_path.c_str());
-    drop_fd();
     return "";
   }
 
@@ -167,7 +144,7 @@ std::string DmaBufIpc::register_fd(uint32_t block_id, int fd, bool take_ownershi
   });
 
   s_registered_blocks[block_id] =
-    RegisteredBlockInfo{sock_fd, socket_path, std::move(server_thread), fd, take_ownership};
+    RegisteredBlockInfo{sock_fd, socket_path, std::move(server_thread)};
   return socket_path;
 }
 

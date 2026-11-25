@@ -10,13 +10,52 @@ processes using 3 transport paths:
 
 ## Build
 
-Requires a ROS 2 Rolling source workspace; see [Building ROS 2 on Ubuntu](https://docs.ros.org/en/rolling/Get-Started/Installation/Ubuntu-Install-Debs.html)
-for the canonical setup. After cloning this repo into your workspace's src/ directory:
+Supported platform: Ubuntu 26.04 (amd64) with ROS 2 Lyrical or Rolling
+([installation](https://docs.ros.org/en/rolling/Installing.html)), on an Intel
+Core Ultra system with an integrated GPU.
+
+All dependencies are installed by `rosdep`. From the workspace that has this
+repository cloned under `src/`, install them and build:
 
 ```bash
+cd ~/ros2_ws
+source /opt/ros/$ROS_DISTRO/setup.bash
+rosdep update
+rosdep install --from-paths src/rosidl_buffer_backends/intel_buffer_backend --ignore-src -y
 colcon build --symlink-install --packages-up-to intel_buffer_backend
-source install/setup.sh
+source install/setup.bash
 ```
+
+`rosdep` installs, among the ROS packages:
+
+| Package | Used for |
+|---|---|
+| `libze-dev` | Level Zero headers and loader (required to build `intel_memory_core`) |
+| `libze-intel-gpu1`, `intel-opencl-icd` | Intel GPU user-space drivers (Level Zero USM transport, GPU DMA-BUF import) |
+| `opencl-headers`, `ocl-icd-opencl-dev` | GPU zero-copy import of DMA-BUFs (optional at build time) |
+| `gtest` | `intel_memory_core` unit tests |
+
+`intel_memory_core` stays a plain CMake library usable without ROS. Its
+`package.xml` exists only so `rosdep`, `colcon` and `bloom` can resolve its
+dependencies.
+
+### Newer Intel hardware
+
+The Ubuntu archive's GPU driver can lag behind the newest platforms. If the
+Level Zero probe doesn't find the GPU (see [Verify](#verify) below), install the
+latest compute-runtime from Intel's graphics PPA, as described in the
+[Intel client GPU guide](https://dgpu-docs.intel.com/driver/client/overview.html),
+then restart the nodes; no rebuild is needed:
+
+```bash
+sudo add-apt-repository -y ppa:kobuk-team/intel-graphics
+sudo apt update && sudo apt upgrade -y   # upgrades libze1, libze-intel-gpu1, intel-opencl-icd
+```
+
+NPU inference in the sample pipeline also needs the NPU driver
+(`intel-level-zero-npu`, from the
+[linux-npu-driver releases](https://github.com/intel/linux-npu-driver/releases)).
+The buffer backend itself doesn't use the NPU driver.
 
 ## Test
 
@@ -24,6 +63,20 @@ source install/setup.sh
 colcon test --packages-select intel_memory_core intel_buffer intel_buffer_backend intel_buffer_backend_msgs
 colcon test-result --verbose
 ```
+
+Complete the [DMA-BUF setup](#dma-buf-setup-required) first. Tests for transports
+the machine can't provide are skipped.
+
+## Verify
+
+The pool logs which transport it selected when the first node using it starts:
+
+| Log line | Meaning |
+|---|---|
+| `Level Zero USM (device ordinal N); zero-copy across CPU/iGPU/NPU ...` | Level Zero GPU driver found; L0 USM transport active |
+| `Using DMA-BUF transport for cross-process zero-copy` | No usable Level Zero GPU driver (or `INTEL_MEMORY_BUFFER_TYPE=dmabuf`); DMA-BUF transport active |
+| `DMA-BUF unavailable: open(/dev/dma_heap/system, O_RDWR) failed ...` | The [DMA-BUF setup](#dma-buf-setup-required) is missing |
+| `Neither Level Zero nor DMA-BUF available; ...` | No zero-copy transport; messages are sent as regular CPU copies |
 
 ## Packages
 

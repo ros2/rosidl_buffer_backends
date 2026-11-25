@@ -41,7 +41,17 @@ find_package(rclcpp_components REQUIRED)
 find_package(vision_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(OpenVINO REQUIRED COMPONENTS Runtime)
+# OpenVINO has no rosdep key (Intel ships it from its own apt repository), so
+# it is optional: without it only openvino_pipeline_node is skipped. See README.
+find_package(OpenVINO QUIET COMPONENTS Runtime)
+if(OpenVINO_FOUND)
+  message(STATUS "OpenVINO ${OpenVINO_VERSION} found: building openvino_pipeline_node")
+else()
+  message(WARNING
+    "OpenVINO not found: openvino_pipeline_node is not built, so the OpenVINO "
+    "launch file cannot run. Install OpenVINO (see test_intel_buffer_backend/README.md) "
+    "and rebuild to enable it.")
+endif()
 
 # --- Camera publisher (camera/video → sensor_msgs/Image backed by IntelBuffer) ---
 add_library(video_publisher_component SHARED
@@ -64,26 +74,36 @@ rclcpp_components_register_node(video_publisher_component
 )
 
 # --- OpenVINO inference (sensor_msgs/Image → IntelBuffer → GPU/NPU) ---
-add_library(openvino_pipeline_component SHARED
-  src/openvino_pipeline_node.cpp
-)
-target_include_directories(openvino_pipeline_component PRIVATE
-  ${OpenCV_INCLUDE_DIRS}
-)
-target_link_libraries(openvino_pipeline_component
-  intel_buffer::intel_buffer
-  intel_memory_core::intel_memory_core
-  rclcpp::rclcpp
-  rclcpp_components::component
-  ${sensor_msgs_TARGETS}
-  ${vision_msgs_TARGETS}
-  ${OpenCV_LIBRARIES}
-  openvino::runtime
-)
-rclcpp_components_register_node(openvino_pipeline_component
-  PLUGIN "UsmOpenvinoPipeline"
-  EXECUTABLE openvino_pipeline_node
-)
+if(OpenVINO_FOUND)
+  add_library(openvino_pipeline_component SHARED
+    src/openvino_pipeline_node.cpp
+  )
+  target_include_directories(openvino_pipeline_component PRIVATE
+    ${OpenCV_INCLUDE_DIRS}
+  )
+  target_link_libraries(openvino_pipeline_component
+    intel_buffer::intel_buffer
+    intel_memory_core::intel_memory_core
+    rclcpp::rclcpp
+    rclcpp_components::component
+    ${sensor_msgs_TARGETS}
+    ${vision_msgs_TARGETS}
+    ${OpenCV_LIBRARIES}
+    openvino::runtime
+  )
+  rclcpp_components_register_node(openvino_pipeline_component
+    PLUGIN "UsmOpenvinoPipeline"
+    EXECUTABLE openvino_pipeline_node
+  )
+  install(TARGETS openvino_pipeline_component
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+  )
+  install(TARGETS openvino_pipeline_node
+    DESTINATION lib/${PROJECT_NAME}
+  )
+endif()
 
 # --- Detection visualizer (draws boxes, publishes Image for RViz2) ---
 add_library(detection_visualizer_component SHARED
@@ -108,7 +128,6 @@ rclcpp_components_register_node(detection_visualizer_component
 
 install(TARGETS
   video_publisher_component
-  openvino_pipeline_component
   detection_visualizer_component
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -117,7 +136,6 @@ install(TARGETS
 
 install(TARGETS
   video_publisher_node
-  openvino_pipeline_node
   detection_visualizer_node
   DESTINATION lib/${PROJECT_NAME}
 )

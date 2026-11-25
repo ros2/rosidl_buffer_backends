@@ -55,36 +55,42 @@ flowchart LR
 
 ## Test the workload
 
-Build the ROS2 workload
+### Install OpenVINO
+
+The OpenVINO inference node needs the OpenVINO runtime. It has no rosdep key, so
+install it from Intel's apt repository
+([instructions](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-apt.html)).
+Without it the package still builds, along with the camera publisher, the
+visualizer and the end-to-end test, but `openvino_pipeline_node` is skipped
+(CMake prints a warning) and the launch file below can't run.
+
+### Build
+
+Follow the [build steps](../README.md#build) of the backend (registering the rosdep
+rules and running `rosdep install`), then build the sample package:
 
 ```bash
-cd ..
-git clone https://github.com/ros2/rosidl
-colcon build --packages-select \
-    intel_memory_core \
-    intel_buffer_backend_msgs \
-    intel_buffer \
-    intel_buffer_backend \
-    test_intel_buffer_backend \
-    --cmake-args -DRMW_IMPLEMENTATION=rmw_fastrtps_cpp
+colcon build --symlink-install --packages-up-to test_intel_buffer_backend
+source install/setup.bash
 ```
 
-Complete the [pre-requisite](../README.md#pre-requisite) before running the workload
+### Run
 
-To run the pipeline with USB camera
-Add the current $USER to `render` and `video` group 
+Complete the [DMA-BUF setup](../README.md#dma-buf-setup-required) first. To use a
+USB camera, also add your user to the `video` group (log out and back in
+afterwards):
 
 ```bash
-sudo sudo usermod -aG render,video $USER
+sudo usermod -aG render,video $USER
 ```
 
 Launch the ROS2 workload
 
 ```bash
-ros2 launch test_intel_memory_buffer_backend test_intel_buffer_backend_openvino.launch.py \
+ros2 launch test_intel_buffer_backend test_intel_buffer_backend_openvino.launch.py \
   source_mode:=<simulated/camera> \
   video_path:=<mp4-video-path> \
-  transport_mode:=<L0_USM/DAM_BUF> \
+  transport_mode:=<L0_USM/DMA_BUF/EXTERNAL_MEMMAP> \
   device:=<GPU/NPU> \
   model:=<model xml file path>
 ```
