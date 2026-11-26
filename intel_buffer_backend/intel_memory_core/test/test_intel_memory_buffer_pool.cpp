@@ -12,17 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <chrono>
+#include <atomic>
 #include <memory>
+#include <set>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
+#include "intel_memory_core/dmabuf_ipc.hpp"
 #include "intel_memory_core/intel_memory_buffer_pool.hpp"
 
 using intel_memory_core::IntelMemoryBufferPool;
+using intel_memory_core::PoolBlock;
 using intel_memory_core::PoolConfig;
 using intel_memory_core::TransportMode;
 
@@ -252,4 +260,215 @@ TEST(IntelMemoryBufferPoolReuse, ReusedBlockInvalidatesItsPublishedUid)
       << " reuse left the previous frame's uid valid";
     pool->release(reused);
   }
+}
+
+// --- Application-owned dma-bufs (wrap_external_dmabuf) ------------------------
+
+namespace
+{
+int make_memfd(size_t size)
+{
+  const int fd = memfd_create("imc_external_dmabuf", 0);
+  if (fd >= 0 && ftruncate(fd, static_cast<off_t>(size)) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+}  // namespace
+
+TEST(IntelMemoryBufferPool, ExternalDmabufGetsItsOwnBlockIdAndRefcountMetadata)
+{
+  auto pool = make_initialized_pool();
+  PoolBlock * pool_block = pool->allocate(4096);
+  const int fd = make_memfd(4096);
+  ASSERT_GE(fd, 0);
+
+  PoolBlock * external = pool->wrap_external_dmabuf(fd, 4096);
+  ASSERT_NE(external, nullptr);
+  EXPECT_TRUE(external->external);
+  EXPECT_NE(external->ipc_meta, nullptr);
+  if (pool_block) {
+    EXPECT_NE(external->block_id, pool_block->block_id);
+  }
+  // Same buffer, same block; one producer reference per wrap.
+  EXPECT_EQ(pool->wrap_external_dmabuf(fd, 4096), external);
+  EXPECT_EQ(external->producer_refs, 2u);
+  EXPECT_EQ(pool->wrap_external_dmabuf(fd, 8192), nullptr);   // larger than the buffer
+  pool->release(external);
+  pool->release(external);
+  EXPECT_EQ(external->producer_refs, 0u);
+  close(fd);
+}
+
+TEST(IntelMemoryBufferPool, ExternalDmabufEachWrapPublishesUnderANewUid)
+{
+  auto pool = make_initialized_pool();
+  const int fd = make_memfd(4096);
+  ASSERT_GE(fd, 0);
+
+  PoolBlock * block = pool->wrap_external_dmabuf(fd, 4096);
+  ASSERT_NE(block, nullptr);
+  const uint64_t first = pool->assign_uid(block);
+  pool->release(block);
+  ASSERT_TRUE(pool->try_reclaim_external_dmabuf(fd));
+  ASSERT_EQ(pool->wrap_external_dmabuf(fd, 4096), block);
+  EXPECT_NE(pool->assign_uid(block), first);
+  pool->release(block);
+  close(fd);
+}
+
+TEST(IntelMemoryBufferPool, ExternalDmabufNeverImportedDescriptorIsGivenUpAfterGracePeriod)
+{
+  PoolConfig config;
+  config.grace_period_us = 2000;
+  auto pool = make_initialized_pool(config);
+  const int fd = make_memfd(4096);
+  ASSERT_GE(fd, 0);
+
+  PoolBlock * block = pool->wrap_external_dmabuf(fd, 4096);
+  ASSERT_NE(block, nullptr);
+  ASSERT_NE(block->ipc_meta, nullptr);
+  pool->assign_uid(block);
+  block->ipc_meta->pending_imports.store(1);   // descriptor issued, never imported
+  pool->release(block);
+
+  EXPECT_FALSE(pool->try_reclaim_external_dmabuf(fd));
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_TRUE(pool->try_reclaim_external_dmabuf(fd));
+  EXPECT_EQ(block->ipc_meta->pending_imports.load(), 0);
+  close(fd);
+}
+
+TEST(IntelMemoryBufferPool, ExternalDmabufRegistryIsBoundedAndEvictsOnlyUnusedBuffers)
+{
+  PoolConfig config;
+  config.max_blocks = 1;
+  auto pool = make_initialized_pool(config);
+  const int fd_a = make_memfd(4096);
+  const int fd_b = make_memfd(4096);
+  ASSERT_GE(fd_a, 0);
+  ASSERT_GE(fd_b, 0);
+
+  PoolBlock * a = pool->wrap_external_dmabuf(fd_a, 4096);
+  ASSERT_NE(a, nullptr);
+  EXPECT_EQ(pool->wrap_external_dmabuf(fd_b, 4096), nullptr);   // a is still wrapped
+  pool->release(a);
+  PoolBlock * b = pool->wrap_external_dmabuf(fd_b, 4096);
+  EXPECT_NE(b, nullptr);   // a was evicted
+  if (b) {
+    pool->release(b);
+  }
+  close(fd_a);
+  close(fd_b);
+}
+
+// Every publisher thread shares the process-wide pool. Concurrent publishes of
+// one block agree on a single uid (the one subscribers validate against), and
+// of distinct blocks never share one.
+TEST(IntelMemoryBufferPool, ConcurrentAssignUidAgreesPerBlockAndIsUniqueAcrossBlocks)
+{
+  auto pool = std::make_shared<IntelMemoryBufferPool>();
+  ASSERT_TRUE(pool->initialize());
+  constexpr int kThreads = 8;
+  constexpr int kRounds = 200;
+
+  std::vector<PoolBlock *> blocks;
+  for (int i = 0; i < kThreads; ++i) {
+    PoolBlock * block = pool->allocate(4096);
+    if (!block || !block->ipc_meta) {
+      GTEST_SKIP() << "no pool block with refcount metadata on this machine";
+    }
+    blocks.push_back(block);
+  }
+  PoolBlock * shared = blocks[0];
+
+  for (int round = 0; round < kRounds; ++round) {
+    for (PoolBlock * block : blocks) {
+      block->current_uid = 0;   // a new frame in every block
+    }
+    std::atomic<bool> go{false};
+    std::vector<uint64_t> shared_uids(kThreads), own_uids(kThreads);
+    std::vector<std::thread> threads;
+    for (int t = 0; t < kThreads; ++t) {
+      threads.emplace_back([&, t] {
+          while (!go.load()) {}
+          shared_uids[t] = pool->assign_uid(shared);
+          own_uids[t] = t == 0 ? shared_uids[t] : pool->assign_uid(blocks[t]);
+        });
+    }
+    go.store(true);
+    for (auto & thread : threads) {
+      thread.join();
+    }
+    for (int t = 0; t < kThreads; ++t) {
+      ASSERT_EQ(shared_uids[t], shared->ipc_meta->uid.load()) << "round " << round;
+    }
+    EXPECT_EQ(std::set<uint64_t>(own_uids.begin(), own_uids.end()).size(), size_t{kThreads});
+  }
+  for (PoolBlock * block : blocks) {
+    pool->release(block);
+  }
+}
+
+// Two containers sharing /dev/shm (e.g. --ipc=host) have separate PID
+// namespaces, so another producer can run under this process's pid. Creating
+// this pool's metadata must never replace that producer's segment.
+TEST(IntelMemoryBufferPool, MetadataNeverReplacesAnotherProducersSegmentWithTheSamePid)
+{
+  auto pool = std::make_shared<IntelMemoryBufferPool>();
+  ASSERT_TRUE(pool->initialize());
+  // The other producer's metadata for its block 0, named the way it would be
+  // without this pool's id.
+  const std::string other = "/intel_memory_buffer_" + std::to_string(getpid()) + "_0";
+  const int fd = shm_open(other.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+  ASSERT_GE(fd, 0) << "stale " << other << " in /dev/shm";
+  ASSERT_EQ(ftruncate(fd, sizeof(intel_memory_core::IPCMetadata)), 0);
+  auto * theirs = static_cast<intel_memory_core::IPCMetadata *>(mmap(nullptr,
+    sizeof(intel_memory_core::IPCMetadata), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+  ASSERT_NE(theirs, MAP_FAILED);
+  theirs->uid.store(0xc0ffee);
+  struct stat before{};
+  ASSERT_EQ(fstat(fd, &before), 0);
+
+  PoolBlock * block = pool->allocate(4096);
+  ASSERT_NE(block, nullptr);
+  ASSERT_EQ(block->block_id, 0u);
+
+  const int again = shm_open(other.c_str(), O_RDWR, 0);
+  struct stat after{};
+  EXPECT_TRUE(again >= 0 && fstat(again, &after) == 0 && after.st_ino == before.st_ino) <<
+    "the other producer's segment was unlinked and replaced";
+  EXPECT_EQ(theirs->uid.load(), 0xc0ffeeu);
+  EXPECT_NE(block->ipc_meta, theirs);
+  if (again >= 0) {close(again);}
+  pool->release(block);
+  munmap(theirs, sizeof(intel_memory_core::IPCMetadata));
+  close(fd);
+  shm_unlink(other.c_str());
+}
+
+// Even a segment at this pool's own name (left by another process) is never
+// replaced: the block then has no metadata and is sent as a copy.
+TEST(IntelMemoryBufferPool, MetadataIsNotCreatedOverAnExistingSegment)
+{
+  auto pool = std::make_shared<IntelMemoryBufferPool>();
+  ASSERT_TRUE(pool->initialize());
+  const std::string name = intel_memory_core::ipc_meta_shm_name(getpid(), pool->pool_id(), 0);
+  const int fd = shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+  ASSERT_GE(fd, 0);
+  struct stat before{};
+  ASSERT_EQ(fstat(fd, &before), 0);
+
+  PoolBlock * block = pool->allocate(4096);
+  ASSERT_NE(block, nullptr);
+  ASSERT_EQ(block->block_id, 0u);
+  EXPECT_EQ(block->ipc_meta, nullptr);
+  struct stat after{};
+  const int again = shm_open(name.c_str(), O_RDWR, 0);
+  EXPECT_TRUE(again >= 0 && fstat(again, &after) == 0 && after.st_ino == before.st_ino);
+  if (again >= 0) {close(again);}
+  pool->release(block);
+  close(fd);
+  shm_unlink(name.c_str());
 }

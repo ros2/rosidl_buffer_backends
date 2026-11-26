@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <new>
 #include <string>
@@ -77,6 +78,18 @@ inline rosidl::Buffer<uint8_t> allocate_buffer(size_t count)
 
 inline rosidl::Buffer<uint8_t> wrap_dmabuf(int dmabuf_fd, size_t size, bool owns_fd = true)
 {
+  auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
+  if (PoolBlock * shared = pool ? pool->wrap_external_dmabuf(dmabuf_fd, size) : nullptr) {
+    if (owns_fd) {
+      close(dmabuf_fd);
+    }
+    // owns_block: the buffer's destructor drops its producer reference.
+    return rosidl::Buffer<uint8_t>(
+      std::make_unique<IntelBufferImpl<uint8_t>>(shared, size, /*owns_block=*/true));
+  }
+
+  // No pool (or the buffer could not be registered): a process-local mapping.
+  // Without refcount metadata it is sent to other processes as a copy.
   void * ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, dmabuf_fd, 0);
   if (ptr == MAP_FAILED) {
     if (owns_fd) {
@@ -97,9 +110,28 @@ inline rosidl::Buffer<uint8_t> wrap_dmabuf(int dmabuf_fd, size_t size, bool owns
   return rosidl::Buffer<uint8_t>(std::move(impl));
 }
 
-/// Wrap an existing Level Zero USM pointer as a zero-copy buffer.
+/// Before overwriting or re-queueing a dma-buf passed to wrap_dmabuf(): true if
+/// no buffer of this process still wraps it and every subscriber has imported
+/// and released its last published frame (frames never imported are given up
+/// after the pool's grace period). Late descriptors of that frame are then
+/// rejected by subscribers. False: keep the buffer and retry later.
 
-inline rosidl::Buffer<uint8_t> wrap_usm_ptr(void * usm_ptr, size_t size, bool owns_ptr = false)
+inline bool try_reclaim_dmabuf(int dmabuf_fd)
+{
+  auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
+  return !pool || pool->try_reclaim_external_dmabuf(dmabuf_fd);
+}
+
+/// Wrap an existing Level Zero USM pointer as a zero-copy buffer.
+///
+/// This backend can't free usm_ptr: it doesn't know the context or allocator
+/// that made it. To hand the pointer over, pass a deleter; it is called once,
+/// with usm_ptr, when the buffer (and so every message holding it) is
+/// destroyed, and must not throw. E.g. `[ctx](void * p) {zeMemFree(ctx, p);}`.
+/// Without one, the caller keeps ownership and must outlive the buffer.
+
+inline rosidl::Buffer<uint8_t> wrap_usm_ptr(
+  void * usm_ptr, size_t size, std::function<void(void *)> deleter = nullptr)
 {
   auto block = std::make_unique<PoolBlock>();
   block->ptr = usm_ptr;
@@ -107,7 +139,7 @@ inline rosidl::Buffer<uint8_t> wrap_usm_ptr(void * usm_ptr, size_t size, bool ow
   block->transport = TransportMode::LEVEL_ZERO_USM;
 
   auto impl = std::make_unique<IntelBufferImpl<uint8_t>>(
-    block.release(), size, owns_ptr, /*standalone=*/true);
+    block.release(), size, std::move(deleter));
   return rosidl::Buffer<uint8_t>(std::move(impl));
 }
 
@@ -159,8 +191,10 @@ public:
     mapped_.assign(slots, false);
     generation_.assign(slots, nullptr);
     for (size_t i = 0; i < slots; ++i) {
-      const std::string name = name_prefix + "_" + std::to_string(getpid()) +
-        "_" + std::to_string(ring_id) + "_" + std::to_string(i);
+      // A pid repeats across PID namespaces sharing /dev/shm; the instance id doesn't.
+      const std::string name = name_prefix + "_" + std::to_string(getpid()) + "_" +
+        std::to_string(intel_memory_core::process_instance_id()) + "_" +
+        std::to_string(ring_id) + "_" + std::to_string(i);
 
       if (!shm_[i].create(name, bytes + kExternalMemMapTrailerBytes)) {
         close();

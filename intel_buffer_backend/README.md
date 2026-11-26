@@ -125,12 +125,19 @@ publisher->publish(msg);
 
 `libcamhal`/V4L2 hands back a `dma_buf` fd that already points at the pages
 the ISP wrote the frame into. `wrap_dmabuf()` does not touch the pixel
-data at all — it only records the fd so the descriptor can be shared:
+data at all — it only records the fd so the descriptor can be shared.
+Subscribers read the camera's buffer in place, so give it back to the driver
+only once `try_reclaim_dmabuf()` reports that no subscriber still holds it:
 
 ```cpp
 int dmabuf_fd = camera.dequeue_buffer();  // VIDIOC_DQBUF + EXPBUF
-msg.data = intel_buffer_backend::wrap_dmabuf(dmabuf_fd, frame_bytes, /*owns_fd=*/true);
+msg.data = intel_buffer_backend::wrap_dmabuf(dmabuf_fd, frame_bytes, /*owns_fd=*/false);
 publisher->publish(msg);
+
+// Later, e.g. before each dequeue; retry while it returns false.
+if (intel_buffer_backend::try_reclaim_dmabuf(dmabuf_fd)) {
+  camera.requeue_buffer(dmabuf_fd);       // VIDIOC_QBUF
+}
 ```
 
 ### Publisher — NPU inference output already in USM (zero-copy)
@@ -138,12 +145,15 @@ publisher->publish(msg);
 A pre-processing or detection model running on the NPU (via OpenVINO/Level
 Zero) writes its output tensor directly into a `zeMemAllocHost()` region.
 `wrap_usm_ptr()` publishes that same allocation as-is — nothing is staged
-back through the CPU first:
+back through the CPU first. The backend can't free the pointer (it doesn't
+know the allocator), so pass a deleter to hand it over; it runs once the
+buffer and every message holding it are gone:
 
 ```cpp
 void * tensor_ptr = npu_context.malloc_host<uint8_t>(tensor_bytes);
 npu_model.infer_into(tensor_ptr);  // NPU writes the output tensor in place
-msg.data = intel_buffer_backend::wrap_usm_ptr(tensor_ptr, tensor_bytes, /*owns_ptr=*/false);
+msg.data = intel_buffer_backend::wrap_usm_ptr(tensor_ptr, tensor_bytes,
+  [&npu_context](void * p) {npu_context.free(p);});
 publisher->publish(msg);
 ```
 

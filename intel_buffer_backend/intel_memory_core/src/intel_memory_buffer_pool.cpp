@@ -65,6 +65,12 @@ IntelMemoryBufferPool::~IntelMemoryBufferPool()
           break;
         }
       }
+      for (auto & [key, block] : external_blocks_) {
+        if (!is_block_ready(block.get())) {
+          all_ready = false;
+          break;
+        }
+      }
     }
     if (all_ready) {
       break;
@@ -82,7 +88,11 @@ IntelMemoryBufferPool::~IntelMemoryBufferPool()
   for (auto & block : all_blocks_) {
     destroy_block(block.get());
   }
+  for (auto & [key, block] : external_blocks_) {
+    destroy_block(block.get());
+  }
   all_blocks_.clear();
+  external_blocks_.clear();
   free_blocks_.clear();
 
   // Destroy Level Zero context
@@ -160,6 +170,7 @@ PoolBlock * IntelMemoryBufferPool::allocate(size_t byte_size)
         block->current_uid = 0;
         if (block->ipc_meta) {
           block->ipc_meta->publish_timestamp_us.store(0, std::memory_order_release);
+          block->ipc_meta->pending_imports.store(0, std::memory_order_release);
         }
         return block;
       }
@@ -183,6 +194,7 @@ PoolBlock * IntelMemoryBufferPool::allocate(size_t byte_size)
           block->current_uid = 0;
           if (block->ipc_meta) {
             block->ipc_meta->publish_timestamp_us.store(0, std::memory_order_release);
+            block->ipc_meta->pending_imports.store(0, std::memory_order_release);
           }
           return block;
         }
@@ -203,11 +215,133 @@ PoolBlock * IntelMemoryBufferPool::allocate(size_t byte_size)
 void IntelMemoryBufferPool::release(PoolBlock * block)
 {
   std::lock_guard<std::mutex> lock(mutex_);
+  if (block->external) {
+    if (block->producer_refs > 0) {
+      --block->producer_refs;
+    }
+    return;
+  }
   free_blocks_[block->size].push_back(block);
+}
+
+namespace
+{
+// Identity of the dma-buf behind fd: every dma-buf has its own inode, which
+// can't be reused while the pool holds its dup of the buffer.
+bool dmabuf_key(int fd, std::string & key)
+{
+  struct stat st{};
+  if (fd < 0 || fstat(fd, &st) != 0) {
+    return false;
+  }
+  key = std::to_string(st.st_dev) + ":" + std::to_string(st.st_ino);
+  return true;
+}
+}  // namespace
+
+PoolBlock * IntelMemoryBufferPool::wrap_external_dmabuf(int fd, size_t size)
+{
+  std::string key;
+  if (!dmabuf_key(fd, key)) {
+    return nullptr;
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  PoolBlock * block = nullptr;
+  auto it = external_blocks_.find(key);
+  if (it != external_blocks_.end()) {
+    block = it->second.get();
+  } else {
+    if (!make_room_for_external_block()) {
+      RCUTILS_LOG_WARN_NAMED("intel_memory_buffer_pool",
+        "%zu external dma-bufs registered and all in use; buffer not shared",
+        config_.max_blocks);
+      return nullptr;
+    }
+    const int own_fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (own_fd < 0) {
+      return nullptr;
+    }
+    const int64_t bytes = DmaBufIpc::buffer_size(own_fd);
+    lseek(own_fd, 0, SEEK_SET);
+    void * ptr = bytes > 0 ?
+      mmap(nullptr, static_cast<size_t>(bytes), PROT_READ | PROT_WRITE, MAP_SHARED, own_fd, 0) :
+      MAP_FAILED;
+    if (ptr == MAP_FAILED) {
+      close(own_fd);
+      return nullptr;
+    }
+    auto created = std::make_unique<PoolBlock>();
+    created->ptr = ptr;
+    created->size = static_cast<size_t>(bytes);
+    created->block_id = next_block_id_++;
+    created->transport = TransportMode::DMA_BUF;
+    created->dmabuf_fd = own_fd;
+    created->external = true;
+    create_ipc_meta(created.get());
+    block = created.get();
+    external_blocks_.emplace(key, std::move(created));
+  }
+
+  if (size > block->size) {
+    return nullptr;
+  }
+  block->current_uid = 0;   // a new frame: assign_uid() issues a new uid
+  ++block->producer_refs;
+  return block;
+}
+
+bool IntelMemoryBufferPool::try_reclaim_external_dmabuf(int fd)
+{
+  std::string key;
+  if (!dmabuf_key(fd, key)) {
+    return true;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = external_blocks_.find(key);
+  if (it == external_blocks_.end()) {
+    return true;
+  }
+  PoolBlock * block = it->second.get();
+  if (block->producer_refs > 0) {
+    return false;
+  }
+  if (!block->ipc_meta) {
+    return true;
+  }
+  // Subscribers take their reference before they stop counting as pending, so
+  // reading pending first never misses a reader.
+  const bool imports_pending =
+    block->ipc_meta->pending_imports.load(std::memory_order_seq_cst) > 0;
+  if (!claim_for_reuse(block, /*honor_grace_period=*/imports_pending)) {
+    return false;
+  }
+  block->ipc_meta->pending_imports.store(0, std::memory_order_seq_cst);
+  block->current_uid = 0;
+  return true;
+}
+
+bool IntelMemoryBufferPool::make_room_for_external_block()
+{
+  if (external_blocks_.size() < config_.max_blocks) {
+    return true;
+  }
+  for (auto it = external_blocks_.begin(); it != external_blocks_.end(); ++it) {
+    PoolBlock * block = it->second.get();
+    if (block->producer_refs == 0 && claim_for_reuse(block, /*honor_grace_period=*/true)) {
+      destroy_block(block);
+      external_blocks_.erase(it);
+      return true;
+    }
+  }
+  return false;
 }
 
 uint64_t IntelMemoryBufferPool::assign_uid(PoolBlock * block)
 {
+  // Publisher threads share the pool: uid_rng_ and current_uid are guarded like
+  // the other block state, and a block published concurrently gets one uid.
+  std::lock_guard<std::mutex> lock(mutex_);
   if (block->current_uid != 0) {
     return block->current_uid;
   }
@@ -257,6 +391,12 @@ PoolBlock * IntelMemoryBufferPool::find_block_for_ptr(void * ptr) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   for (auto & block : all_blocks_) {
+    uint8_t * base = static_cast<uint8_t *>(block->ptr);
+    if (ptr >= base && ptr < base + block->size) {
+      return block.get();
+    }
+  }
+  for (auto & [key, block] : external_blocks_) {
     uint8_t * base = static_cast<uint8_t *>(block->ptr);
     if (ptr >= base && ptr < base + block->size) {
       return block.get();
@@ -506,11 +646,26 @@ PoolBlock * IntelMemoryBufferPool::create_block(size_t aligned_size)
     }
   }
 
-  // Create shared IPC metadata segment
-  std::string shm_name = "/intel_memory_buffer_" + std::to_string(getpid()) +
-    "_" + std::to_string(block->block_id);
-  shm_unlink(shm_name.c_str());
-  int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0666);
+  create_ipc_meta(block.get());
+
+  PoolBlock * ptr = block.get();
+  all_blocks_.push_back(std::move(block));
+  return ptr;
+}
+
+// Shared refcount / uid segment consumers open by ipc_meta_shm_name(). Left
+// unset if it can't be created; descriptors are then not offered for the block.
+// O_EXCL: a segment already at the name is another producer's, never replaced.
+void IntelMemoryBufferPool::create_ipc_meta(PoolBlock * block)
+{
+  std::string shm_name = ipc_meta_shm_name(
+    static_cast<int32_t>(getpid()), pool_id_, block->block_id);
+  int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0666);
+  if (shm_fd < 0) {
+    RCUTILS_LOG_WARN_NAMED("intel_memory_buffer_pool",
+      "shm_open(%s) failed (errno=%d: %s); block %u is sent as a copy",
+      shm_name.c_str(), errno, std::strerror(errno), block->block_id);
+  }
   if (shm_fd >= 0) {
     if (ftruncate(shm_fd, sizeof(IPCMetadata)) == 0) {
       void * meta_ptr = mmap(nullptr, sizeof(IPCMetadata),
@@ -528,10 +683,6 @@ PoolBlock * IntelMemoryBufferPool::create_block(size_t aligned_size)
       shm_unlink(shm_name.c_str());
     }
   }
-
-  PoolBlock * ptr = block.get();
-  all_blocks_.push_back(std::move(block));
-  return ptr;
 }
 
 void IntelMemoryBufferPool::destroy_block(PoolBlock * block)

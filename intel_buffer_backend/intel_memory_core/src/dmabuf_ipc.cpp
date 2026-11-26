@@ -26,6 +26,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -36,6 +37,15 @@
 
 namespace intel_memory_core
 {
+
+uint64_t process_instance_id()
+{
+  static const uint64_t id = [] {
+      std::random_device rd;
+      return (static_cast<uint64_t>(rd()) << 32) | rd();
+    }();
+  return id;
+}
 
 static std::mutex s_blocks_mutex;
 struct RegisteredBlockInfo {
@@ -76,12 +86,12 @@ std::string DmaBufIpc::register_fd(uint32_t block_id, int fd)
     return it->second.socket_path;
   }
 
-  // Create AF_UNIX socket for fd export
+  // Create AF_UNIX socket for fd export. Unique to this process instance, so an
+  // existing file at the path is never this process's: bind() then fails and the
+  // block is sent as a copy, rather than taking over another process's socket.
   std::string socket_path = "/tmp/intel_memory_buffer_" +
-    std::to_string(getpid()) + "_blk" +
+    std::to_string(getpid()) + "_" + std::to_string(process_instance_id()) + "_blk" +
     std::to_string(block_id) + ".sock";
-
-  unlink(socket_path.c_str());
 
   int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (sock_fd < 0) {
@@ -299,7 +309,8 @@ IpcImportResult DmaBufIpc::import_block(
   const uint64_t key = import_cache_key(pool_id, block_id);
   auto it = cache.find(key);
   if (it != cache.end()) {
-    if (size > it->second.size) {
+    // Same bounds as a fresh import: a size the mapping holds, and not zero.
+    if (size == 0 || size > it->second.size) {
       RCUTILS_LOG_WARN_NAMED("dmabuf_ipc",
         "dmabuf import rejected: %lu bytes requested, block %u is mapped with %lu",
         static_cast<unsigned long>(size), block_id,

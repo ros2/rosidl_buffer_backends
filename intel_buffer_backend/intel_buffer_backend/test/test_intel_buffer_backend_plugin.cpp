@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -19,6 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <unordered_map>
 
@@ -45,7 +47,7 @@ rmw_topic_endpoint_info_t make_endpoint(uint32_t gid_seed)
   return info;
 }
 
-// The "|host=..." entry this backend advertises (it is the last key).
+// The trailing "|host=...|pidns=..." entries this backend advertises.
 std::string local_host_entry(const IntelBufferBackend & backend)
 {
   std::string meta = backend.get_backend_metadata();
@@ -83,6 +85,19 @@ TEST(IntelBufferBackend, BackendMetadataAlwaysAdvertisesExtmemmap)
   EXPECT_EQ(meta.find_first_of(",;"), std::string::npos);
 }
 
+TEST(IntelBufferBackend, BackendMetadataAdvertisesActivePoolTransport)
+{
+  IntelBufferBackend backend;
+  auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
+  if (!pool || !IntelBufferImpl<uint8_t>::is_ipc_capable()) {
+    GTEST_SKIP() << "No IPC-capable pool transport on this machine";
+  }
+  const std::string expected =
+    pool->transport_mode() == intel_buffer_backend::TransportMode::LEVEL_ZERO_USM ?
+    "transport=l0usm|" : "transport=dmabuf|";
+  EXPECT_EQ(backend.get_backend_metadata().rfind(expected, 0), 0u);
+}
+
 TEST(IntelBufferBackendDiscovery, MissingBackendKeyIsIncompatible)
 {
   IntelBufferBackend backend;
@@ -114,6 +129,28 @@ TEST(IntelBufferBackendDiscovery, PeerOnAnotherHostIsIncompatible)
 
   auto result = backend.on_discovering_endpoint(endpoint, {}, supported);
   EXPECT_FALSE(result.first);
+}
+
+// The "|host=..." entry alone, without the entries that follow it.
+std::string local_host_only(const IntelBufferBackend & backend)
+{
+  const std::string entry = local_host_entry(backend);
+  return entry.substr(0, entry.find('|', 1));
+}
+
+// A same-host peer in another PID namespace (another container) can't share
+// pid-tracked references with this process: it gets the CPU-based message.
+TEST(IntelBufferBackendDiscovery, PeerInAnotherPidNamespaceIsIncompatible)
+{
+  IntelBufferBackend backend;
+  std::unordered_map<std::string, std::string> supported;
+  supported["intel_buffer"] =
+    "transport=dmabuf|device=0|extmemmap=1" + local_host_only(backend) + "|pidns=1";
+  EXPECT_FALSE(backend.on_discovering_endpoint(make_endpoint(16), {}, supported).first);
+
+  supported["intel_buffer"] = "transport=dmabuf|device=0|extmemmap=1" + local_host_only(backend);
+  EXPECT_FALSE(backend.on_discovering_endpoint(make_endpoint(17), {}, supported).first) <<
+    "a peer that doesn't advertise its PID namespace";
 }
 
 TEST(IntelBufferBackendDiscovery, PeerWithoutHostIsIncompatible)
@@ -211,6 +248,71 @@ TEST(IntelBufferBackendDescriptor, ExternalMemmapBlockWithoutShmNameReturnsNullp
   IntelBufferImpl<uint8_t> impl(block.release(), 1, false);
   auto descriptor = backend.create_descriptor_with_endpoint(&impl, endpoint);
   EXPECT_EQ(descriptor, nullptr);
+}
+
+// GIDs of different endpoints can share bytes (a DDS GUID prefix holds the
+// vendor and host id); each endpoint keeps its own zero-copy decision regardless.
+TEST(IntelBufferBackendDescriptor, IpcDecisionIsPerEndpointNotPerGidPrefix)
+{
+  IntelBufferBackend backend;
+  auto compatible = make_endpoint(0x010f1234);
+  auto incompatible = make_endpoint(0x010f1234);
+  compatible.endpoint_gid[15] = 1;
+  incompatible.endpoint_gid[15] = 2;
+
+  std::unordered_map<std::string, std::string> same_host;
+  same_host["intel_buffer"] = "transport=extmemmap|extmemmap=1" + local_host_entry(backend);
+  std::unordered_map<std::string, std::string> other_host;
+  other_host["intel_buffer"] =
+    "transport=extmemmap|extmemmap=1|host=00000000-0000-0000-0000-000000000000";
+  ASSERT_TRUE(backend.on_discovering_endpoint(compatible, {}, same_host).first);
+  ASSERT_FALSE(backend.on_discovering_endpoint(incompatible, {}, other_host).first);
+
+  auto block = std::make_unique<intel_buffer_backend::PoolBlock>();
+  uint8_t byte = 0;
+  block->ptr = &byte;
+  block->size = 1;
+  block->transport = intel_buffer_backend::TransportMode::EXTERNAL_MEMMAP;
+  block->extmap_shm_name = "/not_used";
+  IntelBufferImpl<uint8_t> impl(block.release(), 1, false);
+
+  EXPECT_NE(backend.create_descriptor_with_endpoint(&impl, compatible), nullptr);
+  EXPECT_EQ(backend.create_descriptor_with_endpoint(&impl, incompatible), nullptr);
+}
+
+// A peer without Level Zero (it advertises dmabuf) cannot import Level Zero USM
+// handles, but can still take transports that need no Level Zero.
+TEST(IntelBufferBackendDescriptor, LevelZeroBlockNotSentToPeerWithoutLevelZero)
+{
+  IntelBufferBackend backend;
+  auto endpoint = make_endpoint(16);
+  std::unordered_map<std::string, std::string> supported;
+  supported["intel_buffer"] = "transport=dmabuf|device=0|extmemmap=1" + local_host_entry(backend);
+  ASSERT_TRUE(backend.on_discovering_endpoint(endpoint, {}, supported).first);
+
+  uint8_t byte = 0;
+  auto extmap_block = std::make_unique<intel_buffer_backend::PoolBlock>();
+  extmap_block->ptr = &byte;
+  extmap_block->size = 1;
+  extmap_block->transport = intel_buffer_backend::TransportMode::EXTERNAL_MEMMAP;
+  extmap_block->extmap_shm_name = "/not_used";
+  IntelBufferImpl<uint8_t> extmap_impl(extmap_block.release(), 1, false);
+  EXPECT_NE(backend.create_descriptor_with_endpoint(&extmap_impl, endpoint), nullptr);
+
+  // A real, exportable Level Zero USM block: an "l0usm" peer gets its descriptor.
+  auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
+  if (!pool || pool->transport_mode() != intel_buffer_backend::TransportMode::LEVEL_ZERO_USM) {
+    GTEST_SKIP() << "pool does not allocate Level Zero USM on this machine";
+  }
+  auto buffer = intel_buffer_backend::allocate_buffer(4096);
+  auto l0_peer = make_endpoint(17);
+  std::unordered_map<std::string, std::string> l0_supported;
+  l0_supported["intel_buffer"] = "transport=l0usm|device=0|extmemmap=1" + local_host_entry(backend);
+  ASSERT_TRUE(backend.on_discovering_endpoint(l0_peer, {}, l0_supported).first);
+  if (!backend.create_descriptor_with_endpoint(buffer.get_impl(), l0_peer)) {
+    GTEST_SKIP() << "pool block not exportable on this machine";
+  }
+  EXPECT_EQ(backend.create_descriptor_with_endpoint(buffer.get_impl(), endpoint), nullptr);
 }
 
 TEST(IntelBufferBackendDescriptor, IpcDecisionCacheShortCircuitsToNullptr)
@@ -564,14 +666,32 @@ constexpr size_t kDmaBufBytes = 4096;
 // must prevent.
 struct ExportedBuffer
 {
+  // The uid the "producer" published the frame under.
+  static constexpr uint64_t kUid = 0x5eed;
+
   explicit ExportedBuffer(uint32_t block_id)
-  : block_id(block_id), fd(memfd_create("ibb_plugin_dmabuf", 0))
+  : block_id(block_id), fd(memfd_create("ibb_plugin_dmabuf", 0)),
+    // Its descriptors use the block id as the pool id too.
+    meta_name(intel_memory_core::ipc_meta_shm_name(getpid(), block_id, block_id))
   {
     if (fd >= 0 && ftruncate(fd, kDmaBufBytes) == 0) {
       const uint8_t marker = 0x3c;
       if (pwrite(fd, &marker, 1, 0) == 1) {
         socket_path = intel_buffer_backend::DmaBufIpc::register_fd(block_id, fd);
       }
+    }
+    // The block's refcount metadata, as the producer's pool creates it.
+    const int meta_fd = shm_open(meta_name.c_str(), O_CREAT | O_RDWR, 0600);
+    if (meta_fd >= 0 && ftruncate(meta_fd, sizeof(intel_memory_core::IPCMetadata)) == 0) {
+      void * p = mmap(nullptr, sizeof(intel_memory_core::IPCMetadata),
+          PROT_READ | PROT_WRITE, MAP_SHARED, meta_fd, 0);
+      if (p != MAP_FAILED) {
+        meta = new (p) intel_memory_core::IPCMetadata();
+        meta->uid.store(kUid);
+      }
+    }
+    if (meta_fd >= 0) {
+      close(meta_fd);
     }
   }
   ~ExportedBuffer()
@@ -580,6 +700,10 @@ struct ExportedBuffer
     if (fd >= 0) {
       close(fd);
     }
+    if (meta) {
+      munmap(meta, sizeof(intel_memory_core::IPCMetadata));
+    }
+    shm_unlink(meta_name.c_str());
   }
 
   // Descriptor as a (possibly buggy or hostile) peer could send it.
@@ -594,12 +718,15 @@ struct ExportedBuffer
     d.dmabuf_pid = static_cast<int32_t>(getpid());
     d.dmabuf_pool_block_id = block_id;
     d.pool_id = pool_id;
+    d.ipc_uid = kUid;
     d.publisher_pid = static_cast<int32_t>(getpid());  // local_ptr == 0: not intra-process
     return frame;
   }
 
   uint32_t block_id;
   int fd;
+  std::string meta_name;
+  intel_memory_core::IPCMetadata * meta{nullptr};
   std::string socket_path;
 };
 }  // namespace
@@ -659,4 +786,94 @@ TEST(IntelBufferBackendDmaBuf, CachedMappingIsNotReusedForLargerRequest)
   auto result = backend.from_descriptor_with_endpoint(&bigger, make_endpoint(44));
   EXPECT_EQ(as_impl(result)->data(), nullptr);
   EXPECT_EQ(as_impl(result)->size(), 0u);
+}
+
+// --- Refcounting is required for zero-copy ----------------------------------
+
+namespace
+{
+// A same-host peer that imports DMA-BUF (and Level Zero, if advertised).
+rmw_topic_endpoint_info_t discover_same_host_peer(
+  IntelBufferBackend & backend, uint32_t gid_seed)
+{
+  auto endpoint = make_endpoint(gid_seed);
+  std::unordered_map<std::string, std::string> supported;
+  supported["intel_buffer"] = "transport=dmabuf|device=0|extmemmap=1" + local_host_entry(backend);
+  EXPECT_TRUE(backend.on_discovering_endpoint(endpoint, {}, supported).first);
+  return endpoint;
+}
+}  // namespace
+
+// A block without refcount metadata could be reused while a subscriber reads
+// it, so it is sent as a copy, not as a descriptor.
+TEST(IntelBufferBackendDescriptor, BlockWithoutRefcountMetadataIsSentAsCopy)
+{
+  if (!IntelBufferImpl<uint8_t>::get_or_create_global_pool()) {
+    GTEST_SKIP() << "no buffer pool on this machine";
+  }
+  IntelBufferBackend backend;
+  auto peer = discover_same_host_peer(backend, 50);
+
+  const int fd = memfd_create("ibb_no_meta", 0);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(ftruncate(fd, kDmaBufBytes), 0);
+  auto block = std::make_unique<intel_buffer_backend::PoolBlock>();
+  block->ptr = mmap(nullptr, kDmaBufBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  ASSERT_NE(block->ptr, MAP_FAILED);
+  block->size = kDmaBufBytes;
+  block->block_id = 0xd0b0005u;
+  block->transport = intel_buffer_backend::TransportMode::DMA_BUF;
+  block->dmabuf_fd = fd;   // exportable, but no ipc_meta
+  IntelBufferImpl<uint8_t> impl(block.release(), kDmaBufBytes, /*owns_block=*/true,
+    /*standalone=*/true);
+
+  EXPECT_EQ(backend.create_descriptor_with_endpoint(&impl, peer), nullptr);
+}
+
+// Lifecycle of a wrapped camera dma-buf: the producer may only re-queue it once
+// no live buffer wraps it and every issued descriptor was imported and
+// released; a descriptor arriving after that is rejected.
+TEST(IntelBufferBackendWrappedDmabuf, ReclaimWaitsForImportAndReleaseThenRejectsLateImports)
+{
+  if (!IntelBufferImpl<uint8_t>::get_or_create_global_pool()) {
+    GTEST_SKIP() << "no buffer pool on this machine";
+  }
+  IntelBufferBackend backend;
+  auto peer = discover_same_host_peer(backend, 51);
+  const int fd = memfd_create("ibb_camera_frame", 0);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(ftruncate(fd, kDmaBufBytes), 0);
+
+  std::shared_ptr<IntelBufferDescriptor> desc;
+  intel_memory_core::IPCMetadata * meta = nullptr;
+  {
+    auto frame = intel_buffer_backend::wrap_dmabuf(fd, kDmaBufBytes, /*owns_fd=*/false);
+    auto * impl = static_cast<IntelBufferImpl<uint8_t> *>(frame.get_impl());
+    ASSERT_NE(impl->get_block(), nullptr);
+    meta = impl->get_block()->ipc_meta;
+    ASSERT_NE(meta, nullptr);
+    impl->data()[0] = 0x7a;
+    desc = std::static_pointer_cast<IntelBufferDescriptor>(
+      backend.create_descriptor_with_endpoint(impl, peer));
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->transport_mode, IntelBufferDescriptor::TRANSPORT_DMA_BUF);
+    EXPECT_EQ(meta->pending_imports.load(), 1);
+    EXPECT_FALSE(intel_buffer_backend::try_reclaim_dmabuf(fd));   // still wrapped
+  }
+  // Published, not yet imported by the subscriber.
+  EXPECT_FALSE(intel_buffer_backend::try_reclaim_dmabuf(fd));
+
+  {
+    auto received = backend.from_descriptor_with_endpoint(desc.get(), make_endpoint(52));
+    ASSERT_NE(as_impl(received)->data(), nullptr);
+    EXPECT_EQ(as_impl(received)->data()[0], 0x7a);
+    EXPECT_EQ(meta->pending_imports.load(), 0);
+    EXPECT_FALSE(intel_buffer_backend::try_reclaim_dmabuf(fd));   // being read
+  }
+  EXPECT_TRUE(intel_buffer_backend::try_reclaim_dmabuf(fd));
+
+  // The producer may now overwrite the buffer; the old descriptor is stale.
+  auto late = backend.from_descriptor_with_endpoint(desc.get(), make_endpoint(53));
+  EXPECT_EQ(as_impl(late)->data(), nullptr);
+  close(fd);
 }

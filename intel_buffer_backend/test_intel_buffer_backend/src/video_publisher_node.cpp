@@ -320,6 +320,7 @@ private:
     if (v4l2_fd_ >= 0) {
       int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
       ioctl(v4l2_fd_, VIDIOC_STREAMOFF, &type);
+      held_buffers_.clear();  // STREAMOFF returns every buffer to the driver
       if (saved_exposure_auto_priority_ >= 0) {
         struct v4l2_control ctrl{};
         ctrl.id = V4L2_CID_EXPOSURE_AUTO_PRIORITY;
@@ -339,8 +340,10 @@ private:
   void camera_capture_loop()
   {
     while (capture_running_) {
+      requeue_reclaimed_buffers();
       struct pollfd pfd{v4l2_fd_, POLLIN, 0};
-      int r = poll(&pfd, 1, 200);  // ms; timeout just to re-check the flag
+      // ms; timeout re-checks the flag, and soon while buffers wait for subscribers
+      int r = poll(&pfd, 1, held_buffers_.empty() ? 200 : 2);
       if (r <= 0) continue;        // timeout or EINTR → loop and re-check
       if (pfd.revents & POLLIN) {
         tick_dmabuf();             // drains to newest + publishes
@@ -446,20 +449,27 @@ private:
     auto buffer = intel_buffer_backend::wrap_dmabuf(
       dmabuf_fd, frame_bytes_, false);
 
-    publish_frame_dmabuf(buffer, buf.index, capture_ns);
+    publish_frame_dmabuf(buffer, capture_ns);
 
-    ioctl(v4l2_fd_, VIDIOC_QBUF, &buf);
+    // Subscribers may still be reading this buffer: re-queue it to the camera
+    // only once the backend reports it reclaimed (requeue_reclaimed_buffers).
+    held_buffers_.push_back(buf);
   }
 
-  void publish_frame_dmabuf(rosidl::Buffer<uint8_t> & buffer, uint32_t buf_index,
-                            uint64_t capture_ns)
+  void requeue_reclaimed_buffers()
   {
-    auto * impl = dynamic_cast<intel_buffer_backend::IntelBufferImpl<uint8_t> *>(
-      buffer.get_impl());
-    if (impl && impl->get_block()) {
-      impl->get_block()->block_id = buf_index;
+    for (auto it = held_buffers_.begin(); it != held_buffers_.end(); ) {
+      if (intel_buffer_backend::try_reclaim_dmabuf(v4l2_dmabuf_fds_[it->index])) {
+        ioctl(v4l2_fd_, VIDIOC_QBUF, &*it);
+        it = held_buffers_.erase(it);
+      } else {
+        ++it;
+      }
     }
+  }
 
+  void publish_frame_dmabuf(rosidl::Buffer<uint8_t> & buffer, uint64_t capture_ns)
+  {
     sensor_msgs::msg::Image msg;
     set_stamp_ns(msg.header.stamp,
       capture_ns != 0 ? static_cast<int64_t>(capture_ns) : mono_now_ns());
@@ -554,6 +564,7 @@ private:
   int v4l2_fd_{-1};
   uint32_t v4l2_buf_count_{0};
   std::vector<int> v4l2_dmabuf_fds_;
+  std::vector<struct v4l2_buffer> held_buffers_;  // published, not yet re-queued
   std::thread capture_thread_;              // camera: frame-arrival-driven publish
   std::atomic<bool> capture_running_{false};
   bool camera_fixed_framerate_{false};

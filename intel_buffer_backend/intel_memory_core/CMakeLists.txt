@@ -187,5 +187,10 @@ if(BUILD_TESTING)
     GTest::gtest
     GTest::gtest_main
   )
+  if(OpenCL_FOUND)
+    # The cl_mem cache tests create a real cl_context.
+    target_compile_definitions(intel_memory_core_test PRIVATE INTEL_MEMORY_CORE_HAVE_OPENCL)
+    target_link_libraries(intel_memory_core_test PRIVATE OpenCL::OpenCL)
+  endif()
   gtest_discover_tests(intel_memory_core_test)
 endif()

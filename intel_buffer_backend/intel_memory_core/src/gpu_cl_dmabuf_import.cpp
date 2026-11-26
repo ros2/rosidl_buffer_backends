@@ -14,7 +14,12 @@
 
 #include "intel_memory_core/gpu_cl_dmabuf_import.hpp"
 
+#include <sys/stat.h>
+
+#include <cerrno>
+#include <map>
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -71,18 +76,18 @@ void release_cl_mem(void * mem)
 namespace
 {
 std::mutex g_cl_mem_cache_mutex;
-std::unordered_map<uint64_t, void *> g_cl_mem_cache;
 
-uint64_t cache_key(void * ctx, int fd)
-{
-  return (reinterpret_cast<uint64_t>(ctx) << 20) ^ static_cast<uint64_t>(fd);
-}
+// A dma-buf is named by its inode, not its fd: fd numbers are reused after
+// close. The cached cl_mem holds a reference to the dma-buf, so the inode can't
+// be reused while its entry exists. The size is part of the key so a hit never
+// returns a cl_mem smaller than requested.
+using DmabufKey = std::tuple<void *, dev_t, ino_t, uint64_t>;   // ctx, st_dev, st_ino, size
+std::map<DmabufKey, void *> g_dmabuf_cl_mem_cache;
 
-uint64_t host_ptr_cache_key(void * ctx, void * host_ptr)
-{
-  return ((reinterpret_cast<uint64_t>(ctx) << 20) ^
-         reinterpret_cast<uint64_t>(host_ptr)) ^ 0x484f5354'50545200ull;  // "HOSTPTR"
-}
+// A host pointer has no such identity; the caller keeps it mapped to the same
+// memory until release_all_cl_mem().
+using HostPtrKey = std::tuple<void *, void *, uint64_t>;   // ctx, host_ptr, size
+std::map<HostPtrKey, void *> g_host_ptr_cl_mem_cache;
 
 std::mutex g_queue_cache_mutex;
 std::unordered_map<void *, cl_command_queue> g_queue_cache;
@@ -151,15 +156,21 @@ void * get_or_import_cl_mem(void * cl_context, int fd, uint64_t size)
   if (!cl_context || fd < 0 || size == 0) {
     return nullptr;
   }
+  struct stat st{};
+  if (fstat(fd, &st) != 0) {
+    RCUTILS_LOG_WARN_NAMED("gpu_cl_dmabuf_import",
+      "fstat(dma_buf fd=%d) failed (errno=%d)", fd, errno);
+    return nullptr;
+  }
   std::lock_guard<std::mutex> lock(g_cl_mem_cache_mutex);
-  uint64_t key = cache_key(cl_context, fd);
-  auto it = g_cl_mem_cache.find(key);
-  if (it != g_cl_mem_cache.end()) {
+  const DmabufKey key{cl_context, st.st_dev, st.st_ino, size};
+  auto it = g_dmabuf_cl_mem_cache.find(key);
+  if (it != g_dmabuf_cl_mem_cache.end()) {
     return it->second;
   }
   void * mem = import_dmabuf_as_cl_mem(cl_context, fd, size);
   if (mem) {
-    g_cl_mem_cache[key] = mem;
+    g_dmabuf_cl_mem_cache[key] = mem;
   }
   return mem;
 }
@@ -170,9 +181,9 @@ void * get_or_wrap_host_ptr_cl_mem(void * cl_context, void * host_ptr, uint64_t 
     return nullptr;
   }
   std::lock_guard<std::mutex> lock(g_cl_mem_cache_mutex);
-  uint64_t key = host_ptr_cache_key(cl_context, host_ptr);
-  auto it = g_cl_mem_cache.find(key);
-  if (it != g_cl_mem_cache.end()) {
+  const HostPtrKey key{cl_context, host_ptr, size};
+  auto it = g_host_ptr_cl_mem_cache.find(key);
+  if (it != g_host_ptr_cl_mem_cache.end()) {
     return it->second;
   }
 
@@ -187,17 +198,21 @@ void * get_or_wrap_host_ptr_cl_mem(void * cl_context, void * host_ptr, uint64_t 
       host_ptr, static_cast<unsigned long long>(size), static_cast<int>(err));
     return nullptr;   // not cached — a later call may retry
   }
-  g_cl_mem_cache[key] = static_cast<void *>(buffer);
+  g_host_ptr_cl_mem_cache[key] = static_cast<void *>(buffer);
   return static_cast<void *>(buffer);
 }
 
 void release_all_cl_mem()
 {
   std::lock_guard<std::mutex> lock(g_cl_mem_cache_mutex);
-  for (auto & kv : g_cl_mem_cache) {
+  for (auto & kv : g_dmabuf_cl_mem_cache) {
     clReleaseMemObject(static_cast<cl_mem>(kv.second));
   }
-  g_cl_mem_cache.clear();
+  g_dmabuf_cl_mem_cache.clear();
+  for (auto & kv : g_host_ptr_cl_mem_cache) {
+    clReleaseMemObject(static_cast<cl_mem>(kv.second));
+  }
+  g_host_ptr_cl_mem_cache.clear();
 }
 
 #else  // !INTEL_MEMORY_CORE_HAVE_OPENCL

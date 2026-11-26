@@ -24,7 +24,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
@@ -119,8 +118,7 @@ IPCMetadata * open_shared_meta(int32_t pid, uint32_t block_id, uint32_t pool_id)
     }
   }
 
-  std::string shm_name = "/intel_memory_buffer_" + std::to_string(pid) +
-    "_" + std::to_string(block_id);
+  const std::string shm_name = ipc_meta_shm_name(pid, pool_id, block_id);
   int shm_fd = shm_open(shm_name.c_str(), O_RDWR, 0666);
   if (shm_fd < 0) {
     return nullptr;
@@ -152,6 +150,13 @@ void evict_meta_pool(uint32_t pool_id)
 
 bool acquire_and_validate(IPCMetadata * meta, uint64_t expected_uid, uint32_t block_id)
 {
+  // Producers never publish uid 0 (it marks a block being reclaimed), so a
+  // descriptor carrying it can't be checked against the live frame.
+  if (expected_uid == 0) {
+    RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
+      "import rejected: descriptor for block %u carries no uid", block_id);
+    return false;
+  }
   meta->refcount.fetch_add(1, std::memory_order_seq_cst);
   if (!register_holder_pid(meta)) {
     // release_block() only undoes references it can match to a holder slot.
@@ -161,19 +166,35 @@ bool acquire_and_validate(IPCMetadata * meta, uint64_t expected_uid, uint32_t bl
     return false;
   }
 
-  if (expected_uid != 0) {
-    uint64_t live_uid = meta->uid.load(std::memory_order_acquire);
-    if (live_uid != expected_uid) {
-      clear_holder_pid(meta);
-      meta->refcount.fetch_sub(1, std::memory_order_release);
-      RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
-        "stale import rejected: expected uid=%lu, live uid=%lu (block %u)",
-        static_cast<unsigned long>(expected_uid),
-        static_cast<unsigned long>(live_uid), block_id);
-      return false;
-    }
+  uint64_t live_uid = meta->uid.load(std::memory_order_acquire);
+  if (live_uid != expected_uid) {
+    clear_holder_pid(meta);
+    meta->refcount.fetch_sub(1, std::memory_order_release);
+    RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
+      "stale import rejected: expected uid=%lu, live uid=%lu (block %u)",
+      static_cast<unsigned long>(expected_uid),
+      static_cast<unsigned long>(live_uid), block_id);
+    return false;
+  }
+
+  // This descriptor is imported: no longer pending. Only after the reference
+  // above is taken, so a producer that sees no pending import sees the holder.
+  int32_t pending = meta->pending_imports.load(std::memory_order_seq_cst);
+  while (pending > 0 &&
+    !meta->pending_imports.compare_exchange_weak(pending, pending - 1, std::memory_order_seq_cst))
+  {
   }
   return true;
+}
+
+// The shared refcount is what keeps the producer from reusing a block while it
+// is read; without it, a mapping must not be handed out.
+IntelMemoryIPCManager::ImportResult reject_without_meta(
+  int32_t pid, uint32_t block_id)
+{
+  RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
+    "import rejected: refcount metadata of block %u of pid %d unavailable", block_id, pid);
+  return IntelMemoryIPCManager::ImportResult{nullptr, nullptr};
 }
 }  // namespace
 
@@ -202,25 +223,20 @@ IntelMemoryIPCManager::ImportResult IntelMemoryIPCManager::import_dmabuf_block(
   uint64_t expected_uid,
   uint32_t pool_id)
 {
-  IpcImportResult ipc_result;
-  try {
-    ipc_result = DmaBufIpc::import_block(socket_path, pid, block_id, size, pool_id);
-  } catch (const std::exception & e) {
-    RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
-      "dmabuf import failed (producer gone or stale socket): %s", e.what());
+  const IpcImportResult ipc_result =
+    DmaBufIpc::import_block(socket_path, pid, block_id, size, pool_id);
+  if (!ipc_result.ptr) {
+    // import_block() logged the reason (e.g. the producer is gone). Drop this
+    // producer instance's mappings no buffer still holds, and take no reference
+    // on a failed import, since no buffer would exist to release it.
     DmaBufIpc::evict_pool(pool_id);
     evict_meta_pool(pool_id);
-    return ImportResult{nullptr, nullptr};
-  }
-  if (!ipc_result.ptr) {
-    // import_block() logged the reason; take no reference on a failed import,
-    // since no buffer would exist to release it.
     return ImportResult{nullptr, nullptr};
   }
 
   IPCMetadata * meta = open_shared_meta(pid, block_id, pool_id);
   if (!meta) {
-    return ImportResult{ipc_result.ptr, nullptr, ipc_result.dmabuf_fd};
+    return reject_without_meta(pid, block_id);
   }
 
   if (!acquire_and_validate(meta, expected_uid, block_id)) {
@@ -309,27 +325,20 @@ IntelMemoryIPCManager::ImportResult IntelMemoryIPCManager::import_level_zero_blo
   const std::string & l0_socket_path,
   uint32_t pool_id)
 {
-  IpcImportResult ipc_result;
-  try {
-    ipc_result = L0UsmIpc::import_handle(
-      ipc_handle_data, ipc_handle_size, device_ordinal, device_uuid,
-      size, pid, block_id, l0_socket_path, pool_id);
-  } catch (const std::exception & e) {
-    RCUTILS_LOG_WARN_NAMED("intel_memory_ipc",
-      "level-zero import failed (producer gone): %s", e.what());
+  const IpcImportResult ipc_result = L0UsmIpc::import_handle(
+    ipc_handle_data, ipc_handle_size, device_ordinal, device_uuid,
+    size, pid, block_id, l0_socket_path, pool_id);
+  if (!ipc_result.ptr) {
+    // import_handle() logged the reason (e.g. the producer is gone). Drop this
+    // producer instance's mappings no buffer still holds; take no reference.
     L0UsmIpc::evict_pool(pool_id);
     evict_meta_pool(pool_id);
-    return ImportResult{nullptr, nullptr};
-  }
-  if (!ipc_result.ptr) {
-    // import_handle() logged the reason; take no reference on a failed import.
     return ImportResult{nullptr, nullptr};
   }
 
   IPCMetadata * meta = open_shared_meta(pid, block_id, pool_id);
   if (!meta) {
-    // best effort, no refcount
-    return ImportResult{ipc_result.ptr, nullptr, ipc_result.dmabuf_fd};
+    return reject_without_meta(pid, block_id);
   }
   if (!acquire_and_validate(meta, expected_uid, block_id)) {
     return ImportResult{nullptr, nullptr};

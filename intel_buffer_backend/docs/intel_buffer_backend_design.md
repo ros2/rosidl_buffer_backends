@@ -116,7 +116,7 @@ classDiagram
     <<ros-adapter — free functions>>
     +allocate_buffer(count) Buffer~uint8~
     +wrap_dmabuf(fd, size, owns) Buffer~uint8~
-    +wrap_usm_ptr(ptr, size, owns) Buffer~uint8~
+    +wrap_usm_ptr(ptr, size, deleter) Buffer~uint8~
     +get_usm_ptr(buffer) uint8*
     +write_to_buffer(buffer, src, n) bool
   }
@@ -256,7 +256,11 @@ classDiagram
 ### 4.2 Buffer lifecycle & reference counting
 
 - Each `PoolBlock` owns an `IPCMetadata` struct in a POSIX shared-memory segment
-  (`/intel_memory_buffer_<pid>_<block_id>`) containing an atomic `refcount`.
+  (`/intel_memory_buffer_<pid>_<pool_id>_<block_id>`, created with `O_EXCL`)
+  containing an atomic `refcount`. The pool id keeps producers with the same pid
+  in different PID namespaces apart; zero-copy is only offered to peers in the
+  same PID namespace (`pidns=` in the backend metadata), since holders and
+  liveness are tracked by pid.
   This lives in `intel_memory_core`, so the refcount works between any two
   processes — ROS or not.
 - On import, the backend increments `refcount`; on the imported buffer's

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -51,7 +52,7 @@ TEST(IntelBufferApi, WrapUsmPtrOverHeapBufferIsAccessible)
   void * heap = std::malloc(size);
   std::memset(heap, 0xAB, size);
 
-  auto buf = wrap_usm_ptr(heap, size, false);
+  auto buf = wrap_usm_ptr(heap, size);
   ASSERT_EQ(buf.size(), size);
   uint8_t * ptr = get_usm_ptr(buf);
   ASSERT_EQ(ptr, heap);
@@ -60,15 +61,21 @@ TEST(IntelBufferApi, WrapUsmPtrOverHeapBufferIsAccessible)
   std::free(heap);
 }
 
-TEST(IntelBufferApi, WrapUsmPtrOwnsPtrFreesOnDestruction)
+// The backend can't free a USM pointer itself (it doesn't know the allocator):
+// the caller's deleter frees it, once, when the last holder of the buffer goes.
+TEST(IntelBufferApi, WrapUsmPtrDeleterFreesPointerOnceWhenBufferIsDestroyed)
 {
   const size_t size = 32;
   void * heap = std::malloc(size);
+  std::vector<void *> freed;
   {
-    auto buf = wrap_usm_ptr(heap, size, true);
+    auto buf = wrap_usm_ptr(heap, size, [&freed](void * p) {freed.push_back(p); std::free(p);});
     ASSERT_EQ(get_usm_ptr(buf), heap);
+    rosidl::Buffer<uint8_t> moved(std::move(buf));
+    EXPECT_TRUE(freed.empty());
   }
-  SUCCEED();
+  ASSERT_EQ(freed.size(), 1u);
+  EXPECT_EQ(freed[0], heap);
 }
 
 TEST(IntelBufferApi, WrapDmabufOverMemfdRoundTripsBytes)
@@ -105,24 +112,35 @@ TEST(IntelBufferApi, WrapDmabufWithOwnsFdFalseLeavesFdOpen)
   close(fd);
 }
 
-TEST(IntelBufferApi, WrapDmabufWithOwnsFdFalseReleasesMapping)
+// Every wrap of one dma-buf shares a single pool block (one block id, one
+// refcount for subscribers), which outlives the application's fd.
+TEST(IntelBufferApi, WrapDmabufSharesOnePoolBlockPerBuffer)
 {
+  if (!intel_buffer_backend::IntelBufferImpl<uint8_t>::get_or_create_global_pool()) {
+    GTEST_SKIP() << "no buffer pool on this machine";
+  }
   const size_t size = 4096;
   int fd = make_memfd(size);
+  int other_fd = make_memfd(size);
   ASSERT_GE(fd, 0);
+  ASSERT_GE(other_fd, 0);
+  const int dup_fd = dup(fd);   // another fd for the same buffer
 
-  void * mapped = nullptr;
-  {
-    auto buf = wrap_dmabuf(fd, size, false);
-    mapped = get_usm_ptr(buf);
-    ASSERT_NE(mapped, nullptr);
-    unsigned char vec = 0;
-    ASSERT_EQ(mincore(mapped, size, &vec), 0);
-  }
-  unsigned char vec = 0;
-  EXPECT_EQ(mincore(mapped, size, &vec), -1);  // unmapped
-  EXPECT_EQ(errno, ENOMEM);
-  close(fd);
+  auto first = wrap_dmabuf(fd, size, /*owns_fd=*/true);
+  auto again = wrap_dmabuf(dup_fd, size, /*owns_fd=*/true);
+  auto other = wrap_dmabuf(other_fd, size, /*owns_fd=*/true);
+  auto block_of = [](rosidl::Buffer<uint8_t> & buf) {
+      return dynamic_cast<intel_buffer_backend::IntelBufferImpl<uint8_t> *>(
+        buf.get_impl())->get_block();
+    };
+  ASSERT_NE(block_of(first), nullptr);
+  EXPECT_EQ(block_of(again), block_of(first));
+  EXPECT_NE(block_of(other)->block_id, block_of(first)->block_id);
+  EXPECT_NE(block_of(first)->ipc_meta, nullptr);
+
+  // Both fds of the buffer were closed: the pool's own dup keeps it mapped.
+  get_usm_ptr(first)[0] = 0x5e;
+  EXPECT_EQ(get_usm_ptr(again)[0], 0x5e);
 }
 
 TEST(IntelBufferApi, WrapDmabufWithInvalidFdReturnsEmptyBuffer)
@@ -140,7 +158,7 @@ TEST(IntelBufferApi, GetUsmPtrOnNonIntelBufferImplReturnsNullptr)
 
 TEST(IntelBufferApi, WriteToBufferCopiesInBoundsData)
 {
-  auto buf = wrap_usm_ptr(std::malloc(16), 16, true);
+  auto buf = wrap_usm_ptr(std::malloc(16), 16, [](void * p) {std::free(p);});
   const char src[] = "0123456789012345";
   EXPECT_TRUE(write_to_buffer(buf, src, 16));
   EXPECT_EQ(std::memcmp(get_usm_ptr(buf), src, 16), 0);
@@ -148,7 +166,7 @@ TEST(IntelBufferApi, WriteToBufferCopiesInBoundsData)
 
 TEST(IntelBufferApi, WriteToBufferRejectsOversizeCopy)
 {
-  auto buf = wrap_usm_ptr(std::malloc(8), 8, true);
+  auto buf = wrap_usm_ptr(std::malloc(8), 8, [](void * p) {std::free(p);});
   const char src[16] = {};
   EXPECT_FALSE(write_to_buffer(buf, src, 16));
 }
@@ -256,4 +274,23 @@ TEST(ExternalMemMapRingTest, DataAndWrapOutOfRangeOnClosedRingAreSafe)
   EXPECT_EQ(ring.data(0), nullptr);
   auto buf = ring.wrap(0, 4096);
   EXPECT_EQ(buf.size(), 0u);
+}
+
+// Another process with this pid (another PID namespace sharing /dev/shm)
+// already has rings with this prefix: creating ours must still succeed.
+TEST(ExternalMemMapRingTest, RingOfAnotherProcessWithTheSamePidDoesNotBlockCreate)
+{
+  const std::string prefix = "/imb_ring_ns_test";
+  std::vector<std::string> theirs;
+  for (int ring = 0; ring < 256; ++ring) {   // whichever ring id ours would get
+    theirs.push_back(prefix + "_" + std::to_string(getpid()) + "_" + std::to_string(ring) + "_0");
+    const int fd = shm_open(theirs.back().c_str(), O_CREAT | O_RDWR, 0600);
+    ASSERT_GE(fd, 0);
+    close(fd);
+  }
+  ExternalMemMapRing ring;
+  EXPECT_TRUE(ring.create(prefix, 4096, 1));
+  for (const auto & name : theirs) {
+    shm_unlink(name.c_str());
+  }
 }

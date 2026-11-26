@@ -34,6 +34,19 @@ inline uint64_t import_cache_key(uint32_t pool_id, uint32_t block_id)
   return (static_cast<uint64_t>(pool_id) << 32) | block_id;
 }
 
+/// Random id of this process instance. A pid alone doesn't name a process:
+/// containers sharing /dev/shm or /tmp have separate PID namespaces, so names of
+/// this process's shared segments and sockets include it.
+uint64_t process_instance_id();
+
+/// Name of the refcount metadata segment of a producer's block. The pool id
+/// tells apart producers with the same pid in different PID namespaces.
+inline std::string ipc_meta_shm_name(int32_t pid, uint32_t pool_id, uint32_t block_id)
+{
+  return "/intel_memory_buffer_" + std::to_string(pid) + "_" + std::to_string(pool_id) +
+         "_" + std::to_string(block_id);
+}
+
 inline bool producer_process_alive(int32_t pid)
 {
   if (pid <= 0) {

@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -66,6 +67,11 @@ public:
   : size_(size), block_(block), owns_block_(owns_block), standalone_(standalone),
     owns_mapping_(owns_mapping) {}
 
+  /// wrap_usm_ptr(): memory from an allocator this backend doesn't know, freed
+  /// by the caller's deleter (if any) when this buffer is destroyed.
+  IntelBufferImpl(PoolBlock * block, size_t size, std::function<void(void *)> ptr_deleter)
+  : size_(size), block_(block), standalone_(true), ptr_deleter_(std::move(ptr_deleter)) {}
+
   ~IntelBufferImpl()
   {
     if (!block_) {
@@ -80,6 +86,9 @@ public:
         free_standalone_resource(block_);
       } else if (owns_mapping_ && block_->ptr && block_->ptr != MAP_FAILED) {
         munmap(block_->ptr, block_->size);
+      }
+      if (ptr_deleter_ && block_->ptr) {
+        ptr_deleter_(block_->ptr);
       }
       delete block_;
     } else if (owns_block_) {
@@ -176,6 +185,7 @@ private:
   bool owns_block_{false};
   bool standalone_{false};
   bool owns_mapping_{false};
+  std::function<void(void *)> ptr_deleter_;
 };
 
 }  // namespace intel_buffer_backend

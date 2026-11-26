@@ -15,6 +15,7 @@
 #ifndef INTEL_BUFFER_BACKEND__INTEL_BUFFER_BACKEND_HPP_
 #define INTEL_BUFFER_BACKEND__INTEL_BUFFER_BACKEND_HPP_
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -63,7 +64,9 @@ public:
     const std::unordered_map<std::string, std::string> & endpoint_supported_backends) override;
 
 private:
-  mutable std::unordered_map<uint32_t, bool> ipc_decision_cache_;
+  /// Transports each discovered endpoint can import (one bit per TransportMode),
+  /// keyed by its full GID.
+  mutable std::unordered_map<std::string, uint8_t> ipc_decision_cache_;
   mutable std::mutex cache_mutex_;
 };
 

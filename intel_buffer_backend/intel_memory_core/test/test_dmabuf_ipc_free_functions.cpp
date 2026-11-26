@@ -15,6 +15,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -303,4 +304,38 @@ TEST(DmaBufIpcReceiveFd, BogusSocketPathThrows)
 TEST(DmaBufIpcUnregisterBlock, UnknownBlockIdIsNoOp)
 {
   EXPECT_NO_THROW(DmaBufIpc::unregister_block(0xdeadbeefu));
+}
+
+// Another producer with this pid (another PID namespace sharing /tmp) already
+// serves its block 0x5ade: registering this process's block must not replace
+// that producer's socket.
+TEST(DmaBufIpcRegister, NeverReplacesAnotherProducersSocketWithTheSamePid)
+{
+  const uint32_t block_id = 0x5adeu;
+  const std::string other = "/tmp/intel_memory_buffer_" + std::to_string(getpid()) +
+    "_blk" + std::to_string(block_id) + ".sock";
+  const int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+  ASSERT_GE(listener, 0);
+  struct sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  std::strncpy(addr.sun_path, other.c_str(), sizeof(addr.sun_path) - 1);
+  ASSERT_EQ(bind(listener, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0) <<
+    "stale " << other;
+  ASSERT_EQ(listen(listener, 1), 0);
+  struct stat before{};
+  ASSERT_EQ(stat(other.c_str(), &before), 0);
+
+  const int fd = memfd_create("dmabuf_ipc_ns", 0);
+  ASSERT_GE(fd, 0);
+  const std::string ours = DmaBufIpc::register_fd(block_id, fd);
+  EXPECT_FALSE(ours.empty());
+  EXPECT_NE(ours, other);
+  struct stat after{};
+  EXPECT_TRUE(stat(other.c_str(), &after) == 0 && after.st_ino == before.st_ino) <<
+    "the other producer's socket was unlinked and replaced";
+
+  DmaBufIpc::unregister_block(block_id);
+  close(fd);
+  close(listener);
+  unlink(other.c_str());
 }

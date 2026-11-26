@@ -24,8 +24,12 @@ void * import_dmabuf_as_cl_mem(void * cl_context, int fd, uint64_t size);
 
 void release_cl_mem(void * cl_mem);
 
+/// Cached per (context, dma-buf, size); the dma-buf is identified by its inode,
+/// so a reused fd number never returns another buffer's cl_mem.
 void * get_or_import_cl_mem(void * cl_context, int fd, uint64_t size);
 
+/// Cached per (context, host_ptr, size). host_ptr must stay mapped to the same
+/// memory until release_all_cl_mem(): a pointer has no identity beyond its address.
 void * get_or_wrap_host_ptr_cl_mem(void * cl_context, void * host_ptr, uint64_t size);
 
 bool sync_host_ptr_cl_mem(void * cl_context, void * cl_mem, uint64_t size);

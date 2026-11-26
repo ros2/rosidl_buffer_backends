@@ -21,6 +21,7 @@
 #include "intel_memory_core/logging.hpp"
 
 #include <cstring>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -29,17 +30,23 @@
 namespace intel_memory_core
 {
 
+// The importing side's Level Zero context, shared by every thread of the
+// process. Never destroyed: buffers imported in it can outlive the thread that
+// imported them, and zeContextDestroy() may free every allocation in it.
 struct L0State {
   ze_driver_handle_t driver{nullptr};
   ze_context_handle_t ctx{nullptr};
   std::vector<ze_device_handle_t> devices;
-  bool initialized{false};
+  std::once_flag once;
 
   bool init()
   {
-    if (initialized) return (ctx != nullptr);
-    initialized = true;
+    std::call_once(once, [this] {create();});
+    return ctx != nullptr;
+  }
 
+  bool create()
+  {
     ze_result_t r = zeInit(0);
     if (r != ZE_RESULT_SUCCESS) return false;
 
@@ -72,14 +79,6 @@ struct L0State {
       }
     }
     return false;
-  }
-
-  ~L0State()
-  {
-    if (ctx) {
-      zeContextDestroy(ctx);
-      ctx = nullptr;
-    }
   }
 };
 
@@ -152,20 +151,26 @@ void L0UsmIpc::put_handle(PoolBlock * block)
 
 namespace
 {
-// One L0 state per importing thread (see L0State above).
 L0State & l0_state()
 {
-  thread_local L0State state;
-  return state;
+  static L0State * state = new L0State();   // intentionally never destroyed
+  return *state;
 }
 
-// One cached import: the USM pointer plus whose it is, for the dead-producer reap.
+// One cached import: the USM pointer, how many bytes from it are mapped, and
+// whose it is, for the dead-producer reap.
 struct CachedL0Import
 {
   IpcImportResult result;
+  uint64_t size{0};
   int32_t pid{0};
+  // Opened with zeMemOpenIpcHandle() (released with zeMemCloseIpcHandle()),
+  // rather than allocated by a dma-buf fd import (released with zeMemFree()).
+  bool from_ipc_handle{false};
 };
 
+// Per thread, in the shared context: one thread's eviction never releases an
+// import another thread is still validating.
 std::unordered_map<uint64_t, CachedL0Import> & l0_import_cache()
 {
   thread_local std::unordered_map<uint64_t, CachedL0Import> cache;
@@ -176,7 +181,13 @@ void drop_l0_import(const CachedL0Import & entry)
 {
   L0State & l0 = l0_state();
   if (entry.result.ptr && l0.ctx) {
-    zeMemFree(l0.ctx, entry.result.ptr);
+    const ze_result_t r = entry.from_ipc_handle ?
+      zeMemCloseIpcHandle(l0.ctx, entry.result.ptr) : zeMemFree(l0.ctx, entry.result.ptr);
+    if (r != ZE_RESULT_SUCCESS) {
+      RCUTILS_LOG_WARN_NAMED("l0_usm_ipc",
+        "%s failed (result=0x%x) releasing an imported mapping",
+        entry.from_ipc_handle ? "zeMemCloseIpcHandle" : "zeMemFree", r);
+    }
   }
   if (entry.result.dmabuf_fd >= 0) {
     close(entry.result.dmabuf_fd);
@@ -215,6 +226,15 @@ IpcImportResult L0UsmIpc::import_handle(
   const uint64_t cache_key = import_cache_key(pool_id, block_id);
   auto cache_it = cache.find(cache_key);
   if (cache_it != cache.end()) {
+    // The descriptor's size is untrusted: never hand out more than is mapped,
+    // and, as a fresh import, reject a zero size.
+    if (size == 0 || size > cache_it->second.size) {
+      RCUTILS_LOG_WARN_NAMED("l0_usm_ipc",
+        "level-zero import rejected: %lu bytes requested, block %u is mapped with %lu",
+        static_cast<unsigned long>(size), block_id,
+        static_cast<unsigned long>(cache_it->second.size));
+      return IpcImportResult{};
+    }
     return cache_it->second.result;
   }
 
@@ -271,6 +291,7 @@ IpcImportResult L0UsmIpc::import_handle(
 
   void * ptr = nullptr;
   int recv_fd = -1;
+  uint64_t mapped_size = 0;
   if (!l0_socket_path.empty()) {
     recv_fd = DmaBufIpc::receive_fd(l0_socket_path);
     const int64_t buffer_bytes = DmaBufIpc::buffer_size(recv_fd);
@@ -292,7 +313,10 @@ IpcImportResult L0UsmIpc::import_handle(
     host_desc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
     host_desc.pNext = &import_fd;
 
-    ze_result_t r = zeMemAllocHost(l0.ctx, &host_desc, size, 0, &ptr);
+    // Map the whole exported buffer: the mapping is cached per block, and later
+    // frames of the same block may be larger than this one.
+    mapped_size = static_cast<uint64_t>(buffer_bytes);
+    ze_result_t r = zeMemAllocHost(l0.ctx, &host_desc, mapped_size, 0, &ptr);
     if (r != ZE_RESULT_SUCCESS) {
       close(recv_fd);
       if (keep_fd >= 0) {
@@ -300,7 +324,7 @@ IpcImportResult L0UsmIpc::import_handle(
       }
       RCUTILS_LOG_ERROR_NAMED("l0_usm_ipc",
         "zeMemAllocHost(import dma_buf fd) failed (result=0x%x, size=%lu)",
-        r, size);
+        r, static_cast<unsigned long>(mapped_size));
       throw std::runtime_error(
         "zeMemAllocHost(import dma_buf fd) failed (result=0x" +
         std::to_string(static_cast<unsigned>(r)) + ")");
@@ -327,12 +351,28 @@ IpcImportResult L0UsmIpc::import_handle(
         "zeMemOpenIpcHandle failed (result=0x" +
         std::to_string(static_cast<unsigned>(result)) + ")");
     }
+    // The handle maps the producer's whole allocation; the descriptor's size
+    // must fit in it.
+    void * base = nullptr;
+    size_t alloc_size = 0;
+    result = zeMemGetAddressRange(l0.ctx, ptr, &base, &alloc_size);
+    const uintptr_t offset =
+      reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(base);
+    if (result != ZE_RESULT_SUCCESS || base == nullptr || ptr < base || offset >= alloc_size ||
+      size == 0 || size > alloc_size - offset)
+    {
+      zeMemCloseIpcHandle(l0.ctx, ptr);
+      throw std::runtime_error(
+        "descriptor size " + std::to_string(size) + " exceeds the imported allocation (" +
+        std::to_string(result == ZE_RESULT_SUCCESS ? alloc_size - offset : 0) + " bytes)");
+    }
+    mapped_size = alloc_size - offset;
     RCUTILS_LOG_INFO_NAMED("l0_usm_ipc",
       "L0 IPC import succeeded: ptr=%p (host USM, CPU+GPU accessible)", ptr);
   }
 
   IpcImportResult import_result{ptr, recv_fd};
-  cache[cache_key] = CachedL0Import{import_result, pid};
+  cache[cache_key] = CachedL0Import{import_result, mapped_size, pid, l0_socket_path.empty()};
   return import_result;
 
   } catch (const std::exception & e) {

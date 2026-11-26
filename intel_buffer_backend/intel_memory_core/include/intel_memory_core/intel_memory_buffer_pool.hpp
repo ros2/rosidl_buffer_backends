@@ -42,6 +42,10 @@ struct IPCMetadata
   std::atomic<uint64_t> uid{0};
   std::atomic<uint64_t> publish_timestamp_us{0};
   std::atomic<int32_t> holder_pids[kMaxImportHolders]{};
+  // Descriptors of the published frame not yet imported by their subscriber.
+  // Lets the producer reclaim a block as soon as every subscriber has imported
+  // and released it, instead of waiting out the grace period.
+  std::atomic<int32_t> pending_imports{0};
 };
 
 enum class TransportMode : uint8_t
@@ -78,6 +82,11 @@ struct PoolBlock
   int shm_fd{-1};
   std::string shm_name;
   uint64_t current_uid{0};
+
+  // Application-owned memory registered with wrap_external_dmabuf(): never
+  // handed out by allocate(); producer_refs counts the live buffers wrapping it.
+  bool external{false};
+  uint32_t producer_refs{0};
 };
 
 /// Configuration for pool growth and block reuse.
@@ -105,8 +114,26 @@ public:
 
   PoolBlock * allocate(size_t byte_size);
 
-  /// Return a block to the pool for reuse.
+  /// Return a block to the pool for reuse (for an external block: drop one
+  /// producer reference).
   void release(PoolBlock * block);
+
+  /// Share an application-owned dma-buf (e.g. a camera buffer) like pool
+  /// memory: the same buffer always maps to the same block, with its own block
+  /// id, refcount metadata and fd export. The pool keeps its own dup of the fd
+  /// and a mapping of the whole buffer. Each call starts a new frame (a new uid
+  /// on publish) and takes a producer reference, dropped by release().
+  /// Returns nullptr if fd is invalid, size exceeds the buffer, or max_blocks
+  /// external buffers are already registered and all in use.
+  PoolBlock * wrap_external_dmabuf(int fd, size_t size);
+
+  /// Before the application overwrites or re-queues a buffer it passed to
+  /// wrap_external_dmabuf(): true if no live buffer of this process wraps it
+  /// and no subscriber holds or is still to import its last published frame
+  /// (descriptors never imported are given up after the grace period). On
+  /// success, descriptors still in flight for that frame are invalidated.
+  /// False: keep the buffer and try again later. True for an unknown fd.
+  bool try_reclaim_external_dmabuf(int fd);
 
   /// Assign a unique publish UID to a block (for staleness detection).
   uint64_t assign_uid(PoolBlock * block);
@@ -143,6 +170,9 @@ private:
   bool probe_level_zero();
   bool probe_dmabuf();
   PoolBlock * create_block(size_t aligned_size);
+  void create_ipc_meta(PoolBlock * block);
+  // Free an external slot if max_blocks are registered; false if all in use.
+  bool make_room_for_external_block();
   void destroy_block(PoolBlock * block);
   bool is_block_ready(PoolBlock * block, bool honor_grace_period = true) const;
 
@@ -172,6 +202,8 @@ private:
 
   std::map<size_t, std::vector<PoolBlock *>> free_blocks_;
   std::vector<std::unique_ptr<PoolBlock>> all_blocks_;
+  // Blocks from wrap_external_dmabuf(), keyed by the dma-buf's identity.
+  std::map<std::string, std::unique_ptr<PoolBlock>> external_blocks_;
   mutable std::mutex mutex_;
 
   // DMA-BUF IPC server state

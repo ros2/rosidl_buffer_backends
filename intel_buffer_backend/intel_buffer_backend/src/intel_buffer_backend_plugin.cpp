@@ -14,6 +14,7 @@
 
 #include "intel_buffer_backend/intel_buffer_backend.hpp"
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstring>
@@ -84,6 +85,19 @@ const std::string & local_host_id()
   return id;
 }
 
+// Identifies this process's PID namespace. Zero-copy references are tracked by
+// pid (holders, liveness checks), which only names the same process inside one
+// PID namespace; containers on one host share the boot id but usually not this.
+// Empty if unavailable, in which case no peer is offered zero-copy.
+const std::string & local_pid_namespace_id()
+{
+  static const std::string id = [] {
+      struct stat st{};
+      return stat("/proc/self/ns/pid", &st) == 0 ? std::to_string(st.st_ino) : std::string();
+    }();
+  return id;
+}
+
 // Metadata entries are '|'-separated: the RMW (rmw_fastrtps user_data) uses
 // ',' and ';' as its own delimiters and truncates the value at either.
 std::string meta_value(const std::string & meta, const std::string & key)
@@ -102,6 +116,22 @@ std::string meta_value(const std::string & meta, const std::string & key)
   }
   return "";
 }
+
+// Cache key for an endpoint's zero-copy decision: all RMW_GID_STORAGE_SIZE bytes
+// of its GID. rmw only guarantees the GID is unique as a whole; its layout is up
+// to the RMW, and part of it can be shared by many endpoints (e.g. a DDS GUID
+// prefix holds the vendor and host id).
+std::string gid_key(const rmw_topic_endpoint_info_t & endpoint_info)
+{
+  return std::string(
+    reinterpret_cast<const char *>(endpoint_info.endpoint_gid), RMW_GID_STORAGE_SIZE);
+}
+
+// The transports a peer can import are cached as a set of these bits.
+uint8_t transport_bit(TransportMode transport)
+{
+  return static_cast<uint8_t>(1u << static_cast<uint8_t>(transport));
+}
 }  // namespace
 
 IntelBufferBackend::IntelBufferBackend()
@@ -112,19 +142,23 @@ std::string IntelBufferBackend::get_backend_metadata() const
 {
   auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
   if (!pool) {
-    return "transport=extmemmap|extmemmap=1|host=" + local_host_id();
+    return "transport=extmemmap|extmemmap=1|host=" + local_host_id() +
+           "|pidns=" + local_pid_namespace_id();
   }
+  // The transport the pool allocates with, which INTEL_MEMORY_BUFFER_TYPE can
+  // force to dmabuf; peers send Level Zero USM only to "l0usm" endpoints.
   std::string meta = "transport=";
-  if (pool->is_level_zero_capable()) {
-    meta += "l0usm";
-  } else if (pool->is_dmabuf_capable()) {
-    meta += "dmabuf";
-  } else {
+  if (!pool->is_level_zero_capable() && !pool->is_dmabuf_capable()) {
     meta += "none";
+  } else if (pool->transport_mode() == TransportMode::LEVEL_ZERO_USM) {
+    meta += "l0usm";
+  } else {
+    meta += "dmabuf";
   }
   meta += "|device=" + std::to_string(pool->ze_device_ordinal());
   meta += "|extmemmap=1";
   meta += "|host=" + local_host_id();
+  meta += "|pidns=" + local_pid_namespace_id();
   return meta;
 }
 
@@ -162,64 +196,38 @@ IntelBufferBackend::on_discovering_endpoint(
 
   const std::string & remote_meta = it->second;
 
-  // Inter-host (or unidentified) peers are incompatible: they get the
-  // CPU-based message instead.
-  const bool same_host = !local_host_id().empty() &&
-    meta_value(remote_meta, "host") == local_host_id();
-
-  bool compatible = same_host &&
-    remote_meta.find("transport=extmemmap") != std::string::npos &&
-    remote_meta.find("extmemmap=1") != std::string::npos;
-
-  if (same_host && !compatible) {
-    if (!IntelBufferImpl<uint8_t>::is_ipc_capable()) {
-      return {false, {}};
+  // Which transports the peer can import. Peers on another host or in another
+  // PID namespace (or unidentified ones) import none and get the CPU-based
+  // message instead.
+  uint8_t imports = 0;
+  if (!local_host_id().empty() && meta_value(remote_meta, "host") == local_host_id() &&
+    !local_pid_namespace_id().empty() &&
+    meta_value(remote_meta, "pidns") == local_pid_namespace_id())
+  {
+    // A DMA-BUF import is an fd received over a UNIX socket plus mmap(), which
+    // any peer can do. A Level Zero USM import needs the peer's Level Zero
+    // driver, which it has if that is the transport it advertises.
+    imports = transport_bit(TransportMode::DMA_BUF);
+    if (meta_value(remote_meta, "extmemmap") == "1") {
+      imports |= transport_bit(TransportMode::EXTERNAL_MEMMAP);
     }
-
-    auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
-    if (!pool) {
-      return {false, {}};
-    }
-
-    if (pool->is_level_zero_capable() &&
-      remote_meta.find("transport=l0usm") != std::string::npos)
-    {
-      compatible = true;
-    } else if (pool->is_dmabuf_capable() &&
-      remote_meta.find("transport=dmabuf") != std::string::npos)
-    {
-      compatible = true;
+    if (meta_value(remote_meta, "transport") == "l0usm") {
+      imports |= transport_bit(TransportMode::LEVEL_ZERO_USM);
     }
   }
 
   {
-    uint32_t gid_hash = 0;
-    for (size_t i = 0; i < RMW_GID_STORAGE_SIZE && i < 4; ++i) {
-      gid_hash = (gid_hash << 8) | endpoint_info.endpoint_gid[i];
-    }
     std::lock_guard<std::mutex> lock(cache_mutex_);
-    ipc_decision_cache_[gid_hash] = compatible;
+    ipc_decision_cache_[gid_key(endpoint_info)] = imports;
   }
 
-  return {compatible, {}};
+  return {imports != 0, {}};
 }
 
 std::shared_ptr<void> IntelBufferBackend::create_descriptor_with_endpoint(
   const void * impl,
   const rmw_topic_endpoint_info_t & endpoint_info) const
 {
-  {
-    uint32_t gid_hash = 0;
-    for (size_t i = 0; i < RMW_GID_STORAGE_SIZE && i < 4; ++i) {
-      gid_hash = (gid_hash << 8) | endpoint_info.endpoint_gid[i];
-    }
-    std::lock_guard<std::mutex> lock(cache_mutex_);
-    auto it = ipc_decision_cache_.find(gid_hash);
-    if (it != ipc_decision_cache_.end() && !it->second) {
-      return nullptr;
-    }
-  }
-
   auto * usm_impl = dynamic_cast<IntelBufferImpl<uint8_t> *>(
     const_cast<rosidl::BufferImplBase<uint8_t> *>(
       static_cast<const rosidl::BufferImplBase<uint8_t> *>(impl)));
@@ -230,6 +238,17 @@ std::shared_ptr<void> IntelBufferBackend::create_descriptor_with_endpoint(
   PoolBlock * block = usm_impl->get_block();
   if (!block) {
     return nullptr;
+  }
+
+  // The descriptor carries this block's transport (not necessarily the pool's:
+  // wrap_dmabuf() / wrap_usm_ptr() / the ring choose their own), so send it
+  // only to a peer that can import that transport.
+  {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    auto it = ipc_decision_cache_.find(gid_key(endpoint_info));
+    if (it != ipc_decision_cache_.end() && !(it->second & transport_bit(block->transport))) {
+      return nullptr;
+    }
   }
 
   if (block->transport == TransportMode::EXTERNAL_MEMMAP) {
@@ -251,6 +270,11 @@ std::shared_ptr<void> IntelBufferBackend::create_descriptor_with_endpoint(
 
   auto pool = IntelBufferImpl<uint8_t>::get_or_create_global_pool();
   if (!pool) {
+    return nullptr;
+  }
+  // Without refcount metadata nothing stops the block from being reused while
+  // a subscriber reads it, and subscribers reject such imports: send a copy.
+  if (!block->ipc_meta) {
     return nullptr;
   }
 
@@ -308,6 +332,8 @@ std::shared_ptr<void> IntelBufferBackend::create_descriptor_with_endpoint(
     desc.dmabuf_socket_path = socket_path;
   }
 
+  // Counted down when the subscriber imports it (see try_reclaim_dmabuf()).
+  block->ipc_meta->pending_imports.fetch_add(1, std::memory_order_seq_cst);
   return frame;
 }
 
