@@ -1,0 +1,19 @@
+# Intel USM buffer backend — DMA-BUF access
+#
+# The backend allocates all shared frame buffers from the kernel dma-heap
+# subsystem (/dev/dma_heap/system). By default that device node is root-only
+# (crw------- root root), so ROS 2 nodes running as a normal user cannot
+# allocate DMA-BUFs and the pool reports "DMA-BUF unavailable".
+#
+# This rule grants the "render" group read/write access to the system dma-heap,
+# matching the access model already used for the iGPU render node
+# (/dev/dri/renderD128). Add your user to the "render" group:
+#
+#     sudo usermod -aG render $USER      # then log out / back in
+#
+# Install:
+#     sudo cp 60-intel-memory-dmabuf.rules /etc/udev/rules.d/
+#     sudo udevadm control --reload-rules
+#     sudo udevadm trigger --subsystem-match=dma_heap
+#
+SUBSYSTEM=="dma_heap", KERNEL=="system", GROUP="render", MODE="0660"
