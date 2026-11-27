@@ -1,0 +1,25 @@
+# Copyright 2026 Meta Platforms, Inc. and affiliates.
+# Licensed under the Apache License, Version 2.0
+
+# Without a CUDA ExecuTorch, the package reports itself not found, with the reason.
+# A later find_package skips this file and clears the message, so the reason is
+# also kept in EXECUTORCH_CUDA_VENDOR_SKIPPED.
+set(EXECUTORCH_CUDA_VENDOR_SKIPPED "@EXECUTORCH_CUDA_VENDOR_SKIPPED@")
+if(EXECUTORCH_CUDA_VENDOR_SKIPPED)
+  set(EXECUTORCH_CUDA_VENDOR_SKIPPED
+    "executorch_cuda_vendor installed no ExecuTorch: ${EXECUTORCH_CUDA_VENDOR_SKIPPED}")
+  set(executorch_cuda_vendor_FOUND FALSE)
+  set(executorch_cuda_vendor_NOT_FOUND_MESSAGE "${EXECUTORCH_CUDA_VENDOR_SKIPPED}")
+else()
+  set(EXECUTORCH_CUDA_VENDOR_ACTIVE TRUE)
+  # The toolkit's major version this package was checked against. A CUDA package that
+  # finds another toolkit would load 2 CUDA runtimes, so it can skip itself instead.
+  set(EXECUTORCH_CUDA_VENDOR_CUDA_MAJOR "@CUDAToolkit_VERSION_MAJOR@")
+  find_package(executorch_vendor REQUIRED)
+  if(NOT "@EXECUTORCH_CUDA_VENDOR_DIR@" STREQUAL "")
+    set(executorch_DIR "@EXECUTORCH_CUDA_VENDOR_DIR@")
+  else()
+    set(executorch_DIR "${executorch_cuda_vendor_DIR}/../../../opt/executorch_cuda_vendor/share/cmake")
+  endif()
+  executorch_vendor_check_existing_targets()
+endif()
