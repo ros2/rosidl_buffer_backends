@@ -58,7 +58,7 @@ public:
   }
 
 private:
-  void image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+  void image_callback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
   {
     const std::string backend = msg->data.get_backend_type();
     if (backend != "cuda") {

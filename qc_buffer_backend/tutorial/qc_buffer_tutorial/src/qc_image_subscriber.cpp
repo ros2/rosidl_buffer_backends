@@ -46,7 +46,7 @@ public:
   }
 
 private:
-  void on_image(const sensor_msgs::msg::Image::SharedPtr msg)
+  void on_image(const sensor_msgs::msg::Image::ConstSharedPtr msg)
   {
     ++count_;
     const std::string backend = msg->data.get_backend_type();
@@ -54,7 +54,7 @@ private:
     if (backend == "qc") {
       // Zero-copy: read the same ION memory the publisher wrote.
       const int fd = qc_buffer_backend::get_dmabuf_fd(msg->data);
-      uint8_t * p = qc_buffer_backend::get_data_ptr(msg->data);
+      const uint8_t * p = qc_buffer_backend::get_data_ptr(msg->data);
       const uint8_t first = (p != nullptr && msg->data.size() > 0) ? p[0] : 0;
 
       RCLCPP_INFO(this->get_logger(),

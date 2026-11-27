@@ -105,7 +105,7 @@ publisher->publish(msg);
 ```cpp
 #include "cuda_buffer/cuda_buffer_api.hpp"
 
-void callback(const sensor_msgs::msg::Image::SharedPtr msg) {
+void callback(const sensor_msgs::msg::Image::ConstSharedPtr msg) {
   cuda_buffer_backend::ReadHandle rh =
     cuda_buffer_backend::from_input_buffer(msg->data, stream);
   // ReadHandle constructor waits on publisher's write_event.

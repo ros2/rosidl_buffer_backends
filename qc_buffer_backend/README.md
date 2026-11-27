@@ -64,7 +64,7 @@ subscription_ = create_subscription<sensor_msgs::msg::Image>(
 // in the callback:
 if (msg->data.get_backend_type() == "qc") {
   int fd = qc_buffer_backend::get_dmabuf_fd(msg->data);   // pass to the HTP accelerator
-  uint8_t * p = qc_buffer_backend::get_data_ptr(msg->data);  // CPU read, no copy
+  const uint8_t * p = qc_buffer_backend::get_data_ptr(msg->data);  // CPU read, no copy
   // ... use p / fd ...
 } else {
   const std::vector<uint8_t> & data = msg->data;   // CPU fallback
