@@ -80,6 +80,18 @@ inline uint8_t * get_data_ptr(rosidl::Buffer<uint8_t> & buffer)
   return qc ? qc->data() : nullptr;
 }
 
+/// \brief Return a read-only CPU-accessible pointer backing \p buffer, or
+/// nullptr if the buffer is not qc-backed.
+inline const uint8_t * get_data_ptr(const rosidl::Buffer<uint8_t> & buffer)
+{
+  const auto * impl = detail::qc_impl_of(buffer);
+  if (!impl) {
+    return nullptr;
+  }
+  const auto & qc = impl->get_qc_buffer();
+  return qc ? qc->data() : nullptr;
+}
+
 }  // namespace qc_buffer_backend
 
 #endif  // QC_BUFFER__QC_BUFFER_API_HPP_

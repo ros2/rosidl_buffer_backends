@@ -298,11 +298,31 @@ TEST(QcBufferApiTest, GetDataPtrIsNonNull)
   EXPECT_NE(qc_buffer_backend::get_data_ptr(buf), nullptr);
 }
 
+// get_data_ptr on a const buffer returns the same, read-only, pointer.
+TEST(QcBufferApiTest, GetDataPtrOnConstBufferMatches)
+{
+  if (!RpcMemLoader::instance().available()) {
+    GTEST_SKIP() << "rpcmem not available";
+  }
+  auto buf = qc_buffer_backend::allocate_buffer(8);
+  const auto & const_buf = buf;
+  EXPECT_EQ(qc_buffer_backend::get_data_ptr(const_buf), qc_buffer_backend::get_data_ptr(buf));
+}
+
 // get_dmabuf_fd returns -1 for a default-constructed (CPU) buffer.
 TEST(QcBufferApiTest, GetDmabufFdReturnsMinus1ForCpuBuffer)
 {
   rosidl::Buffer<uint8_t> buf;
   EXPECT_EQ(qc_buffer_backend::get_dmabuf_fd(buf), -1);
+}
+
+// get_data_ptr returns nullptr for a default-constructed (CPU) buffer, const or not.
+TEST(QcBufferApiTest, GetDataPtrReturnsNullForCpuBuffer)
+{
+  rosidl::Buffer<uint8_t> buf;
+  const auto & const_buf = buf;
+  EXPECT_EQ(qc_buffer_backend::get_data_ptr(buf), nullptr);
+  EXPECT_EQ(qc_buffer_backend::get_data_ptr(const_buf), nullptr);
 }
 
 // ── FdBroker ─────────────────────────────────────────────────────────────────

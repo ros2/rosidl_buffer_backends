@@ -79,7 +79,7 @@ public:
   }
 
 private:
-  void image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+  void image_callback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
   {
     double latency_ms = (this->now() - msg->header.stamp).seconds() * 1000.0;
     received_count_++;
