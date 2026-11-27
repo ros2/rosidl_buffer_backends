@@ -35,7 +35,7 @@ struct IPCMetadata;
 /// exported file descriptors can be served over Unix-domain sockets. On the
 /// subscriber side, import_block() receives the FD, maps the VMM block into
 /// the local process, validates the block UID, increments IPCMetadata::refcount,
-/// and caches imports by (publisher pid, block id).
+/// and caches imports by socket name.
 class CudaVmmIPCManager
 {
 public:
@@ -48,6 +48,12 @@ public:
   CudaVmmIPCManager & operator=(CudaVmmIPCManager &&) = delete;
 
   std::string register_block(VmmBlock * block);
+
+  /// Name of this process's block on the host: the abstract socket that serves its FD and, with a
+  /// leading '/', its IPCMetadata segment. It carries the PID namespace, because processes in two
+  /// containers can have the same ID and still share the abstract socket namespace (one network
+  /// namespace) and /dev/shm (one IPC namespace).
+  static std::string block_name(uint32_t block_id);
 
   struct ImportResult
   {

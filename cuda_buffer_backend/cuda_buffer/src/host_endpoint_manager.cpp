@@ -153,6 +153,19 @@ HostEndpointManager::get_instance(size_t domain_id)
   return instance;
 }
 
+uint64_t pid_namespace()
+{
+  // Env-var name for testing the other-namespace path without a second PID namespace.
+  // Not intended for production configuration — use only from test launches.
+  if (auto v = parse_override_int_env(
+      "CUDA_BUFFER_PID_NAMESPACE_OVERRIDE", 1, std::numeric_limits<int64_t>::max()))
+  {
+    return static_cast<uint64_t>(*v);
+  }
+  struct stat st;
+  return stat("/proc/self/ns/pid", &st) == 0 ? static_cast<uint64_t>(st.st_ino) : 0;
+}
+
 HostEndpointManager::HostEndpointManager(size_t domain_id)
 : domain_id_(domain_id),
   instance_id_(0),
@@ -201,8 +214,14 @@ HostEndpointManager::HostEndpointManager(size_t domain_id)
   hostname_ = hostname_buf;
 
   uint32_t host_hash = hash_string(hostname_);
+  // One registry per PID namespace. Entries are identified, and purged once their process has
+  // exited, by process ID, which kill() resolves only in its caller's PID namespace. Peers in
+  // another PID namespace, such as another container, are therefore never found and get the
+  // host path, which they need anyway: CUDA's interprocess events do not open across PID
+  // namespaces. A namespace that ends without a clean exit, such as a killed container, leaves
+  // only its own registry behind.
   shm_name_ = "/ros2_hem_d" + std::to_string(domain_id) +
-    "_h" + std::to_string(host_hash);
+    "_h" + std::to_string(host_hash) + "_n" + std::to_string(pid_namespace());
 
   shm_size_ = sizeof(EndpointRegistry);
 
