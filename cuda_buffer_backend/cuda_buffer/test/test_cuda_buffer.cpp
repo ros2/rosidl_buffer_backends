@@ -22,11 +22,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <set>
 #include <string>
 #include <thread>
@@ -34,6 +36,7 @@
 
 #include "cuda_buffer/cuda_buffer.hpp"
 #include "cuda_buffer/cuda_buffer_api.hpp"
+#include "cuda_buffer/cuda_memory_pool.hpp"
 #include "rosidl_buffer/buffer.hpp"
 
 extern char ** environ;
@@ -79,6 +82,119 @@ protected:
   cudaStream_t stream1_{nullptr};
   cudaStream_t stream2_{nullptr};
 };
+
+TEST_F(CudaBufferTest, RecyclerDoesNotBlockReadyBuffersBehindPendingWork)
+{
+  struct Gate
+  {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered{false};
+    bool open{false};
+
+    void release()
+    {
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        open = true;
+      }
+      cv.notify_one();
+    }
+  };
+  auto pending_gate = std::make_shared<Gate>();
+  auto later_gate = std::make_shared<Gate>();
+
+  struct CallbackData
+  {
+    std::shared_ptr<Gate> gate;
+  };
+  auto wait_for_gate = [](void * data) {
+      std::unique_ptr<CallbackData> callback_data(static_cast<CallbackData *>(data));
+      auto gate = callback_data->gate;
+      std::unique_lock<std::mutex> lock(gate->mutex);
+      gate->entered = true;
+      gate->cv.notify_all();
+      gate->cv.wait(lock, [&gate] {return gate->open;});
+    };
+
+  struct CallbackCleanup
+  {
+    std::shared_ptr<Gate> pending_gate;
+    std::shared_ptr<Gate> later_gate;
+    cudaStream_t pending_stream;
+    cudaStream_t later_stream;
+
+    ~CallbackCleanup()
+    {
+      pending_gate->release();
+      later_gate->release();
+      (void)cudaStreamSynchronize(pending_stream);
+      (void)cudaStreamSynchronize(later_stream);
+    }
+  } cleanup{pending_gate, later_gate, stream1_, stream2_};
+
+  cudaEvent_t pending_event = nullptr;
+  cudaEvent_t later_event = nullptr;
+  ASSERT_EQ(cudaSuccess, cudaEventCreateWithFlags(&pending_event, cudaEventDisableTiming));
+  ASSERT_EQ(cudaSuccess, cudaEventCreateWithFlags(&later_event, cudaEventDisableTiming));
+
+  // Ensure the later entry is still pending when destroyed. Queue the first
+  // callback only after this callback has begun, so both events are pending.
+  auto later_callback_data = std::make_unique<CallbackData>();
+  later_callback_data->gate = later_gate;
+  ASSERT_EQ(
+    cudaSuccess,
+    cudaLaunchHostFunc(stream2_, wait_for_gate, later_callback_data.get()));
+  later_callback_data.release();
+  ASSERT_EQ(cudaSuccess, cudaEventRecord(later_event, stream2_));
+  {
+    std::unique_lock<std::mutex> lock(later_gate->mutex);
+    ASSERT_TRUE(later_gate->cv.wait_for(
+        lock, std::chrono::seconds(5), [&later_gate] {return later_gate->entered;}));
+  }
+  auto pending_callback_data = std::make_unique<CallbackData>();
+  pending_callback_data->gate = pending_gate;
+  ASSERT_EQ(
+    cudaSuccess,
+    cudaLaunchHostFunc(stream1_, wait_for_gate, pending_callback_data.get()));
+  pending_callback_data.release();
+  ASSERT_EQ(cudaSuccess, cudaEventRecord(pending_event, stream1_));
+
+  std::atomic<bool> pending_released{false};
+  std::atomic<bool> later_released{false};
+  auto pending = std::make_unique<cuda_buffer_backend::CudaBuffer>(
+    new uint8_t, 1, 0, [&pending_released](uint8_t * ptr) {
+      delete ptr;
+      pending_released = true;
+    });
+  pending->set_write_event(pending_event, true);
+  pending.reset();
+
+  auto later = std::make_unique<cuda_buffer_backend::CudaBuffer>(
+    new uint8_t, 1, 0, [&later_released](uint8_t * ptr) {
+      delete ptr;
+      later_released = true;
+    });
+  later->set_write_event(later_event, true);
+  later.reset();
+
+  later_gate->release();
+  EXPECT_EQ(cudaSuccess, cudaStreamSynchronize(stream2_));
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (!later_released && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(later_released);
+  EXPECT_FALSE(pending_released);
+
+  pending_gate->release();
+  EXPECT_EQ(cudaSuccess, cudaStreamSynchronize(stream1_));
+  // Keep the deleters' captured state alive until the recycler finishes.
+  while (!pending_released || !later_released) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+}
 
 TEST_F(CudaBufferTest, AllocateAndWriteHandle)
 {
@@ -544,6 +660,34 @@ TEST(CudaBufferPoolTest, IsPoolIpcCapableDoesNotThrow)
   EXPECT_EQ(after_first, after_second);
   RecordProperty("ipc_capable", capable ? "true" : "false");
   RecordProperty("pool_warnings", after_second);
+}
+
+// A reused block must not keep the UID of its last publication.
+TEST(CudaMemoryPoolTest, ReusedBlockInvalidatesPublishedUid)
+{
+  auto pool = std::make_shared<cuda_buffer_backend::CudaMemoryPool>();
+  if (pool->create() != CUDA_SUCCESS) {
+    GTEST_SKIP() << "no CUDA device with VMM support: this test needs a GPU";
+  }
+  constexpr size_t kSize = 1 << 20;
+  cuda_buffer_backend::VmmBlock * block = pool->allocate(kSize);
+  ASSERT_NE(block, nullptr);
+  if (block->ipc_meta == nullptr) {
+    pool->free(block);
+    GTEST_SKIP() << "the pool is not IPC capable here: blocks have no shared UID";
+  }
+  const uint64_t uid = pool->assign_uid(block);  // published
+  ASSERT_NE(uid, 0u);
+  ASSERT_EQ(block->ipc_meta->uid.load(), uid);
+  pool->free(block);
+
+  // No subscriber has imported it: after the grace period the block is reused.
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  cuda_buffer_backend::VmmBlock * reused = pool->allocate(kSize);
+  ASSERT_EQ(reused, block);
+  EXPECT_NE(reused->ipc_meta->uid.load(), uid)
+    << "a late import of the old descriptor would pass the UID check";
+  pool->free(reused);
 }
 
 int main(int argc, char ** argv)

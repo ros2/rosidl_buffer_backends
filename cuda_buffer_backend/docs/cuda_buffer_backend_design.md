@@ -50,27 +50,33 @@ sequenceDiagram
   participant Cache as Subscriber import cache
 
   Pub->>Pool: allocate(byte_count)
-  Pool-->>Pub: VmmBlock (va, exported_fd, ipc_meta, uid)
+  Pool-->>Pub: VmmBlock (va, exported_fd, ipc_meta)
   Pub->>Pub: write data to GPU memory
+  Pub->>Pool: assign_uid(block): store new nonzero UID, opening the generation
   Pub-->>Sub: publish CudaBufferDescriptor
 
   Sub->>Cache: lookup (pid, block_id)
-  alt cache hit
-    Cache-->>Sub: existing import (no FD round-trip)
-  else cache miss
-    Sub->>Pub: connect(socket_path)
-    Pub->>Sub: sendmsg with SCM_RIGHTS (FD)
-    Sub->>Sub: cuMemImportFromShareableHandle + map
+  alt cache miss
     Sub->>Sub: mmap IPCMetadata
-    Sub->>Cache: insert
   end
 
-  Sub->>Sub: ipc_meta->refcount.fetch_add(1)
-  Sub-->>Sub: deliver CUDA-backed Buffer to user
+  Sub->>Sub: acquire lease: check descriptor UID, refcount.fetch_add(1), check UID again
+  alt UID closed or stale, or metadata missing
+    Sub-->>Sub: drop descriptor
+  else lease held
+    alt cache miss
+      Sub->>Pub: connect(socket_path)
+      Pub->>Sub: sendmsg with SCM_RIGHTS (FD)
+      Sub->>Sub: cuMemImportFromShareableHandle + map
+      Sub->>Cache: insert
+    end
+    Sub->>Sub: import the producer event
+    Sub-->>Sub: deliver CUDA-backed Buffer to user
+  end
 
   Note over Sub: on Buffer destroy
-  Sub->>Sub: ipc_meta->refcount.fetch_sub(1)
-  Note over Pub: pool may now recycle the block
+  Sub->>Sub: destroy imported event, refcount.fetch_sub(1)
+  Note over Pub: refcount zero is one of the conditions for reuse
 ```
 
 The first transmission of a `(pid, block_id)` pair does the full FD
@@ -108,25 +114,42 @@ flowchart TD
   B --> C["WriteHandle records write event"]
   C --> D["Descriptor published"]
 
-  D --> E["Subscriber imports block"]
-  E --> F{"Descriptor UID matches shared-memory UID?"}
-  F -->|"yes"| G["IPC refcount increments"]
-  F -->|"no"| S["stale buffer, discard"]
-  G --> H["Local CudaBuffer and ReadHandle"]
+  D --> E["Subscriber acquires open UID generation"]
+  E -->|"accepted"| G["IPC refcount increments"]
+  E -->|"closed, stale or missing metadata"| S["discard descriptor before event import"]
+  G --> H["Import event; local CudaBuffer and ReadHandle"]
   H --> I["Local recycler waits read events"]
-  I --> J["IPC refcount decrements"]
+  I --> J["Destroy imported event; decrement IPC refcount"]
 
-  J --> K{"Safe to recycle?"}
-  K -->|"refcount zero and grace elapsed"| A
-  K -->|"otherwise"| K
+  D --> P["Pool retains exported event with returned block"]
+  P --> K{"Grace elapsed?"}
+  K -->|"no"| K
+  K -->|"yes"| R{"IPC refcount zero?"}
+  R -->|"no: lease held, generation stays open"| R
+  R -->|"yes"| L["Close generation by setting shared UID to zero"]
+  L --> M{"IPC refcount still zero and producer event complete?"}
+  M -->|"yes"| N["Destroy exported event and reuse block with a new UID"]
+  M -->|"no"| M
+  N --> A
 ```
 
-A CUDA buffer is a pooled VMM block wrapped in `CudaBuffer`. When the block is
-imported in another process, the import increments the shared-memory IPC
-refcount, while local `shared_ptr` ownership keeps the imported `CudaBuffer`
-alive inside that process. When the last local owner is released, the recycler
-waits for recorded CUDA read events before decrementing the IPC refcount.
-The publisher may recycle the block only after the IPC refcount returns to
-zero and a short grace window has elapsed. If a late subscriber still races
-with reuse, it detects stale data on first access by comparing the descriptor
-UID with the UID stored in shared memory.
+A CUDA buffer is a pooled VMM block wrapped in `CudaBuffer`. Before importing a
+block, a subscriber atomically acquires its published UID generation. The
+acquisition increments the shared-memory IPC refcount only while that
+generation remains open. Local `shared_ptr` ownership then keeps the imported
+`CudaBuffer` alive. When the last local owner is released, the recycler waits
+for recorded CUDA read events, destroys the imported event handle, and
+decrements the IPC refcount.
+
+When the publisher returns a block, the pool retains any exported write event
+with that block. After the grace window, the pool leaves the generation open
+while any subscriber holds a lease, so other subscribers of the same
+publication can still import it. Once the IPC refcount reads zero, the pool
+closes the generation to new imports by setting the shared UID to zero, and
+checks the refcount again to catch a lease taken just before the store. It
+destroys the exported event and reuses the block only after the producer event
+has completed and the IPC refcount is zero. A reused block keeps UID zero
+(closed) until it is next published; publication stores a new nonzero UID,
+which reopens the generation. A delayed subscriber therefore observes a closed
+or different UID and discards the descriptor before calling
+`cudaIpcOpenEventHandle`.
