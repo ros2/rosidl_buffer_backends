@@ -33,10 +33,6 @@
 namespace cuda_buffer_backend
 {
 
-/// Process-wide VMM allocation pool. Defined out-of-line so backend plugins
-/// and application DSOs resolve allocations through the same pool instance.
-CUDA_BUFFER_PUBLIC std::shared_ptr<CudaMemoryPool> get_or_create_global_pool();
-
 // Process-wide stream for internal ops (clone, to_cpu, resize).
 // Intentionally leaked; the CUDA driver releases it at process exit.
 inline cudaStream_t get_internal_stream()
@@ -56,23 +52,26 @@ inline cudaStream_t get_internal_stream()
   return s;
 }
 
+/// \brief rosidl buffer implementation for CUDA device memory.
+///
+/// CudaBufferImpl is the typed, rosidl-facing view of a CudaBuffer. It is the
+/// same class for every storage backend: where the device memory comes from is
+/// decided by the CudaBuffer it owns.
 template<typename T>
 class CudaBufferImpl : public rosidl::BufferImplBase<T>
 {
 public:
   CudaBufferImpl()
-  : size_(0) {}
+  : size_(0), cuda_buffer_(CudaBuffer::allocate(0)) {}
 
   explicit CudaBufferImpl(size_t size)
-  : size_(size)
-  {
-    if (size_ > 0) {
-      allocate_buffer(size_);
-    }
-  }
+  : size_(size), cuda_buffer_(CudaBuffer::allocate(size * sizeof(T))) {}
 
-  explicit CudaBufferImpl(CudaBuffer && buffer, size_t size)
-  : size_(size), cuda_buffer_(std::move(buffer)) {}
+  /// \brief Adopt existing storage, for example a buffer imported from another process.
+  /// \details A null \p buffer yields an empty CudaBufferImpl, whatever \p size says.
+  explicit CudaBufferImpl(std::unique_ptr<CudaBuffer> buffer, size_t size)
+  : size_(buffer ? size : 0),
+    cuda_buffer_(buffer ? std::move(buffer) : CudaBuffer::allocate(0)) {}
 
   ~CudaBufferImpl() = default;
 
@@ -85,6 +84,12 @@ public:
 
   size_t size() const override {return size_;}
 
+  /// \brief Resize to \p n elements, keeping the leading elements that fit.
+  /// \details Replaces the underlying CudaBuffer unless \p n equals the current
+  /// size. That invalidates every ReadHandle and WriteHandle obtained from this
+  /// object, and the reference returned by get_cuda_buffer(), in the same way
+  /// that resizing a std::vector invalidates its iterators. Release all handles
+  /// before calling this.
   void resize(size_t n)
   {
     if (n == size_) {
@@ -96,14 +101,13 @@ public:
       return;
     }
 
-    CudaBuffer new_buffer;
-    allocate_buffer_internal(new_buffer, n);
+    std::unique_ptr<CudaBuffer> new_buffer = CudaBuffer::allocate(n * sizeof(T));
 
-    if (size_ > 0 && cuda_buffer_.size() > 0) {
+    if (size_ > 0 && cuda_buffer_->size() > 0) {
       cudaStream_t s = stream_ ? stream_ : get_internal_stream();
       size_t copy_size = std::min(n, size_) * sizeof(T);
-      ReadHandle rh = cuda_buffer_.get_read_handle(s);
-      WriteHandle wh = new_buffer.get_write_handle(s);
+      ReadHandle rh = cuda_buffer_->get_read_handle(s);
+      WriteHandle wh = new_buffer->get_write_handle(s);
       CUDA_CHECK(cudaMemcpyAsync(
         wh.get_ptr(), rh.get_ptr(),
         copy_size, cudaMemcpyDeviceToDevice, s));
@@ -113,9 +117,12 @@ public:
     size_ = n;
   }
 
+  /// \brief Release the storage and become empty.
+  /// \details Invalidates outstanding handles and the reference returned by
+  /// get_cuda_buffer(), as resize() does. Release all handles before calling this.
   void clear()
   {
-    cuda_buffer_ = CudaBuffer();
+    cuda_buffer_ = CudaBuffer::allocate(0);
     size_ = 0;
   }
 
@@ -124,9 +131,9 @@ public:
     auto cpu = std::make_unique<rosidl::CpuBufferImpl<T>>();
     cpu->get_storage().resize(size_);
 
-    if (size_ > 0 && cuda_buffer_.size() > 0) {
+    if (size_ > 0 && cuda_buffer_->size() > 0) {
       cudaStream_t s = stream_ ? stream_ : get_internal_stream();
-      ReadHandle rh = cuda_buffer_.get_read_handle(s);
+      ReadHandle rh = cuda_buffer_->get_read_handle(s);
       CUDA_CHECK(cudaMemcpyAsync(
         cpu->get_storage().data(), rh.get_ptr(),
         size_ * sizeof(T), cudaMemcpyDeviceToHost, s));
@@ -140,10 +147,10 @@ public:
   {
     auto copy = std::make_unique<CudaBufferImpl<T>>(size_);
 
-    if (size_ > 0 && cuda_buffer_.size() > 0) {
+    if (size_ > 0 && cuda_buffer_->size() > 0) {
       cudaStream_t s = stream_ ? stream_ : get_internal_stream();
-      ReadHandle rh = cuda_buffer_.get_read_handle(s);
-      WriteHandle wh = copy->cuda_buffer_.get_write_handle(s);
+      ReadHandle rh = cuda_buffer_->get_read_handle(s);
+      WriteHandle wh = copy->cuda_buffer_->get_write_handle(s);
       CUDA_CHECK(cudaMemcpyAsync(
         wh.get_ptr(), rh.get_ptr(),
         size_ * sizeof(T), cudaMemcpyDeviceToDevice, s));
@@ -152,12 +159,12 @@ public:
     return copy;
   }
 
-  CudaBuffer & get_cuda_buffer() {return cuda_buffer_;}
-  const CudaBuffer & get_cuda_buffer() const {return cuda_buffer_;}
+  CudaBuffer & get_cuda_buffer() {return *cuda_buffer_;}
+  const CudaBuffer & get_cuda_buffer() const {return *cuda_buffer_;}
 
   void set_stream(cudaStream_t stream) {stream_ = stream;}
   cudaStream_t get_stream() const {return stream_;}
-  int get_device_id() const {return cuda_buffer_.get_device_id();}
+  int get_device_id() const {return cuda_buffer_->get_device_id();}
 
   static std::shared_ptr<CudaMemoryPool> get_or_create_global_pool()
   {
@@ -181,48 +188,9 @@ public:
   }
 
 private:
-  void allocate_buffer(size_t n)
-  {
-    allocate_buffer_internal(cuda_buffer_, n);
-  }
-
-  void allocate_buffer_internal(CudaBuffer & buffer, size_t n)
-  {
-    auto pool = get_or_create_global_pool();
-    size_t byte_size = n * sizeof(T);
-
-    VmmBlock * block = pool->allocate(byte_size);
-
-    cudaEvent_t ev = nullptr;
-    cudaError_t ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_DEFAULT_EVENT_FLAGS);
-    if (ev_err != cudaSuccess) {
-      const cudaError_t interprocess_event_error = ev_err;
-      (void)cudaGetLastError();
-      ev_err = cudaEventCreateWithFlags(&ev, CUDA_BUFFER_MINIMUM_EVENT_FLAGS);
-      if (ev_err != cudaSuccess) {
-        ev = nullptr;
-        (void)cudaGetLastError();
-        RCUTILS_LOG_WARN_NAMED("cuda_buffer_backend",
-          "Failed to create CUDA event; stream ordering disabled for this buffer");
-      } else {
-        RCUTILS_LOG_WARN_ONCE_NAMED(
-          "cuda_buffer_backend",
-          "Failed to create interprocess CUDA event (%s); falling back to a local event",
-          cudaGetErrorName(interprocess_event_error));
-      }
-    }
-
-    buffer = CudaBuffer(
-      reinterpret_cast<void *>(block->va), byte_size, pool->get_device_id(),
-      pool->deleter(block));
-
-    if (ev) {
-      buffer.set_write_event(ev, true);
-    }
-  }
-
   size_t size_;
-  CudaBuffer cuda_buffer_;
+  /// Never null; an empty buffer stands in when there is no storage.
+  std::unique_ptr<CudaBuffer> cuda_buffer_;
   cudaStream_t stream_{nullptr};
 };
 

@@ -18,6 +18,7 @@
 #include <cuda_runtime.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -26,100 +27,104 @@
 
 #include "cuda_buffer/cuda_buffer_handle.hpp"
 #include "cuda_buffer/cuda_error.hpp"
+#include "cuda_buffer/visibility_control.h"
 
 namespace cuda_buffer_backend
 {
 
-/// \brief Internal CUDA storage object owned by CudaBufferImpl.
+/// \brief The storage backend behind a CudaBuffer.
+/// \details Code that treats one backend specially, such as the plugin's
+/// transport, switches on CudaBuffer::storage_kind() and then static_casts to
+/// the class the enumerator names. Each new backend adds an enumerator here.
+enum class StorageKind
+{
+  /// VmmBuffer: CUDA Virtual Memory Management.
+  Vmm,
+};
+
+/// \brief Abstract CUDA storage object owned by CudaBufferImpl.
 ///
 /// The public rosidl buffer hierarchy is:
 ///   rosidl::Buffer<T> -> rosidl::BufferImplBase<T> -> CudaBufferImpl<T>.
-/// CudaBuffer is not part of that hierarchy. It is the
-/// low-level RAII holder for the CUDA device pointer, device id, write/read
-/// event state, and deferred recycler used by CudaBufferImpl.
-class CudaBuffer
+/// CudaBuffer is not part of that hierarchy. It is the byte-level storage
+/// that CudaBufferImpl owns, and the interface through which read and write
+/// handles are acquired.
+///
+/// This base class owns everything that is the same for every storage
+/// backend: the size, the device id, and the write-handle state machine
+/// (one writer, no write after a read, finalize on publish). How the device
+/// memory is obtained and released, and how producer and consumer streams are
+/// ordered against each other, is left to the storage backend through the
+/// protected hooks below. VmmBuffer is the CUDA VMM implementation.
+class CUDA_BUFFER_PUBLIC CudaBuffer
 {
 public:
-  CudaBuffer() = default;
-
-  CudaBuffer(CudaBuffer && other) noexcept
-  : device_ptr_(std::move(other.device_ptr_)),
-    size_(other.size_),
-    device_id_(other.device_id_),
-    write_event_(other.write_event_),
-    owns_write_event_(other.owns_write_event_),
-    read_events_(std::move(other.read_events_)),
-    handle_state_(std::move(other.handle_state_)),
-    recycler_(std::move(other.recycler_))
-  {
-    other.size_ = 0;
-    other.device_id_ = 0;
-    other.write_event_ = nullptr;
-    other.owns_write_event_ = false;
-  }
+  virtual ~CudaBuffer();
 
   CudaBuffer(const CudaBuffer &) = delete;
   CudaBuffer & operator=(const CudaBuffer &) = delete;
+  CudaBuffer(CudaBuffer &&) = delete;
+  CudaBuffer & operator=(CudaBuffer &&) = delete;
 
-  CudaBuffer & operator=(CudaBuffer && other) noexcept
-  {
-    if (this != &other) {
-      std::swap(device_ptr_, other.device_ptr_);
-      std::swap(size_, other.size_);
-      std::swap(device_id_, other.device_id_);
-      std::swap(write_event_, other.write_event_);
-      std::swap(owns_write_event_, other.owns_write_event_);
-      std::swap(read_events_, other.read_events_);
-      std::swap(handle_state_, other.handle_state_);
-      std::swap(recycler_, other.recycler_);
-    }
-    return *this;
-  }
+  /// \brief Allocate \p byte_size bytes from this process's storage backend.
+  /// \details This is where the storage backend for new allocations is chosen.
+  /// Buffers received from another process are constructed by the plugin. A
+  /// \p byte_size of zero returns an empty buffer without touching the device.
+  static std::unique_ptr<CudaBuffer> allocate(size_t byte_size);
 
-  ~CudaBuffer();
-
-  CudaBuffer(
-    void * ptr, size_t size, int device_id,
-    std::function<void(uint8_t *)> custom_deleter);
+  /// \brief The storage backend this buffer belongs to.
+  /// \details Every subclass returns its own enumerator, so a static_cast to
+  /// the class that enumerator names is valid.
+  virtual StorageKind storage_kind() const noexcept = 0;
 
   ReadHandle get_read_handle(cudaStream_t stream) const;
   WriteHandle get_write_handle(cudaStream_t stream);
-
-  void set_write_event(cudaEvent_t event, bool owns_event = false)
-  {
-    write_event_ = event;
-    owns_write_event_ = owns_event;
-  }
-
-  cudaEvent_t get_write_event() const {return write_event_;}
 
   void finalize_write_handle() const;
 
   size_t size() const {return size_;}
   int get_device_id() const {return device_id_;}
-  uint8_t * get_device_ptr() {return device_ptr_.get();}
-  const uint8_t * get_device_ptr() const {return device_ptr_.get();}
+  uint8_t * get_device_ptr() {return device_ptr();}
+  const uint8_t * get_device_ptr() const {return device_ptr();}
+
+protected:
+  CudaBuffer() = default;
+  CudaBuffer(size_t size, int device_id)
+  : size_(size), device_id_(device_id) {}
+
+  /// \brief Device pointer of the storage, or nullptr for an empty buffer.
+  virtual uint8_t * device_ptr() const noexcept = 0;
+
+  /// \brief Make work submitted to \p stream wait for the producer's write.
+  /// \details Called before a read handle is handed out. \p stream may be
+  /// nullptr. May throw CudaError.
+  virtual void wait_for_write(cudaStream_t stream) const = 0;
+
+  /// \brief Mark the end of the producer's work on \p stream.
+  /// \details Called once per write, either when the write handle is released
+  /// or when the write is finalized on publish. \p stream is usable.
+  virtual void signal_write(cudaStream_t stream) const noexcept = 0;
+
+  /// \brief Mark the end of a consumer's work on \p stream.
+  /// \details Called when a read handle is released. \p stream is usable.
+  virtual void signal_read(cudaStream_t stream) const noexcept = 0;
+
+  /// \brief Drop bookkeeping for reads that have completed.
+  /// \return the number of reads that are still in flight.
+  virtual size_t reap_completed_reads() const = 0;
 
 private:
-  class BufferRecycler;
+  friend class ReadHandle;
+  friend class WriteHandle;
 
-  void reap_completed_read_events() const;
   void finalize_write_handle_locked() const;
-  static void default_cuda_free(uint8_t * p);
 
-  std::unique_ptr<uint8_t, std::function<void(uint8_t *)>> device_ptr_{
-    nullptr, default_cuda_free
-  };
   size_t size_{0};
   int device_id_{0};
 
-  mutable cudaEvent_t write_event_{nullptr};
-  bool owns_write_event_{false};
-  mutable std::vector<cudaEvent_t> read_events_;
-  mutable std::mutex events_mutex_;
-
+  /// Serializes write-handle acquisition.
+  std::mutex write_acquire_mutex_;
   std::shared_ptr<HandleState> handle_state_{nullptr};
-  std::shared_ptr<BufferRecycler> recycler_;
 };
 
 }  // namespace cuda_buffer_backend

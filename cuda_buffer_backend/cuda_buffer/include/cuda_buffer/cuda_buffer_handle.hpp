@@ -21,9 +21,9 @@
 #include <memory>
 #include <mutex>
 #include <utility>
-#include <vector>
 
 #include "cuda_buffer/cuda_error.hpp"
+#include "cuda_buffer/visibility_control.h"
 #include "rosidl_buffer/buffer.hpp"
 
 namespace cuda_buffer_backend
@@ -59,11 +59,14 @@ struct HandleState
 
 /// \brief Scoped read access to a CudaBuffer.
 ///
-/// ReadHandle is created by CudaBuffer::get_read_handle(). It waits on the
-/// producer write event before exposing a const device pointer, then records a
-/// read event on destruction. CudaBuffer's recycler later waits on those read
-/// events before releasing or reusing the underlying storage.
-/// Must not outlive the CudaBuffer that created it.
+/// ReadHandle is created by CudaBuffer::get_read_handle(), which makes the
+/// reader's stream wait for the producer's write before exposing a const
+/// device pointer. On destruction the handle tells the buffer that the read
+/// has been enqueued, so the storage backend can keep the memory alive until
+/// that work completes.
+/// Must not outlive the CudaBuffer that created it. CudaBufferImpl::resize()
+/// and CudaBufferImpl::clear() replace that CudaBuffer, so the handle must be
+/// released before either is called.
 class ReadHandle
 {
 public:
@@ -72,13 +75,11 @@ public:
   ReadHandle & operator=(const ReadHandle &) = delete;
 
   ReadHandle(ReadHandle && other) noexcept
-  : data_ptr_(other.data_ptr_), read_events_(other.read_events_),
-    events_mutex_(other.events_mutex_), stream_(other.stream_),
+  : data_ptr_(other.data_ptr_), owner_(other.owner_), stream_(other.stream_),
     promoted_buffer_(std::move(other.promoted_buffer_))
   {
     other.data_ptr_ = nullptr;
-    other.read_events_ = nullptr;
-    other.events_mutex_ = nullptr;
+    other.owner_ = nullptr;
     other.stream_ = nullptr;
   }
 
@@ -87,13 +88,11 @@ public:
     if (this != &other) {
       release();
       data_ptr_ = other.data_ptr_;
-      read_events_ = other.read_events_;
-      events_mutex_ = other.events_mutex_;
+      owner_ = other.owner_;
       stream_ = other.stream_;
       promoted_buffer_ = std::move(other.promoted_buffer_);
       other.data_ptr_ = nullptr;
-      other.read_events_ = nullptr;
-      other.events_mutex_ = nullptr;
+      other.owner_ = nullptr;
       other.stream_ = nullptr;
     }
     return *this;
@@ -120,43 +119,21 @@ public:
   }
 
 private:
-  void release() noexcept
-  {
-    if (!read_events_ || !cuda_is_stream_usable(stream_)) {return;}
-
-    // Read events are only queried and synchronised in this process (see
-    // CudaBuffer::reap_completed_read_events), never exported with
-    // cudaIpcGetEventHandle. cudaEventInterprocess is therefore not needed, and
-    // it makes the CUDA driver create a per-process /dev/shm/cuda.shm.* segment
-    // that it does not remove at process exit.
-    cudaEvent_t ev{nullptr};
-    CUDA_CHECK_NOTHROW(
-      cudaEventCreateWithFlags(&ev, CUDA_BUFFER_MINIMUM_EVENT_FLAGS),
-      return);
-    CUDA_CHECK_NOTHROW(cudaEventRecord(ev, stream_), {cudaEventDestroy(ev); return;});
-    std::lock_guard<std::mutex> lg(*events_mutex_);
-    read_events_->push_back(ev);
-  }
+  /// Report the end of this read to the owning buffer. Defined in cuda_buffer.cpp.
+  CUDA_BUFFER_PUBLIC void release() noexcept;
 
   friend class CudaBuffer;
 
   explicit ReadHandle(
     const uint8_t * data_ptr,
-    cudaEvent_t write_event,
-    std::vector<cudaEvent_t> * read_events,
-    std::mutex * events_mutex,
+    const CudaBuffer * owner,
     cudaStream_t stream)
-  : data_ptr_(data_ptr), read_events_(read_events),
-    events_mutex_(events_mutex), stream_(stream)
+  : data_ptr_(data_ptr), owner_(owner), stream_(stream)
   {
-    if (write_event != nullptr && stream_ != nullptr) {
-      CUDA_CHECK(cudaStreamWaitEvent(stream_, write_event, 0));
-    }
   }
 
   const uint8_t * data_ptr_{nullptr};
-  std::vector<cudaEvent_t> * read_events_{nullptr};
-  std::mutex * events_mutex_{nullptr};
+  const CudaBuffer * owner_{nullptr};
   cudaStream_t stream_{nullptr};
   std::shared_ptr<rosidl::Buffer<uint8_t>> promoted_buffer_{};
 };
@@ -164,10 +141,13 @@ private:
 /// \brief Scoped write access to a CudaBuffer.
 ///
 /// WriteHandle is created by CudaBuffer::get_write_handle(). It exposes a
-/// mutable device pointer and records the producer write event on destruction,
-/// making later ReadHandles wait for the correct CUDA stream work. Only one
-/// write handle may be active for a buffer.
-/// Must not outlive the CudaBuffer that created it.
+/// mutable device pointer and, on destruction, tells the buffer that the
+/// producer's work has been enqueued, making later ReadHandles wait for the
+/// correct CUDA stream work. Only one write handle may be active for a buffer.
+/// Must not outlive the CudaBuffer that created it, unless the write was
+/// already finalized (for example by publishing the buffer). CudaBufferImpl::resize()
+/// and CudaBufferImpl::clear() replace that CudaBuffer, so the handle must be
+/// released before either is called.
 class WriteHandle
 {
 public:
@@ -175,12 +155,12 @@ public:
   WriteHandle & operator=(const WriteHandle &) = delete;
 
   WriteHandle(WriteHandle && other) noexcept
-  : data_ptr_(other.data_ptr_), write_event_ptr_(other.write_event_ptr_),
+  : data_ptr_(other.data_ptr_), owner_(other.owner_),
     stream_(other.stream_), state_(std::move(other.state_)),
     promoted_buffer_(std::move(other.promoted_buffer_))
   {
     other.data_ptr_ = nullptr;
-    other.write_event_ptr_ = nullptr;
+    other.owner_ = nullptr;
     other.stream_ = nullptr;
   }
 
@@ -189,12 +169,12 @@ public:
     if (this != &other) {
       release();
       data_ptr_ = other.data_ptr_;
-      write_event_ptr_ = other.write_event_ptr_;
+      owner_ = other.owner_;
       stream_ = other.stream_;
       state_ = std::move(other.state_);
       promoted_buffer_ = std::move(other.promoted_buffer_);
       other.data_ptr_ = nullptr;
-      other.write_event_ptr_ = nullptr;
+      other.owner_ = nullptr;
       other.stream_ = nullptr;
     }
     return *this;
@@ -221,33 +201,23 @@ public:
   }
 
 private:
-  void release() noexcept
-  {
-    if (!state_) {return;}
-    std::lock_guard<std::mutex> lock(state_->mtx);
-    if (state_->state == HandleState::State::Finalized) {return;}
-    cudaStream_t ws = state_->write_stream ? state_->write_stream : stream_;
-    if (cuda_is_stream_usable(ws) && write_event_ptr_ && *write_event_ptr_) {
-      CUDA_CHECK_NOTHROW(cudaEventRecord(*write_event_ptr_, ws), (void)0);
-    }
-    state_->state = HandleState::State::Finalized;
-    state_->write_stream = nullptr;
-  }
+  /// Finalize this write on the owning buffer. Defined in cuda_buffer.cpp.
+  CUDA_BUFFER_PUBLIC void release() noexcept;
 
   friend class CudaBuffer;
 
   explicit WriteHandle(
     uint8_t * data_ptr,
-    cudaEvent_t * write_event_ptr,
+    const CudaBuffer * owner,
     cudaStream_t stream,
     std::shared_ptr<HandleState> state)
-  : data_ptr_(data_ptr), write_event_ptr_(write_event_ptr), stream_(stream),
+  : data_ptr_(data_ptr), owner_(owner), stream_(stream),
     state_(state)
   {
   }
 
   uint8_t * data_ptr_{nullptr};
-  cudaEvent_t * write_event_ptr_{nullptr};
+  const CudaBuffer * owner_{nullptr};
   cudaStream_t stream_{nullptr};
   std::shared_ptr<HandleState> state_{nullptr};
   std::shared_ptr<rosidl::Buffer<uint8_t>> promoted_buffer_{};
